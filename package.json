@@ -1,0 +1,35 @@
+{
+  "name": "@voicethere/agent",
+  "version": "0.1.0",
+  "description": "VoiceThere customer agent SDK — IPC types and runtime helpers for sandboxed child bundles",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "templates",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && esbuild examples/agent.ts --bundle --platform=node --format=esm --outfile=dist/agent.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:ci": "npm run typecheck && npm run test",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8"
+  }
+}

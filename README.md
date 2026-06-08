@@ -60,7 +60,7 @@ Customer bundles run in an isolated child process. **Do not import or use:**
 - `node:fs`, `node:child_process`, `node:net`, `node:dns`, `node:cluster`
 - `process.exit`, spawning subprocesses, or raw network clients
 
-Allowed: pure logic, `@voicethere/agent`, and allowlisted env (`SESSION_ID`, `PROJECT_ID`, `BUILD_ID`). Full enforcement lands in runner P1.4.
+Allowed: pure logic, `@voicethere/agent`, and allowlisted env (`SESSION_ID`, `PROJECT_ID`, `BUILD_ID`). Runner enforces `fs` and `child_process` via Node `--permission` on the child process.
 
 ## Build outputs
 

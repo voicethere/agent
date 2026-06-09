@@ -3,8 +3,7 @@
  * Same event coverage as `templates/agent.ts` (imports from src for this repo).
  *
  *   cd agent && npm run build
- *   cd ../runner && AGENT_BUNDLE_PATH=../agent/dist/agent.js npm run start
- *   (runner: https://github.com/voicethere/runner)
+ *   AGENT_BUNDLE_PATH=../agent/dist/agent.js npm run start   # on your agent runner checkout
  */
 
 import type { SpeechEvent } from "../src/protocol.js";

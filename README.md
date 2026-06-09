@@ -1,6 +1,6 @@
 # @voicethere/agent
 
-VoiceThere **customer agent SDK** — TypeScript types and runtime helpers for sandboxed child bundles running inside [`voicethere/runner`](https://github.com/voicethere/runner).
+VoiceThere **customer agent SDK** — TypeScript types and runtime helpers for sandboxed child bundles running inside the **VoiceThere agent runner** (session worker).
 
 **npm:** `@voicethere/agent`  
 **Repo:** [`voicethere/agent`](https://github.com/voicethere/agent)
@@ -9,7 +9,7 @@ VoiceThere **customer agent SDK** — TypeScript types and runtime helpers for s
 
 | Layer     | Package                                                     | Runs in                              |
 | --------- | ----------------------------------------------------------- | ------------------------------------ |
-| Parent    | [`voicethere/runner`](https://github.com/voicethere/runner) | Trusted Node + WebRTC + speech stack |
+| Parent    | VoiceThere agent runner                                     | Trusted Node + WebRTC + speech stack |
 | **Child** | **`@voicethere/agent`**                                     | Sandboxed customer `agent.js` bundle |
 
 The child receives speech lifecycle events over IPC (same shapes as `@node-webrtc-rust/sdk/voice`) and calls `speak()` to request TTS from the parent.
@@ -23,11 +23,10 @@ npm install
 npm run build
 ```
 
-Run with a local [runner](https://github.com/voicethere/runner) (clone that repo alongside this one):
+**Voice E2E:** deploy to the VoiceThere platform or run against your organization's internal agent runner. With a local runner checkout, point it at your bundle:
 
 ```bash
-cd ../runner
-AGENT_BUNDLE_PATH=../agent/dist/agent.js npm run start
+AGENT_BUNDLE_PATH=/path/to/dist/agent.js npm run start
 ```
 
 Open the runner URL in a browser, connect, and speak.
@@ -45,9 +44,9 @@ npm run verify:local
 | `npm run verify:local`    | **Default** — `npm run build`, then fork `dist/agent.js` in the sandbox and assert a `speak` reply to `user_speech_final` |
 | `npm run verify:local:only` | Re-run smoke after build; optional `AGENT_BUNDLE_PATH=./dist/agent.js` or `--bundle <path>`                               |
 
-This checks bundle load, IPC, and Node permission flags. It does **not** replace a voice roundtrip — use [`voicethere/runner`](https://github.com/voicethere/runner) for mic/WebRTC E2E.
+This checks bundle load, IPC, and Node permission flags. It does **not** replace a voice roundtrip — use the VoiceThere agent runner (platform or internal deployment) for mic/WebRTC E2E.
 
-Harness: [`scripts/sandbox/`](./scripts/sandbox/) (aligned with [`voicethere/runner`](https://github.com/voicethere/runner) child launcher).
+Harness: [`scripts/sandbox/`](./scripts/sandbox/) (aligned with the agent runner child launcher).
 
 ## API
 
@@ -82,7 +81,7 @@ defineAgent({
 | `SPEECH_EVENT_TYPE`                             | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child) |
 | `speak`                                         | Request parent TTS                                                                    |
 | `agentLog`                                      | Forward structured logs to parent                                                     |
-| `ParentToChildMessage` / `ChildToParentMessage` | IPC contract shared with [`voicethere/runner`](https://github.com/voicethere/runner)   |
+| `ParentToChildMessage` / `ChildToParentMessage` | IPC contract shared with the VoiceThere agent runner                                   |
 
 ### Speech events (parent → child)
 
@@ -113,20 +112,17 @@ Upload `dist/agent.js` (or point `AGENT_BUNDLE_PATH` at it locally). Inlining de
 
 ## Sandbox and security model
 
-Customer code runs in a **forked child process**, separate from the trusted runner parent (Sherpa, WebRTC, TTS). Security is layered:
+Customer code runs in a **forked child process**, separate from the trusted agent runner parent (WebRTC, speech stack, TTS). Security is layered:
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│  Runner parent (trusted) — full Node, WebRTC, speech stack   │
+│  Agent runner parent (trusted) — WebRTC, speech stack, TTS   │
 │    fork(loader-entry.js, execArgv: [--permission, …])       │
 │         │ IPC (process.send / on('message'))                  │
 │         ▼                                                     │
 │  Customer child — Node Permission Model + stripped env      │
 │    loader-entry.js → import(your agent.js)                   │
 └──────────────────────────────────────────────────────────────┘
-          │ same pod network namespace (K8s)
-          ▼
-   Cilium NetworkPolicy on runner pod (egress rules)
 ```
 
 ### Layer 1 — Process isolation
@@ -134,9 +130,9 @@ Customer code runs in a **forked child process**, separate from the trusted runn
 | Mechanism | What it means for your bundle |
 | --------- | ----------------------------- |
 | **Separate process** | Crash or `process.exit` in your bundle does not take down the parent voice stack |
-| **IPC only** | Talk to the platform via `defineAgent` / `speak` / `agentLog` — not direct WebRTC or STT |
-| **Stripped `process.env`** | Child receives only `NODE_ENV`, internal loader path, and allowlisted keys (`SESSION_ID`, `PROJECT_ID`, `BUILD_ID`) — not parent/kube secrets |
-| **Console redirection** | `console.log` / `warn` / `error` → IPC logs; raw stdout is not forwarded to cluster logs |
+| **IPC only for media** | WebRTC, mic, STT, and TTS go through the parent — use `defineAgent`, `speak`, and speech events |
+| **Stripped `process.env`** | Child receives only `NODE_ENV`, internal loader path, and allowlisted keys (`SESSION_ID`, `PROJECT_ID`, `BUILD_ID`) — not parent secrets |
+| **Console redirection** | `console.log` / `warn` / `error` → IPC logs |
 
 ### Layer 2 — Node `--permission` (runtime-enforced)
 
@@ -147,7 +143,7 @@ The parent starts the child with Node’s [Permission Model](https://nodejs.org/
 | Flag | Effect |
 | ---- | ------ |
 | `--permission` | Enables restriction mode |
-| `--allow-fs-read=<loaderDir>` | Read files under the runner’s child loader directory |
+| `--allow-fs-read=<loaderDir>` | Read files under the child loader directory |
 | `--allow-fs-read=<bundleParentDir>` | Read files under the **directory containing your `agent.js`** (see below) |
 
 **Not granted → blocked at runtime:**
@@ -162,6 +158,8 @@ The parent starts the child with Node’s [Permission Model](https://nodejs.org/
 | No `--allow-wasi` | WASI modules |
 
 This is **not** an import allowlist — Node gates **capability classes**, not package names. Using `node:fs` inside the allowed read tree can work; using it on `/etc/passwd` does not.
+
+**Network is not gated by `--permission`.** `fetch`, `http`, `https`, and other outbound calls use the same network namespace as the parent. On VoiceThere-hosted sessions, **public internet egress is allowed** (e.g. calling your LLM or tool APIs). **Private cluster / internal platform addresses are not reachable** from the child — use the parent IPC surface for voice, not in-cluster services.
 
 ### Bundle directory vs single file
 
@@ -185,19 +183,13 @@ This is **not** an import allowlist — Node gates **capability classes**, not p
 
 Prefer **one esbuild bundle** so production behavior matches `npm run verify:local`.
 
-### Layer 3 — Platform policy (documented; not all enforced in-process)
+### Layer 3 — Platform policy
 
-These are **unsupported** in customer bundles even if Node might not block them today:
-
-| Capability | Enforcement |
-| ---------- | ----------- |
-| **Outbound network** (`fetch`, `http`, `net`, `dns`) | Not gated by `--permission`; child shares the **pod** network. Runner pods use **Cilium NetworkPolicy** (public egress; cluster/RFC1918 denied). **Do not** rely on network from child — use parent/platform APIs. |
+| Capability | Behavior |
+| ---------- | -------- |
+| **Outbound network** (`fetch`, `http`, `https`) | **Public internet:** allowed — typical for LLM/tool calls from your agent code. **Internal platform / private network:** blocked on hosted sessions. |
 | **`process.exit`** | Not blocked — kills your agent leg; parent may play crash TTS |
 | **Direct WebRTC / mic / STT / TTS** | Parent only — use `speak()` and speech event handlers |
-
-### Layer 4 — Kubernetes (runner pod)
-
-On cluster deploy, the runner pod also has Helm hardening (non-root, read-only rootfs, dropped caps) and **NetworkPolicy** for egress. That applies to the whole pod (parent + child).
 
 ### What you should use in agent code
 
@@ -205,6 +197,7 @@ On cluster deploy, the runner pod also has Helm hardening (non-root, read-only r
 
 - `@voicethere/agent` (`defineAgent`, `speak`, `agentLog`, `onSpeechEvent`, …)
 - Pure TypeScript/JavaScript logic and in-memory state
+- **`fetch` / HTTP(S) to public APIs** (LLMs, tools, your backends on the internet)
 - Allowlisted env from `onSessionStart` (`SESSION_ID`, `PROJECT_ID`, `BUILD_ID`)
 - `SPEECH_EVENT_TYPE` from `@node-webrtc-rust/sdk/voice` at build time (avoid bundling the full SDK runtime into the child when possible)
 
@@ -215,13 +208,14 @@ On cluster deploy, the runner pod also has Helm hardening (non-root, read-only r
 - File writes
 - Native Node addons (`.node`)
 - `worker_threads` (not allowed)
-- Direct media/network stack access
+- Direct WebRTC / mic / STT / TTS (use parent IPC)
+- Reachability to internal platform addresses from hosted sessions
 
 **Pre-publish checklist**
 
 1. `npm run build` — produce `dist/agent.js`
 2. `npm run verify:local` — sandbox + IPC smoke (same flags as production child)
-3. Optional: voice E2E with [`voicethere/runner`](https://github.com/voicethere/runner)
+3. Optional: voice E2E with the VoiceThere agent runner (platform or internal deployment)
 
 ## Build outputs
 
@@ -246,6 +240,6 @@ See [`scripts/RELEASE.md`](./scripts/RELEASE.md) — tag `release/X.Y.Z` trigger
 
 | Repo                                                                          | Purpose                                                       |
 | ----------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| [`voicethere/runner`](https://github.com/voicethere/runner)                   | Session worker that hosts your `agent.js` bundle              |
+| VoiceThere agent runner (internal session worker)                             | Hosts your `agent.js` bundle in production and local E2E      |
 | [`voicethere/cli`](https://github.com/voicethere/cli)                         | CLI for the VoiceThere platform (projects, deploys, sessions) |
 | [`akirilyuk/node-webrtc-rust`](https://github.com/akirilyuk/node-webrtc-rust) | WebRTC + voice SDK (`SpeechEvent` types)                      |

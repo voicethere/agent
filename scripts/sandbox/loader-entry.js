@@ -1,7 +1,7 @@
 /**
  * Sandboxed child bootstrap — loads customer bundle under Node --permission.
  *
- * Keep in sync with voicethere/runner `src/child/loader-entry.js`.
+ * Keep in sync with the agent runner `src/child/loader-entry.js`.
  */
 
 const bundlePath = process.env.__CHILD_BUNDLE_PATH__;

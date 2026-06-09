@@ -8,7 +8,7 @@
  *   npm install @voicethere/agent
  *   npx esbuild agent.ts --bundle --platform=node --format=esm --outfile=dist/agent.js
  *
- * Local runner (clone https://github.com/voicethere/runner):
+ * Voice E2E (VoiceThere agent runner — platform or internal deployment):
  *   AGENT_BUNDLE_PATH=./dist/agent.js npm run start
  */
 

@@ -4,7 +4,7 @@
  * Transport: Node.js `process.send` / `process.on('message')` on a forked child.
  * Speech payloads use {@link SpeechEvent} from `@node-webrtc-rust/sdk/voice` unchanged.
  *
- * IPC shapes are shared with [`voicethere/runner`](https://github.com/voicethere/runner).
+ * IPC shapes are shared with the VoiceThere agent runner (session worker parent).
  *
  * @packageDocumentation
  */

@@ -1,5 +1,5 @@
 /**
- * Fork a customer agent bundle the same way voicethere/runner does (IPC + sandbox).
+ * Fork a customer agent bundle the same way the agent runner does (IPC + sandbox).
  *
  * Keep behavior aligned with runner `src/child/starter.ts`.
  */

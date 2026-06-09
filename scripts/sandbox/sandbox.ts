@@ -1,7 +1,7 @@
 /**
  * Node --permission flags for the customer child process.
  *
- * Keep in sync with voicethere/runner `src/child/sandbox.ts`.
+ * Keep in sync with the agent runner `src/child/sandbox.ts`.
  */
 
 import { dirname, resolve } from "node:path";

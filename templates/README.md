@@ -23,4 +23,4 @@ npx esbuild agent.ts --bundle --platform=node --format=esm --outfile=dist/agent.
 
 **Verify sandbox (no WebRTC):** from the agent repo, `npm run verify:local` after building your bundle.
 
-**Voice E2E:** host with [`voicethere/runner`](https://github.com/voicethere/runner) — set `AGENT_BUNDLE_PATH` to your built `dist/agent.js`.
+**Voice E2E:** host with the VoiceThere agent runner (platform or internal deployment) — set `AGENT_BUNDLE_PATH` to your built `dist/agent.js`.

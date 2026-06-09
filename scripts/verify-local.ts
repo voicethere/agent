@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Local sandbox smoke — fork your agent bundle like voicethere/runner does.
+ * Local sandbox smoke — fork your agent bundle like the VoiceThere agent runner does.
  *
  * Usage:
  *   npm run verify:local
  *   AGENT_BUNDLE_PATH=./dist/agent.js npm run verify:local:only
  *   npm run verify:local -- --bundle ./dist/agent.js
  *
- * Requires Node 22+ (--permission). Does not run WebRTC; use voicethere/runner for voice E2E.
+ * Requires Node 22+ (--permission). Does not run WebRTC; use the agent runner for voice E2E.
  */
 
 import { existsSync } from "node:fs";

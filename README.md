@@ -101,14 +101,15 @@ Copy [`templates/agent.ts`](./templates/agent.ts) as a starting point — exhaus
 
 ## Building your agent bundle
 
-**Recommended:** single ESM bundle (esbuild or similar):
+**Recommended:** bundle with the package CLI (same esbuild settings VoiceThere uses in production):
 
 ```bash
-npm install @voicethere/agent esbuild
-npx esbuild agent.ts --bundle --platform=node --format=esm --outfile=dist/agent.js
+npm install @voicethere/agent
+npx @voicethere/agent build
+# or: npx @voicethere/agent build --entry src/agent.ts --outfile dist/agent.js
 ```
 
-Upload `dist/agent.js` (or point `AGENT_BUNDLE_PATH` at it locally). Inlining dependencies avoids runtime `node_modules` resolution inside the sandbox.
+Defaults: entry `agent.ts`, output `dist/agent.js`. Upload the bundle (or point `AGENT_BUNDLE_PATH` at it locally). Inlining dependencies avoids runtime `node_modules` resolution inside the sandbox.
 
 ## Sandbox and security model
 
@@ -227,7 +228,9 @@ Prefer **one esbuild bundle** so production behavior matches `npm run verify:loc
 ## Scripts
 
 ```bash
-npm run build           # library + example bundle
+npm run build           # compile SDK + example bundle (repo dev)
+npm run build:lib       # compile SDK only (tsc → dist/)
+npx @voicethere/agent build   # customer project: bundle agent.ts → dist/agent.js
 npm run verify:local    # sandbox smoke (build + fork bundle)
 npm run test:ci         # typecheck + vitest
 ```

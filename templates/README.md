@@ -17,8 +17,9 @@ Full starter bundle covering every speech event from `@node-webrtc-rust/sdk/voic
 **Build:**
 
 ```bash
-npm install @voicethere/agent esbuild
-npx esbuild agent.ts --bundle --platform=node --format=esm --outfile=dist/agent.js
+npm install @voicethere/agent
+npx @voicethere/agent build
+# optional: --entry agent.ts --outfile dist/agent.js
 ```
 
 **Verify sandbox (no WebRTC):** from the agent repo, `npm run verify:local` after building your bundle.

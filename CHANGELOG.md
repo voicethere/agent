@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-09
+
+### Added
+
+- `npx @voicethere/agent build` — bundle customer `agent.ts` to `dist/agent.js` (esbuild included; no separate devDependency)
+
 ## [0.1.1] - 2026-06-09
 
 ### Changed

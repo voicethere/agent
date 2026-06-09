@@ -1,0 +1,41 @@
+name: Manual GitHub Release
+
+# Create a GitHub Release for an existing tag (e.g. when publish succeeded but release step failed).
+# Actions → Manual GitHub Release → Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag (must already exist)
+        required: true
+        default: release/0.1.0
+      version:
+        description: Version for CHANGELOG section
+        required: true
+        default: 0.1.0
+
+permissions:
+  contents: write
+
+jobs:
+  create_release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare release notes
+        id: notes
+        run: |
+          BODY_FILE="${RUNNER_TEMP}/release-notes.md"
+          bash scripts/changelog-release-body.sh "${{ inputs.version }}" > "$BODY_FILE"
+          echo "body_file=$BODY_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: Release ${{ inputs.version }}
+          body_path: ${{ steps.notes.outputs.body_file }}
+          generate_release_notes: false

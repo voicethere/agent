@@ -13,7 +13,7 @@ import {
   ALLOWED_CHILD_ENV_KEYS,
   type ChildToParentMessage,
   type ParentToChildMessage,
-} from "../../src/protocol.js";
+} from "../protocol.js";
 import { buildChildExecArgv } from "./sandbox.js";
 
 const SANDBOX_DIR = dirname(fileURLToPath(import.meta.url));

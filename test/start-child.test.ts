@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   resolveBundlePath,
   startSandboxedChild,
-} from "../scripts/sandbox/start-child.js";
+} from "../src/sandbox/start-child.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ECHO_FIXTURE = join(__dirname, "fixtures/echo-agent.mjs");

@@ -8,6 +8,9 @@
  *   npm install @voicethere/agent
  *   npx @voicethere/agent build
  *
+ * Verify (sandbox checks, no WebRTC):
+ *   npx @voicethere/agent verify
+ *
  * Voice E2E (VoiceThere agent runner — platform or internal deployment):
  *   AGENT_BUNDLE_PATH=./dist/agent.js npm run start
  */

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { defineAgent, speak } from "../src/runtime.js";
-import { startSandboxedChild } from "../scripts/sandbox/start-child.js";
+import { startSandboxedChild } from "../src/sandbox/start-child.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(__dirname, "fixtures");

@@ -6,6 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-09
+
+### Added
+
+- `npx @voicethere/agent verify` — build (optional) and run sandbox checks on customer bundles; prints failing checks with details
+
+### Changed
+
+- CLI shows help when invoked with no subcommand (explicit `build` or `verify` required)
+- Sandbox verify harness ships in the npm package (`src/sandbox`, `src/verify`)
+
 ## [0.1.2] - 2026-06-09
 
 ### Added

@@ -6,7 +6,7 @@ import {
   VERIFY_SESSION_ID,
   parseBundleArg,
   waitForSpeak,
-} from "../scripts/verify-local-lib.js";
+} from "../src/verify/lib.js";
 
 describe("parseBundleArg", () => {
   const cwd = "/workspace/agent";
@@ -19,6 +19,9 @@ describe("parseBundleArg", () => {
   it("uses --bundle flag when present", () => {
     expect(parseBundleArg(["--bundle", "./custom.js"], {}, cwd)).toBe(
       `${cwd}/custom.js`,
+    );
+    expect(parseBundleArg(["-b", "./short.js"], {}, cwd)).toBe(
+      `${cwd}/short.js`,
     );
   });
 

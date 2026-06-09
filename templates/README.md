@@ -22,6 +22,10 @@ npx @voicethere/agent build
 # optional: --entry agent.ts --outfile dist/agent.js
 ```
 
-**Verify sandbox (no WebRTC):** from the agent repo, `npm run verify:local` after building your bundle.
+**Verify sandbox (no WebRTC):**
+
+```bash
+npx @voicethere/agent verify
+```
 
 **Voice E2E:** host with the VoiceThere agent runner (platform or internal deployment) — set `AGENT_BUNDLE_PATH` to your built `dist/agent.js`.

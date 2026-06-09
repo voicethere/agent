@@ -23,30 +23,25 @@ npm install
 npm run build
 ```
 
-**Voice E2E:** deploy to the VoiceThere platform or run against your organization's internal agent runner. With a local runner checkout, point it at your bundle:
-
-```bash
-AGENT_BUNDLE_PATH=/path/to/dist/agent.js npm run start
-```
-
-Open the runner URL in a browser, connect, and speak.
-
 ## Verify locally (sandbox, no WebRTC)
 
-Before deploying to VoiceThere, confirm your bundle loads and responds under the **same Node sandbox** the runner uses:
+Before deploying to VoiceThere, build your bundle and run sandbox checks (same Node `--permission` flags as production):
 
 ```bash
-npm run verify:local
+npx @voicethere/agent verify
 ```
 
-| Script                    | When to use                                                                                                               |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `npm run verify:local`    | **Default** — `npm run build`, then fork `dist/agent.js` in the sandbox and assert a `speak` reply to `user_speech_final` |
-| `npm run verify:local:only` | Re-run smoke after build; optional `AGENT_BUNDLE_PATH=./dist/agent.js` or `--bundle <path>`                               |
+This runs a short checklist: Node version, bundle build, sandbox load, IPC `session_start`, `user_speech_final` → `speak`, and no `agent_error`. Failures print which check failed and why.
 
-This checks bundle load, IPC, and Node permission flags. It does **not** replace a voice roundtrip — use the VoiceThere agent runner (platform or internal deployment) for mic/WebRTC E2E.
+| Command | When to use |
+| ------- | ----------- |
+| `npx @voicethere/agent verify` | **Default** — build `agent.ts` → `dist/agent.js`, then run all checks |
+| `npx @voicethere/agent verify --no-build` | Re-run checks on an existing bundle |
+| `npx @voicethere/agent verify --no-build --bundle ./dist/agent.js` | Verify a specific bundle path |
 
-Harness: [`scripts/sandbox/`](./scripts/sandbox/) (aligned with the agent runner child launcher).
+Optional flags: `--entry` / `-e`, `--outfile` / `-o` (same as `build`).
+
+This does **not** replace a voice roundtrip with mic/WebRTC — deploy to the VoiceThere platform for full E2E.
 
 ## API
 
@@ -214,9 +209,10 @@ Prefer **one esbuild bundle** so production behavior matches `npm run verify:loc
 
 **Pre-publish checklist**
 
-1. `npm run build` — produce `dist/agent.js`
-2. `npm run verify:local` — sandbox + IPC smoke (same flags as production child)
-3. Optional: voice E2E with the VoiceThere agent runner (platform or internal deployment)
+1. `npx @voicethere/agent verify` — build your bundle and run sandbox checks
+2. Deploy the bundle to VoiceThere (platform upload or CLI when available)
+
+For iterative work: `npx @voicethere/agent build` then `npx @voicethere/agent verify --no-build`.
 
 ## Build outputs
 
@@ -230,9 +226,15 @@ Prefer **one esbuild bundle** so production behavior matches `npm run verify:loc
 ```bash
 npm run build           # compile SDK + example bundle (repo dev)
 npm run build:lib       # compile SDK only (tsc → dist/)
-npx @voicethere/agent build   # customer project: bundle agent.ts → dist/agent.js
-npm run verify:local    # sandbox smoke (build + fork bundle)
+npm run verify:local    # repo dev: build example + sandbox verify
 npm run test:ci         # typecheck + vitest
+```
+
+Customer project:
+
+```bash
+npx @voicethere/agent build    # bundle agent.ts → dist/agent.js
+npx @voicethere/agent verify   # build + sandbox checks
 ```
 
 ## Release

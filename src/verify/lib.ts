@@ -1,18 +1,21 @@
 import { resolve } from "node:path";
 
-import type { ChildToParentMessage } from "../src/protocol.js";
+import type { ChildToParentMessage } from "../protocol.js";
 
 export const VERIFY_SESSION_ID = "local-verify";
 export const DEFAULT_VERIFY_BUNDLE = "dist/agent.js";
+export const DEFAULT_VERIFY_ENTRY = "agent.ts";
 
 export function parseBundleArg(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
   cwd: string = process.cwd(),
 ): string {
-  const flagIndex = argv.indexOf("--bundle");
-  if (flagIndex >= 0 && argv[flagIndex + 1]) {
-    return resolve(cwd, argv[flagIndex + 1]);
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if ((arg === "--bundle" || arg === "-b") && argv[i + 1]) {
+      return resolve(cwd, argv[i + 1]);
+    }
   }
   if (env.AGENT_BUNDLE_PATH?.trim()) {
     return resolve(cwd, env.AGENT_BUNDLE_PATH.trim());

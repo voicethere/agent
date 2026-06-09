@@ -3,11 +3,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { buildChildExecArgv } from "../scripts/sandbox/sandbox.js";
+import { buildChildExecArgv } from "../src/sandbox/sandbox.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(__dirname, "fixtures");
-const SANDBOX_DIR = join(__dirname, "../scripts/sandbox");
+const SANDBOX_DIR = join(__dirname, "../src/sandbox");
 const LOADER = join(SANDBOX_DIR, "loader-entry.js");
 
 function runSandboxedChild(
@@ -42,11 +42,11 @@ function runSandboxedChild(
 describe("buildChildExecArgv", () => {
   it("matches runner permission flags (no child_process, scoped fs read)", () => {
     const argv = buildChildExecArgv({
-      loaderDir: "/app/scripts/sandbox",
+      loaderDir: "/app/src/sandbox",
       bundlePath: "/app/dist/agent.js",
     });
     expect(argv).toContain("--permission");
-    expect(argv).toContain("--allow-fs-read=/app/scripts/sandbox");
+    expect(argv).toContain("--allow-fs-read=/app/src/sandbox");
     expect(argv).toContain("--allow-fs-read=/app/dist");
     expect(argv.some((flag) => flag.includes("allow-child-process"))).toBe(
       false,
@@ -57,7 +57,7 @@ describe("buildChildExecArgv", () => {
 
   it("resolves relative loader and bundle paths", () => {
     const argv = buildChildExecArgv({
-      loaderDir: "./scripts/sandbox",
+      loaderDir: "./src/sandbox",
       bundlePath: "./dist/agent.js",
     });
     expect(argv[0]).toBe("--permission");

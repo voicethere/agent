@@ -4,7 +4,7 @@
  * Transport: Node.js `process.send` / `process.on('message')` on a forked child.
  * Speech payloads use {@link SpeechEvent} from `@node-webrtc-rust/sdk/voice` unchanged.
  *
- * Keep in sync with `runner/src/child/protocol.ts`.
+ * IPC shapes are shared with [`voicethere/runner`](https://github.com/voicethere/runner).
  *
  * @packageDocumentation
  */
@@ -69,7 +69,7 @@ export interface SpeechEventMessage {
 /**
  * The peer disconnected or the runner is tearing down this session leg.
  *
- * Emitted from {@link AgentChildBridge.unregisterPeer} and on bridge destroy.
+ * Emitted when the runner unregisters a peer or tears down the session.
  */
 export interface SessionEndMessage {
   type: "session_end";
@@ -80,8 +80,8 @@ export interface SessionEndMessage {
 /**
  * Ask the parent to synthesize speech on the agent outbound WebRTC track.
  *
- * Maps to `VoiceSessionContext.speak()` in the runner — audio is **not** generated
- * inside the sandboxed child.
+ * Handled by the runner parent, which synthesizes audio on the outbound WebRTC track.
+ * TTS does **not** run inside the sandboxed child.
  */
 export interface SpeakMessage {
   type: "speak";
@@ -119,7 +119,7 @@ export interface AgentErrorMessage {
 /**
  * Environment variable names the runner may inject into {@link SessionStartMessage.env}.
  *
- * Additional project keys may be added in M3 (platform fetch); customer bundles must
+ * The runner may add more project-specific keys over time; customer bundles must
  * not read `process.env` directly — only the `env` object on session start.
  */
 export const ALLOWED_CHILD_ENV_KEYS = [

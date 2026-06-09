@@ -26,3 +26,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Sandbox smoke (verify:local:only)
+        run: npm run verify:local:only

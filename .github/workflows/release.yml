@@ -1,0 +1,132 @@
+name: Release
+
+# Publish @voicethere/agent to npm on tag push.
+# Trigger: git tag release/0.1.0 && git push origin refs/tags/release/0.1.0
+# Prep: branch release-prep/X.Y.Z → main (see scripts/RELEASE.md)
+
+on:
+  push:
+    tags: ['release/*']
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  quality:
+    name: Test & verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck and unit tests
+        run: npm run test:ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Sandbox smoke (verify:local:only)
+        run: npm run verify:local:only
+
+  publish:
+    name: Publish to npm
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Resolve release version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#release/}"
+          if [ -z "$VERSION" ]; then
+            echo "Could not parse version from tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing @voicethere/agent@${VERSION}"
+
+      - run: npm ci
+
+      - name: Set package version
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Build publishable dist
+        run: npm run build
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify package on registry
+        run: bash scripts/ci/wait-for-npm-package.sh @voicethere/agent "${{ steps.version.outputs.version }}"
+
+      - name: Prepare GitHub release notes
+        id: release_notes
+        run: |
+          BODY_FILE="${RUNNER_TEMP}/release-notes.md"
+          bash scripts/changelog-release-body.sh "${{ steps.version.outputs.version }}" > "$BODY_FILE"
+          echo "body_file=$BODY_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ steps.version.outputs.version }}
+          body_path: ${{ steps.release_notes.outputs.body_file }}
+          generate_release_notes: false
+
+  sync-main-package-lock:
+    name: Sync main package-lock (PR)
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Resolve release version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#release/}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync package.json and lockfile
+        run: bash scripts/ci/post-release-sync-main-package-lock.sh "${{ steps.version.outputs.version }}"
+
+      - name: Open PR to main
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore(ci): sync package-lock after release ${{ steps.version.outputs.version }}"
+          title: "chore(ci): sync package-lock after release ${{ steps.version.outputs.version }}"
+          body: |
+            Automated follow-up to tag `${{ github.ref_name }}` after npm publish.
+
+            - `package.json` version aligned to `${{ steps.version.outputs.version }}`
+            - `package-lock.json` refreshed
+
+            Merge promptly so `main` stays valid for `npm ci`.
+          branch: chore/post-release-package-lock-${{ steps.version.outputs.version }}
+          base: main
+          delete-branch: true
+          labels: dependencies,automation

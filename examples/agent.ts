@@ -4,6 +4,7 @@
  *
  *   cd agent && npm run build
  *   cd ../runner && AGENT_BUNDLE_PATH=../agent/dist/agent.js npm run start
+ *   (runner: https://github.com/voicethere/runner)
  */
 
 import type { SpeechEvent } from "../src/protocol.js";

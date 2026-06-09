@@ -19,13 +19,31 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:ci": "npm run typecheck && npm run test",
+    "verify:local": "npm run build && tsx scripts/verify-local.ts",
+    "verify:local:only": "tsx scripts/verify-local.ts",
     "prepublishOnly": "npm run build"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voicethere/agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/voicethere/agent/issues"
+  },
+  "homepage": "https://github.com/voicethere/agent#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "voicethere",
+    "voice-agent",
+    "webrtc",
+    "sandbox"
+  ],
   "engines": {
     "node": ">=22"
   },
   "license": "UNLICENSED",
-  "private": true,
   "dependencies": {
     "@node-webrtc-rust/sdk": "0.5.2"
   },
@@ -35,6 +53,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "esbuild": "^0.25.12",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.0",
     "vitest": "^2.1.8"
   }

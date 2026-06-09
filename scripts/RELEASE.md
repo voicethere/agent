@@ -1,6 +1,6 @@
 # Release guide — `@voicethere/agent`
 
-How to publish `@voicethere/agent` to npm — same **tag-driven** workflow as [`node-webrtc-rust`](https://github.com/akirilyuk/node-webrtc-rust/blob/main/scripts/RELEASE.md).
+How to publish `@voicethere/agent` to npm — tag-driven workflow (simplified single-package flow; no post-release lockfile sync).
 
 ## Package published
 
@@ -53,12 +53,11 @@ Add repository secret **`NPM_TOKEN`** on [`voicethere/agent`](https://github.com
 
 You do **not** add a separate `NODE_AUTH_TOKEN` secret — the workflow maps `NPM_TOKEN` → `NODE_AUTH_TOKEN` for `actions/setup-node`.
 
-Verify locally (same token you put in GitHub):
+Verify locally (write token to `agent/.npmrc`, gitignored):
 
 ```bash
-export NPM_TOKEN=npm_...
+echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
 npm whoami
-cd agent
 npm publish --access public --dry-run
 ```
 
@@ -79,9 +78,11 @@ Remove `--dry-run` only when you intend a manual publish.
 | ----- | ---- | ----------------- |
 | **npm registry** | CI publish job on tag push | — |
 | **`package.json` on `main`** | Release prep PR **before** tag | **Yes** |
-| **`package-lock.json`** | Post-release PR after publish | **Yes** (automated) |
+| **`package-lock.json`** | Same release prep PR (if deps changed) | **Yes** |
 
 **Rule:** `package.json` version on `main` must match the tag **before** you push `release/X.Y.Z`.
+
+Unlike the `node-webrtc-rust` monorepo, this single-package repo does **not** need a post-publish lockfile sync PR — publish does not change dependencies on `main`.
 
 ## Release via GitHub Actions (recommended)
 
@@ -110,15 +111,15 @@ git push origin refs/tags/release/0.1.0
 
 ### 3. CI pipeline (`release.yml`)
 
-1. **quality** — `npm ci`, `test:ci`, `build`, `verify:local:only`
+1. **quality** — `npm ci`, `test:ci`, `verify:local:only`
 2. **publish** — set version from tag, `npm publish --access public`, verify registry
 3. **GitHub Release** — notes from `CHANGELOG.md`
-4. **sync-main-package-lock** — bot PR `chore/post-release-package-lock-X.Y.Z` → merge when green
+
+If the GitHub Release step fails after a successful publish, use [**Manual GitHub Release**](../.github/workflows/manual-github-release.yml) (`workflow_dispatch`).
 
 ### 4. After release
 
-- [ ] Workflow green (including **Publish**)
-- [ ] Merge post-release package-lock PR
+- [ ] Workflow green (including **Publish** and **GitHub Release**)
 - [ ] `npm view @voicethere/agent version` shows new version
 
 ## Changelog
@@ -146,7 +147,6 @@ Requires `NPM_TOKEN` or `npm login` with publish rights.
 
 | Script | Purpose |
 | ------ | ------- |
-| [`ci/bump-version.sh`](ci/bump-version.sh) | Set `package.json` version |
-| [`ci/post-release-sync-main-package-lock.sh`](ci/post-release-sync-main-package-lock.sh) | Post-publish sync (same as CI bot) |
+| [`ci/bump-version.sh`](ci/bump-version.sh) | Set `package.json` version (release prep) |
 | [`ci/wait-for-npm-package.sh`](ci/wait-for-npm-package.sh) | Registry poll after publish |
 | [`changelog-release-body.sh`](changelog-release-body.sh) | GitHub Release body from CHANGELOG |

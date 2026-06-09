@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   quality:
@@ -97,44 +96,3 @@ jobs:
           name: Release ${{ steps.version.outputs.version }}
           body_path: ${{ steps.release_notes.outputs.body_file }}
           generate_release_notes: false
-
-  sync-main-package-lock:
-    name: Sync main package-lock (PR)
-    needs: publish
-    if: ${{ !cancelled() && needs.publish.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      - name: Resolve release version from tag
-        id: version
-        run: |
-          VERSION="${GITHUB_REF_NAME#release/}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Sync package.json and lockfile
-        run: bash scripts/ci/post-release-sync-main-package-lock.sh "${{ steps.version.outputs.version }}"
-
-      - name: Open PR to main
-        uses: peter-evans/create-pull-request@v7
-        with:
-          commit-message: "chore(ci): sync package-lock after release ${{ steps.version.outputs.version }}"
-          title: "chore(ci): sync package-lock after release ${{ steps.version.outputs.version }}"
-          body: |
-            Automated follow-up to tag `${{ github.ref_name }}` after npm publish.
-
-            - `package.json` version aligned to `${{ steps.version.outputs.version }}`
-            - `package-lock.json` refreshed
-
-            Merge promptly so `main` stays valid for `npm ci`.
-          branch: chore/post-release-package-lock-${{ steps.version.outputs.version }}
-          base: main
-          delete-branch: true
-          labels: dependencies,automation

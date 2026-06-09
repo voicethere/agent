@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-09
+
+### Changed
+
+- README and customer-facing docs: replace public runner repo links with VoiceThere agent runner (platform or internal deployment)
+- Sandbox documentation: clarify that `fetch` / HTTP(S) to public APIs is supported on hosted sessions; trim internal infra details
+
 ## [0.1.0] - 2026-06-09
 
 ### Added

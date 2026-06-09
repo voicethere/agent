@@ -44,6 +44,9 @@ jobs:
           node-version: '24'
           cache: npm
           registry-url: https://registry.npmjs.org
+          scope: '@voicethere'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Resolve release version from tag
         id: version
@@ -64,10 +67,15 @@ jobs:
       - name: Build publishable dist
         run: npm run build
 
+      - name: Configure npm registry auth
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > "$HOME/.npmrc"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish to npm
         run: npm publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Verify package on registry
         run: bash scripts/ci/wait-for-npm-package.sh @voicethere/agent "${{ steps.version.outputs.version }}"

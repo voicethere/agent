@@ -29,7 +29,9 @@ Create or use the **`voicethere`** npm org. Your user needs publish access to `@
 
 ### GitHub secret
 
-Add repository secret **`NPM_TOKEN`** (npm Automation or Publish token with org access) on [`voicethere/agent`](https://github.com/voicethere/agent).
+Add repository secret **`NPM_TOKEN`** (npm **Automation** or granular **Publish** token with access to `@voicethere`) on [`voicethere/agent`](https://github.com/voicethere/agent) → **Settings → Secrets and variables → Actions → Repository secrets**.
+
+The release workflow passes it to `actions/setup-node` (`NODE_AUTH_TOKEN`) and writes `~/.npmrc` before `npm publish`. If publish fails with `ENEEDAUTH`, the secret is missing, empty, or not a publish-capable token.
 
 ```bash
 export NPM_TOKEN=npm_...

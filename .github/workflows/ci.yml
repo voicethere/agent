@@ -21,11 +21,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck and unit tests
+      - name: Typecheck, build, and tests
         run: npm run test:ci
-
-      - name: Build
-        run: npm run build
 
       - name: Sandbox smoke (verify:local:only)
         run: npm run verify:local:only

@@ -18,7 +18,7 @@
     "build": "tsc -p tsconfig.json && esbuild examples/agent.ts --bundle --platform=node --format=esm --outfile=dist/agent.js",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
-    "test:ci": "npm run typecheck && npm run test",
+    "test:ci": "npm run typecheck && npm run build && npm run test",
     "verify:local": "npm run build && tsx scripts/verify-local.ts",
     "verify:local:only": "tsx scripts/verify-local.ts",
     "prepublishOnly": "npm run build"

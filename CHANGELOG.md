@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-06-09
+
+### Added
+
+- `./verify` package export — `runAgentVerify` for server-side bundle validation (`@voicethere/agent/verify`)
+
+### Changed
+
+- `@node-webrtc-rust/sdk` is **peerDependency only** (removed from `dependencies`) so consumers like the platform control plane can install verify without pulling native WebRTC bindings
+
 ## [0.1.3] - 2026-06-09
 
 ### Added

@@ -12,7 +12,7 @@ VoiceThere **customer agent SDK** — TypeScript types and runtime helpers for s
 | Parent | `runner` | Trusted Node + WebRTC + Sherpa |
 | **Child** | **`@voicethere/agent`** | Sandboxed customer `agent.js` bundle |
 
-The child receives `user_speech_final` over IPC and calls `speak()` to request TTS from the parent.
+The child receives speech lifecycle events over IPC (mirroring `@node-webrtc-rust/sdk/voice`) and calls `speak()` to request TTS from the parent.
 
 ## Quick start
 
@@ -32,7 +32,8 @@ AGENT_BUNDLE_PATH=../agent/dist/agent.js npm run start
 ## API
 
 ```typescript
-import { defineAgent, speak } from '@voicethere/agent'
+import { agentLog, defineAgent, speak, type SpeechEvent } from '@voicethere/agent'
+import { SPEECH_EVENT_TYPE } from '@node-webrtc-rust/sdk/voice'
 
 defineAgent({
   onSessionStart({ sessionId }) {
@@ -41,17 +42,38 @@ defineAgent({
   onUserSpeechFinal({ sessionId, text }) {
     speak(sessionId, `You said: ${text}`)
   },
+  onSpeechEvent({ sessionId }, speech: SpeechEvent) {
+    if (speech.type === SPEECH_EVENT_TYPE.bargeIn) {
+      agentLog('info', `User interrupted on ${sessionId}`)
+    }
+  },
 })
 ```
 
 | Export | Purpose |
 |--------|---------|
-| `defineAgent` | Register `onSessionStart`, `onUserSpeechFinal`, `onSessionEnd` |
+| `defineAgent` | Register `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onSessionEnd` |
+| `SpeechEvent`, `SpeechEventType` | Re-exported **types** from `@node-webrtc-rust/sdk/voice` |
+| `SPEECH_EVENT_TYPE` | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child) |
 | `speak` | Request parent TTS |
 | `agentLog` | Forward structured logs to parent |
 | `ParentToChildMessage` / `ChildToParentMessage` | IPC contract (mirrors `runner/src/child/protocol.ts`) |
 
-Copy [`templates/agent.ts`](./templates/agent.ts) as a starting point.
+### Speech events (parent → child)
+
+Forwarded from the runner voice pipeline as SDK `SpeechEvent` payloads on `speech_event.event` (`event.type`, optional `text` / `error`):
+
+| Event | Typical use in custom agent |
+|-------|----------------------------|
+| `user_speaking_start` / `user_speaking_end` | UI state, turn-taking |
+| `user_speech_partial` | Live captions, early barge-in logic |
+| `user_speech_final` | Primary turn boundary (`onUserSpeechFinal` convenience) |
+| `agent_speaking_start` / `agent_speaking_end` | Know when TTS playback starts/stops |
+| `barge_in` | User interrupted agent playback |
+| `vad_triggered`, `stt_stream_*`, `user_stt_*` | Low-level pipeline hooks |
+| `error` | Vendor or pipeline failure |
+
+Copy [`templates/agent.ts`](./templates/agent.ts) as a starting point — exhaustive `switch` over all 14 `SpeechEvent` types with per-peer state stubs and `agentLog` tracing.
 
 ## Sandbox policy
 

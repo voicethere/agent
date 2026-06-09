@@ -1,8 +1,22 @@
+export type {
+  SpeechEvent,
+  SpeechEventListener,
+  SpeechEventName,
+  SpeechEventType,
+} from "@node-webrtc-rust/sdk/voice";
+
 export {
   ALLOWED_CHILD_ENV_KEYS,
+  type AgentErrorMessage,
+  type AgentLogMessage,
+  type AllowedChildEnvKey,
   type ChildToParentMessage,
   type ParentToChildMessage,
-} from './protocol.js'
+  type SessionEndMessage,
+  type SessionStartMessage,
+  type SpeakMessage,
+  type SpeechEventMessage,
+} from "./protocol.js";
 
 export {
   agentLog,
@@ -11,4 +25,5 @@ export {
   type AgentHandlers,
   type SessionContext,
   type SpeechContext,
-} from './runtime.js'
+  type SpeechEventContext,
+} from "./runtime.js";

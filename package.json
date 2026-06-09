@@ -26,6 +26,12 @@
   },
   "license": "UNLICENSED",
   "private": true,
+  "dependencies": {
+    "@node-webrtc-rust/sdk": "0.5.2"
+  },
+  "peerDependencies": {
+    "@node-webrtc-rust/sdk": ">=0.5.2"
+  },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "esbuild": "^0.25.12",

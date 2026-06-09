@@ -23,20 +23,55 @@ git push origin refs/tags/release/0.1.0
 
 ## One-time setup
 
-### npm organization
+### npm organization (required before first publish)
 
-Create or use the **`voicethere`** npm org. Your user needs publish access to `@voicethere/agent`.
+You do **not** pre-create `@voicethere/agent` in the npm UI — the **first** `npm publish --access public` creates the package.
+
+You **do** need the **`voicethere`** scope on npm:
+
+1. Sign in at [npmjs.com](https://www.npmjs.com) as an org admin.
+2. Confirm the org exists: [npmjs.com/org/voicethere](https://www.npmjs.com/org/voicethere) (0 packages is fine).
+3. **Members** → invite the npm user whose token will power CI (or use an org-owner account for the token).
+4. That member needs permission to **publish** packages under `@voicethere` (Developer or Owner).
+
+### npm access token
+
+Create the token while logged in as a user who is a **member of the `voicethere` org**:
+
+| Token type | Settings |
+| ---------- | -------- |
+| **Automation** (classic) | Recommended for CI — publish without 2FA prompt |
+| **Granular** | Packages: **Publish**; select org **`voicethere`** (or all packages in org) |
 
 ### GitHub secret
 
-Add repository secret **`NPM_TOKEN`** (npm **Automation** or granular **Publish** token with access to `@voicethere`) on [`voicethere/agent`](https://github.com/voicethere/agent) → **Settings → Secrets and variables → Actions → Repository secrets**.
+Add repository secret **`NPM_TOKEN`** on [`voicethere/agent`](https://github.com/voicethere/agent) → **Settings → Secrets and variables → Actions → Repository secrets**.
 
-The release workflow passes it to `actions/setup-node` (`NODE_AUTH_TOKEN`) and writes `~/.npmrc` before `npm publish`. If publish fails with `ENEEDAUTH`, the secret is missing, empty, or not a publish-capable token.
+| GitHub secret | Value |
+| ------------- | ----- |
+| **`NPM_TOKEN`** | The npm token (`npm_...`) from the org member above |
+
+You do **not** add a separate `NODE_AUTH_TOKEN` secret — the workflow maps `NPM_TOKEN` → `NODE_AUTH_TOKEN` for `actions/setup-node`.
+
+Verify locally (same token you put in GitHub):
 
 ```bash
 export NPM_TOKEN=npm_...
 npm whoami
+cd agent
+npm publish --access public --dry-run
 ```
+
+Remove `--dry-run` only when you intend a manual publish.
+
+### Publish errors
+
+| Error | Cause | Fix |
+| ----- | ----- | --- |
+| `ENEEDAUTH` | No token / wrong secret name | Secret must be exactly **`NPM_TOKEN`**; workflow writes `~/.npmrc` |
+| `404` on `PUT @voicethere/agent` | Token user is **not** in the `voicethere` npm org, or token lacks **Publish** for that org | Join user to org; recreate token as org member |
+| `402` / restricted | Scoped package publish without public access | Workflow uses `npm publish --access public` (required for first scoped publish) |
+| Verify step fails after successful publish | New scoped package: `npm view` lags behind version manifest | `wait-for-npm-package.sh` falls back to registry HTTP API; re-run failed jobs from **Verify** onward (do not re-publish same version) |
 
 ## Version flow (git vs npm)
 

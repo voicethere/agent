@@ -79,6 +79,9 @@ jobs:
 
       - name: Verify package on registry
         run: bash scripts/ci/wait-for-npm-package.sh @voicethere/agent "${{ steps.version.outputs.version }}"
+        env:
+          NPM_REGISTRY_VERIFY_ATTEMPTS: 24
+          NPM_REGISTRY_VERIFY_SLEEP_SECONDS: 5
 
       - name: Prepare GitHub release notes
         id: release_notes

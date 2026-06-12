@@ -248,3 +248,7 @@ See [`scripts/RELEASE.md`](./scripts/RELEASE.md) — tag `release/X.Y.Z` trigger
 | VoiceThere agent runner (internal session worker)                             | Hosts your `agent.js` bundle in production and local E2E      |
 | [`voicethere/cli`](https://github.com/voicethere/cli)                         | CLI for the VoiceThere platform (projects, deploys, sessions) |
 | [`akirilyuk/node-webrtc-rust`](https://github.com/akirilyuk/node-webrtc-rust) | WebRTC + voice SDK (`SpeechEvent` types)                      |
+
+## License
+
+MIT — see [LICENSE](./LICENSE).

@@ -17,7 +17,8 @@
   "files": [
     "dist",
     "templates",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build:lib": "tsc -p tsconfig.json && mkdir -p dist/sandbox && cp src/sandbox/loader-entry.js dist/sandbox/",
@@ -50,7 +51,7 @@
   "engines": {
     "node": ">=22"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "dependencies": {
     "esbuild": "^0.25.12"
   },

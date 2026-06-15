@@ -1,5 +1,22 @@
 # Agent templates
 
+## `echo.ts`
+
+Full echo debug agent for the VoiceThere dashboard — speaks **"you said: …"** on voice finals and text chat, relays speech events over DataChannel, and echoes chat replies on DC.
+
+**Build:**
+
+```bash
+npm install @voicethere/agent
+npx @voicethere/agent build --entry templates/echo.ts
+```
+
+Platform auto-seeds the built bundle when a project is created with the **Echo (voice + chat)** template.
+
+## `echo-dc.ts`
+
+Data-channel-only echo — relays speech events and chat text over DC without TTS. Use when debugging the dashboard chat panel without agent playback.
+
 ## `agent.ts`
 
 Full starter bundle covering every speech event from `@node-webrtc-rust/sdk/voice`:

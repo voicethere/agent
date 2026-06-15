@@ -6,6 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-06-15
+
+### Added
+
+- **`templates/echo.ts`** — full echo agent: TTS **"you said: …"** on voice finals and typed chat, plus DataChannel speech events and `chat_reply` (for platform **Echo (voice + chat)** template).
+- **`AGENT_ECHO_PREFIX`** env override for the spoken/chat prefix (default `you said:`).
+
+### Changed
+
+- **`templates/README.md`** — documents `echo.ts` vs `echo-dc.ts`.
+
 ## [0.1.6] - 2026-06-15
 
 ### Added

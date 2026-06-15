@@ -20,17 +20,19 @@ import type { SpeechEvent } from "@node-webrtc-rust/sdk/voice";
 export type ParentToChildMessage =
   | SessionStartMessage
   | SpeechEventMessage
-  | SessionEndMessage;
+  | SessionEndMessage
+  | DataChannelMessageMessage;
 
 /**
  * Messages the customer child may send back to the runner parent.
  *
- * Prefer {@link speak} and {@link agentLog} helpers over raw `process.send`.
+ * Prefer {@link speak}, {@link sendToClient}, and {@link agentLog} helpers over raw `process.send`.
  */
 export type ChildToParentMessage =
   | SpeakMessage
   | AgentLogMessage
-  | AgentErrorMessage;
+  | AgentErrorMessage
+  | SendToClientMessage;
 
 /**
  * A WebRTC peer connected to the runner and mapped to this child process.
@@ -78,6 +80,16 @@ export interface SessionEndMessage {
 }
 
 /**
+ * Raw JSON payload received from the browser data channel (voice-control or voicethere).
+ */
+export interface DataChannelMessageMessage {
+  type: "data_channel_message";
+  sessionId: string;
+  /** UTF-8 JSON string from the browser peer. */
+  payload: string;
+}
+
+/**
  * Ask the parent to synthesize speech on the agent outbound WebRTC track.
  *
  * Handled by the runner parent, which synthesizes audio on the outbound WebRTC track.
@@ -114,6 +126,15 @@ export interface AgentErrorMessage {
   sessionId: string;
   /** Human-readable error summary (no stack traces required). */
   message: string;
+}
+
+/**
+ * Send a JSON-serializable payload to the browser peer over the WebRTC data channel.
+ */
+export interface SendToClientMessage {
+  type: "send_to_client";
+  sessionId: string;
+  payload: unknown;
 }
 
 /**

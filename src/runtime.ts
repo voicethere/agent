@@ -16,6 +16,13 @@ export interface SpeechEventContext {
   sessionId: string;
 }
 
+export interface DataChannelContext {
+  sessionId: string;
+  /** Parsed JSON when the payload is valid JSON; otherwise the raw string. */
+  message: unknown;
+  raw: string;
+}
+
 export interface AgentHandlers {
   onSessionStart?: (ctx: SessionContext) => void | Promise<void>;
   /** Fired for every speech lifecycle event from the parent voice pipeline. */
@@ -26,6 +33,8 @@ export interface AgentHandlers {
   /** Convenience handler — also invoked when `speech.type` is `user_speech_final`. */
   onUserSpeechFinal?: (ctx: SpeechContext) => void | Promise<void>;
   onSessionEnd?: (ctx: { sessionId: string }) => void | Promise<void>;
+  /** Browser data channel JSON (chat, custom app protocol). */
+  onDataChannelMessage?: (ctx: DataChannelContext) => void | Promise<void>;
 }
 
 function isParentMessage(value: unknown): value is ParentToChildMessage {
@@ -34,8 +43,17 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
   return (
     msg.type === "session_start" ||
     msg.type === "speech_event" ||
-    msg.type === "session_end"
+    msg.type === "session_end" ||
+    msg.type === "data_channel_message"
   );
+}
+
+function parseDataChannelPayload(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return raw;
+  }
 }
 
 /**
@@ -71,6 +89,13 @@ export function defineAgent(handlers: AgentHandlers): void {
               });
             }
             break;
+          case "data_channel_message":
+            await handlers.onDataChannelMessage?.({
+              sessionId: message.sessionId,
+              message: parseDataChannelPayload(message.payload),
+              raw: message.payload,
+            });
+            break;
           case "session_end":
             await handlers.onSessionEnd?.({ sessionId: message.sessionId });
             break;
@@ -93,7 +118,21 @@ export function speak(sessionId: string, text: string): void {
   process.send?.({ type: "speak", sessionId, text });
 }
 
+/** Send a JSON payload to the browser peer via the runner parent. */
+export function sendToClient(sessionId: string, payload: unknown): void {
+  process.send?.({ type: "send_to_client", sessionId, payload });
+}
+
 /** Structured log forwarded to the runner parent. */
 export function agentLog(level: "info" | "error", message: string): void {
   process.send?.({ type: "log", level, message });
+}
+
+/** Extract chat text from a parsed data channel message. */
+export function parseChatText(message: unknown): string | null {
+  if (!message || typeof message !== "object") return null;
+  const record = message as { type?: string; text?: string };
+  if (record.type !== "chat" || typeof record.text !== "string") return null;
+  const trimmed = record.text.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }

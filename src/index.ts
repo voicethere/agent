@@ -14,6 +14,8 @@ export {
   type ParentToChildMessage,
   type SessionEndMessage,
   type SessionStartMessage,
+  type SendToClientMessage,
+  type DataChannelMessageMessage,
   type SpeakMessage,
   type SpeechEventMessage,
 } from "./protocol.js";
@@ -21,8 +23,11 @@ export {
 export {
   agentLog,
   defineAgent,
+  parseChatText,
+  sendToClient,
   speak,
   type AgentHandlers,
+  type DataChannelContext,
   type SessionContext,
   type SpeechContext,
   type SpeechEventContext,

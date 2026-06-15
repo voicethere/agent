@@ -6,6 +6,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-06-15
+
+### Added
+
+- **`sendToClient(sessionId, payload)`** — send JSON to the browser over DataChannel from agent handlers.
+- **`onDataChannelMessage`** handler on `defineAgent` for inbound client messages.
+- **`templates/echo-dc.ts`** — starter template that echoes DataChannel chat (for dashboard debug chat).
+
+## [0.1.5] - 2026-06-15
+
+### Changed
+
+- MIT license (A KIRILYUK LLC)
+
 ## [0.1.4] - 2026-06-09
 
 ### Added

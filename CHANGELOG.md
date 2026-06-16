@@ -6,6 +6,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-06-16
+
+### Added
+
+- Binary DataChannel IPC: `data_channel_binary` (parent→child) and `send_binary_to_client` (child→parent).
+- `DataChannelContext.rawBinary`, optional `raw`, and `channel` (`control` | `sync`).
+- `sendBinaryToClient(sessionId, data, channel?)` helper.
+
+### Changed
+
+- Peer dependency `@node-webrtc-rust/sdk` **>=0.5.4** (ArrayBuffer send/receive on data channels).
+
 ## [0.1.7] - 2026-06-15
 
 ### Added

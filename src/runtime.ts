@@ -1,6 +1,9 @@
 import type { SpeechEvent } from "@node-webrtc-rust/sdk/voice";
 
-import type { ParentToChildMessage } from "./protocol.js";
+import type {
+  DataChannelKind,
+  ParentToChildMessage,
+} from "./protocol.js";
 
 export interface SessionContext {
   sessionId: string;
@@ -20,7 +23,10 @@ export interface DataChannelContext {
   sessionId: string;
   /** Parsed JSON when the payload is valid JSON; otherwise the raw string. */
   message: unknown;
-  raw: string;
+  raw: string | null;
+  /** Present when the parent forwarded a binary data channel frame. */
+  rawBinary: Buffer | null;
+  channel: DataChannelKind;
 }
 
 export interface AgentHandlers {
@@ -35,6 +41,8 @@ export interface AgentHandlers {
   onSessionEnd?: (ctx: { sessionId: string }) => void | Promise<void>;
   /** Browser data channel JSON (chat, custom app protocol). */
   onDataChannelMessage?: (ctx: DataChannelContext) => void | Promise<void>;
+  /** Browser data channel binary (game state, custom framing). */
+  onDataChannelBinary?: (ctx: DataChannelContext) => void | Promise<void>;
 }
 
 function isParentMessage(value: unknown): value is ParentToChildMessage {
@@ -44,7 +52,8 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "session_start" ||
     msg.type === "speech_event" ||
     msg.type === "session_end" ||
-    msg.type === "data_channel_message"
+    msg.type === "data_channel_message" ||
+    msg.type === "data_channel_binary"
   );
 }
 
@@ -94,6 +103,17 @@ export function defineAgent(handlers: AgentHandlers): void {
               sessionId: message.sessionId,
               message: parseDataChannelPayload(message.payload),
               raw: message.payload,
+              rawBinary: null,
+              channel: "control",
+            });
+            break;
+          case "data_channel_binary":
+            await handlers.onDataChannelBinary?.({
+              sessionId: message.sessionId,
+              message: null,
+              raw: null,
+              rawBinary: message.data,
+              channel: message.channel ?? "sync",
             });
             break;
           case "session_end":
@@ -121,6 +141,16 @@ export function speak(sessionId: string, text: string): void {
 /** Send a JSON payload to the browser peer via the runner parent. */
 export function sendToClient(sessionId: string, payload: unknown): void {
   process.send?.({ type: "send_to_client", sessionId, payload });
+}
+
+/** Send raw bytes to the browser peer via the runner parent. */
+export function sendBinaryToClient(
+  sessionId: string,
+  data: Buffer | Uint8Array,
+  channel: DataChannelKind = "sync",
+): void {
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  process.send?.({ type: "send_binary_to_client", sessionId, data: buffer, channel });
 }
 
 /** Structured log forwarded to the runner parent. */

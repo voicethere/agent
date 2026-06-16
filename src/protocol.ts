@@ -21,18 +21,23 @@ export type ParentToChildMessage =
   | SessionStartMessage
   | SpeechEventMessage
   | SessionEndMessage
-  | DataChannelMessageMessage;
+  | DataChannelMessageMessage
+  | DataChannelBinaryMessage;
 
 /**
  * Messages the customer child may send back to the runner parent.
  *
- * Prefer {@link speak}, {@link sendToClient}, and {@link agentLog} helpers over raw `process.send`.
+ * Prefer {@link speak}, {@link sendToClient}, {@link sendBinaryToClient}, and {@link agentLog} helpers over raw `process.send`.
  */
 export type ChildToParentMessage =
   | SpeakMessage
   | AgentLogMessage
   | AgentErrorMessage
-  | SendToClientMessage;
+  | SendToClientMessage
+  | SendBinaryToClientMessage;
+
+/** Which WebRTC data channel carried a binary IPC payload. */
+export type DataChannelKind = "control" | "sync";
 
 /**
  * A WebRTC peer connected to the runner and mapped to this child process.
@@ -90,6 +95,16 @@ export interface DataChannelMessageMessage {
 }
 
 /**
+ * Raw binary payload from the browser data channel (`voice-control` or `voicethere-sync`).
+ */
+export interface DataChannelBinaryMessage {
+  type: "data_channel_binary";
+  sessionId: string;
+  data: Buffer;
+  channel?: DataChannelKind;
+}
+
+/**
  * Ask the parent to synthesize speech on the agent outbound WebRTC track.
  *
  * Handled by the runner parent, which synthesizes audio on the outbound WebRTC track.
@@ -135,6 +150,14 @@ export interface SendToClientMessage {
   type: "send_to_client";
   sessionId: string;
   payload: unknown;
+}
+
+/** Send raw bytes to the browser peer over a WebRTC data channel. */
+export interface SendBinaryToClientMessage {
+  type: "send_binary_to_client";
+  sessionId: string;
+  data: Buffer;
+  channel?: DataChannelKind;
 }
 
 /**

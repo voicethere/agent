@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { agentLog, defineAgent, speak } from "../src/runtime.js";
+import { agentLog, defineAgent, sendBinaryToClient, speak } from "../src/runtime.js";
 import {
   installProcessMessageCapture,
   installProcessSendMock,
@@ -273,6 +273,30 @@ describe("defineAgent", () => {
 
     sendMock.restore();
   });
+
+  it("dispatches onDataChannelBinary with rawBinary and channel", async () => {
+    const onDataChannelBinary = vi.fn();
+    capture = installProcessMessageCapture();
+    defineAgent({ onDataChannelBinary });
+
+    const data = Buffer.from([0xca, 0xfe]);
+    capture.emit({
+      type: "data_channel_binary",
+      sessionId: "peer-1",
+      data,
+      channel: "sync",
+    });
+
+    await vi.waitFor(() => {
+      expect(onDataChannelBinary).toHaveBeenCalledWith({
+        sessionId: "peer-1",
+        message: null,
+        raw: null,
+        rawBinary: data,
+        channel: "sync",
+      });
+    });
+  });
 });
 
 describe("speak", () => {
@@ -289,6 +313,26 @@ describe("speak", () => {
       type: "speak",
       sessionId: "peer-1",
       text: "Hello there",
+    });
+  });
+});
+
+describe("sendBinaryToClient", () => {
+  let sendMock: ReturnType<typeof installProcessSendMock>;
+
+  afterEach(() => {
+    sendMock?.restore();
+  });
+
+  it("sends binary IPC to parent", () => {
+    sendMock = installProcessSendMock();
+    const payload = Uint8Array.of(1, 2, 3);
+    sendBinaryToClient("peer-1", payload, "sync");
+    expect(sendMock.send).toHaveBeenCalledWith({
+      type: "send_binary_to_client",
+      sessionId: "peer-1",
+      data: Buffer.from(payload),
+      channel: "sync",
     });
   });
 });

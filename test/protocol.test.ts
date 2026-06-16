@@ -39,6 +39,12 @@ describe("protocol", () => {
       sessionId: "peer-1",
       text: "Hello",
     };
+    const binary: ChildToParentMessage = {
+      type: "send_binary_to_client",
+      sessionId: "peer-1",
+      data: Buffer.from([1, 2, 3]),
+      channel: "sync",
+    };
     const log: ChildToParentMessage = {
       type: "log",
       level: "info",
@@ -50,7 +56,18 @@ describe("protocol", () => {
       message: "boom",
     };
     expect(speak.type).toBe("speak");
+    expect(binary.channel).toBe("sync");
     expect(log.level).toBe("info");
     expect(error.type).toBe("agent_error");
+  });
+
+  it("accepts parent data_channel_binary shape", () => {
+    const message: ParentToChildMessage = {
+      type: "data_channel_binary",
+      sessionId: "peer-1",
+      data: Buffer.from([0xde, 0xad]),
+      channel: "control",
+    };
+    expect(message.data.length).toBe(2);
   });
 });

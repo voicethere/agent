@@ -16,6 +16,9 @@ export {
   type SessionStartMessage,
   type SendToClientMessage,
   type DataChannelMessageMessage,
+  type DataChannelBinaryMessage,
+  type DataChannelKind,
+  type SendBinaryToClientMessage,
   type SpeakMessage,
   type SpeechEventMessage,
 } from "./protocol.js";
@@ -25,6 +28,7 @@ export {
   defineAgent,
   parseChatText,
   sendToClient,
+  sendBinaryToClient,
   speak,
   type AgentHandlers,
   type DataChannelContext,

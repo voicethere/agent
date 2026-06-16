@@ -1,16 +1,20 @@
 {
   "name": "@voicethere/agent",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "VoiceThere customer agent SDK — IPC types and runtime helpers for sandboxed child bundles",
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./verify": {
       "types": "./dist/verify/run-verify.d.ts",
-      "import": "./dist/verify/run-verify.js"
+      "import": "./dist/verify/run-verify.js",
+      "require": "./dist/verify/run-verify.js",
+      "default": "./dist/verify/run-verify.js"
     }
   },
   "bin": "./dist/cli.js",
@@ -26,7 +30,7 @@
     "build": "npm run build:lib && npm run build:example",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
-    "test:ci": "npm run typecheck && npm run build && npm run test",
+    "test:ci": "npm run typecheck && npm run build && npm run test && node scripts/ci/verify-package-exports.mjs",
     "verify:local": "npm run build && node dist/cli.js verify --no-build --bundle dist/agent.js",
     "verify:local:only": "node dist/cli.js verify --no-build --bundle dist/agent.js",
     "prepublishOnly": "npm run build"

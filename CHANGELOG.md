@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-06-16
+
+### Fixed
+
+- **`package.json` exports** — add `default` and `require` conditions for `.` and `./verify` so Node/tsx CJS resolution works (fixes `ERR_PACKAGE_PATH_NOT_EXPORTED` in platform workers and scripts).
+
 ## [0.1.8] - 2026-06-16
 
 ### Added

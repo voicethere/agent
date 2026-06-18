@@ -48,6 +48,7 @@ describe("buildChildExecArgv", () => {
     expect(argv).toContain("--permission");
     expect(argv).toContain("--allow-fs-read=/app/src/sandbox");
     expect(argv).toContain("--allow-fs-read=/app/dist");
+    expect(argv).toContain("--allow-fs-read=/app/dist/agent.js");
     expect(argv.some((flag) => flag.includes("allow-child-process"))).toBe(
       false,
     );
@@ -66,7 +67,7 @@ describe("buildChildExecArgv", () => {
     expect(argv[1]).not.toBe(argv[2]);
   });
 
-  it("deduplicates read dirs when loader and bundle share a parent", () => {
+  it("includes bundle file path when loader and bundle share a parent", () => {
     const argv = buildChildExecArgv({
       loaderDir: "/app/dist",
       bundlePath: "/app/dist/agent.js",
@@ -74,8 +75,8 @@ describe("buildChildExecArgv", () => {
     const readFlags = argv.filter((flag) =>
       flag.startsWith("--allow-fs-read="),
     );
-    expect(readFlags).toHaveLength(1);
-    expect(readFlags[0]).toBe("--allow-fs-read=/app/dist");
+    expect(readFlags).toContain("--allow-fs-read=/app/dist");
+    expect(readFlags).toContain("--allow-fs-read=/app/dist/agent.js");
   });
 });
 

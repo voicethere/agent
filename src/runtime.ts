@@ -1,9 +1,6 @@
 import type { SpeechEvent } from "@node-webrtc-rust/sdk/voice";
 
-import type {
-  DataChannelKind,
-  ParentToChildMessage,
-} from "./protocol.js";
+import type { DataChannelKind, ParentToChildMessage } from "./protocol.js";
 
 export interface SessionContext {
   sessionId: string;
@@ -30,6 +27,8 @@ export interface DataChannelContext {
 }
 
 export interface AgentHandlers {
+  /** Alias for {@link AgentHandlers.onSessionStart}. */
+  onClientJoin?: (ctx: SessionContext) => void | Promise<void>;
   onSessionStart?: (ctx: SessionContext) => void | Promise<void>;
   /** Fired for every speech lifecycle event from the parent voice pipeline. */
   onSpeechEvent?: (
@@ -38,6 +37,8 @@ export interface AgentHandlers {
   ) => void | Promise<void>;
   /** Convenience handler — also invoked when `speech.type` is `user_speech_final`. */
   onUserSpeechFinal?: (ctx: SpeechContext) => void | Promise<void>;
+  /** Alias for {@link AgentHandlers.onSessionEnd}. */
+  onClientLeave?: (ctx: { sessionId: string }) => void | Promise<void>;
   onSessionEnd?: (ctx: { sessionId: string }) => void | Promise<void>;
   /** Browser data channel JSON (chat, custom app protocol). */
   onDataChannelMessage?: (ctx: DataChannelContext) => void | Promise<void>;
@@ -77,7 +78,7 @@ export function defineAgent(handlers: AgentHandlers): void {
       try {
         switch (message.type) {
           case "session_start":
-            await handlers.onSessionStart?.({
+            await (handlers.onClientJoin ?? handlers.onSessionStart)?.({
               sessionId: message.sessionId,
               env: message.env,
             });
@@ -117,7 +118,9 @@ export function defineAgent(handlers: AgentHandlers): void {
             });
             break;
           case "session_end":
-            await handlers.onSessionEnd?.({ sessionId: message.sessionId });
+            await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
+              sessionId: message.sessionId,
+            });
             break;
         }
       } catch (error) {
@@ -150,7 +153,22 @@ export function sendBinaryToClient(
   channel: DataChannelKind = "sync",
 ): void {
   const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
-  process.send?.({ type: "send_binary_to_client", sessionId, data: buffer, channel });
+  process.send?.({
+    type: "send_binary_to_client",
+    sessionId,
+    data: buffer,
+    channel,
+  });
+}
+
+/** Send the same JSON payload to one or more browser peers. */
+export function broadcastToClients(
+  payload: unknown,
+  sessionIds: readonly string[],
+): void {
+  for (const sessionId of sessionIds) {
+    sendToClient(sessionId, payload);
+  }
 }
 
 /** Structured log forwarded to the runner parent. */

@@ -30,6 +30,7 @@ export {
   sendToClient,
   sendBinaryToClient,
   speak,
+  broadcastToClients,
   type AgentHandlers,
   type DataChannelContext,
   type SessionContext,

@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-06-18
+
+### Fixed
+
+- **Sandbox bundle path** — `realpathSync` on bundle file for ESM `import()` under Node `--permission`; allowlist includes canonical bundle path (parity with runner child fork).
+
 ## [0.1.9] - 2026-06-16
 
 ### Fixed

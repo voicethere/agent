@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -47,14 +47,28 @@ describe("resolveBundlePath", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "agent-bundle-"));
     tempFile = join(tempDir, "agent.mjs");
     writeFileSync(tempFile, "export {};\n");
-    expect(resolveBundlePath(tempFile)).toBe(tempFile);
+    expect(resolveBundlePath(tempFile)).toBe(realpathSync(tempFile));
   });
 
   it("trims whitespace in bundle path", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "agent-bundle-"));
     tempFile = join(tempDir, "agent.mjs");
     writeFileSync(tempFile, "export {};\n");
-    expect(resolveBundlePath(`  ${tempFile}  `)).toBe(tempFile);
+    expect(resolveBundlePath(`  ${tempFile}  `)).toBe(realpathSync(tempFile));
+  });
+
+  it("returns realpath for symlinked bundle (var/run → run on Linux)", () => {
+    const root = join(tmpdir(), `agent-bundle-symlink-${process.pid}`);
+    const realDir = join(root, "run", "runner");
+    const linkDir = join(root, "var", "run", "runner");
+    mkdirSync(realDir, { recursive: true });
+    mkdirSync(join(root, "var", "run"), { recursive: true });
+    tempFile = join(realDir, "bundle.js");
+    writeFileSync(tempFile, "export {};\n");
+    symlinkSync(realDir, linkDir, "dir");
+
+    const viaSymlink = join(linkDir, "bundle.js");
+    expect(resolveBundlePath(viaSymlink)).toBe(realpathSync(tempFile));
   });
 });
 

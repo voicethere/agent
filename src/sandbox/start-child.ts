@@ -5,7 +5,7 @@
  */
 
 import { fork, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,7 +43,11 @@ export function resolveBundlePath(bundlePath: string): string {
   if (!existsSync(resolved)) {
     throw new Error(`Bundle not found: ${resolved}`);
   }
-  return resolved;
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
 }
 
 export function startSandboxedChild(

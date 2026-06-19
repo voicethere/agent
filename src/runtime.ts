@@ -49,6 +49,11 @@ export interface AgentHandlers {
    * Must not throw; errors are logged and reported as session errors.
    */
   onIdleTimeout?: (ctx: IdleTimeoutContext) => void | Promise<void>;
+  /**
+   * Optional — runs when handler code throws before runner crash handling.
+   * Must not throw; hook errors are logged via {@link agentLog}.
+   */
+  errorHook?: (ctx: AgentErrorContext) => void | Promise<void>;
 }
 
 export interface IdleTimeoutContext {
@@ -57,6 +62,15 @@ export interface IdleTimeoutContext {
   buildId?: string;
   env: Record<string, string>;
   idleTimeoutSeconds: number;
+}
+
+export interface AgentErrorContext {
+  sessionId: string;
+  projectId?: string;
+  buildId?: string;
+  env: Record<string, string>;
+  error: Error;
+  customerContext?: Record<string, unknown>;
 }
 
 function isParentMessage(value: unknown): value is ParentToChildMessage {
@@ -145,16 +159,57 @@ export function defineAgent(handlers: AgentHandlers): void {
             break;
         }
       } catch (error) {
-        const errMessage =
-          error instanceof Error ? error.message : String(error);
+        const err =
+          error instanceof Error ? error : new Error(String(error));
+        const env =
+          peerEnvBySessionId.get(message.sessionId) ??
+          buildIdleEnv(message.sessionId);
+        await runErrorHook(handlers, {
+          sessionId: message.sessionId,
+          projectId: env.PROJECT_ID,
+          buildId: env.BUILD_ID,
+          env,
+          error: err,
+          customerContext: parseCustomerContext(env.AGENT_CUSTOMER_CONTEXT),
+        });
         process.send?.({
           type: "agent_error",
           sessionId: message.sessionId,
-          message: errMessage,
+          message: err.message,
+          stack: err.stack,
         });
       }
     })();
   });
+}
+
+function parseCustomerContext(
+  raw: string | undefined,
+): Record<string, unknown> | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // ignore malformed context
+  }
+  return undefined;
+}
+
+async function runErrorHook(
+  handlers: AgentHandlers,
+  ctx: AgentErrorContext,
+): Promise<void> {
+  if (!handlers.errorHook) return;
+  try {
+    await handlers.errorHook(ctx);
+  } catch (hookError) {
+    const message =
+      hookError instanceof Error ? hookError.message : String(hookError);
+    agentLog("error", `errorHook failed: ${message}`);
+  }
 }
 
 async function runIdleTimeoutHook(

@@ -242,6 +242,7 @@ describe("defineAgent", () => {
         type: "agent_error",
         sessionId: "peer-err",
         message: "boom",
+        stack: expect.stringContaining("boom"),
       });
     });
 
@@ -264,11 +265,51 @@ describe("defineAgent", () => {
     });
 
     await vi.waitFor(() => {
-      expect(sendMock.send).toHaveBeenCalledWith({
-        type: "agent_error",
-        sessionId: "peer-async",
-        message: "async fail",
-      });
+      expect(sendMock.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "agent_error",
+          sessionId: "peer-async",
+          message: "async fail",
+        }),
+      );
+    });
+
+    sendMock.restore();
+  });
+
+  it("runs errorHook before agent_error IPC and swallows hook throws", async () => {
+    const errorHook = vi.fn().mockRejectedValue(new Error("hook fail"));
+    const sendMock = installProcessSendMock();
+    capture = installProcessMessageCapture();
+    defineAgent({
+      errorHook,
+      onSessionStart: () => {
+        throw new Error("handler fail");
+      },
+    });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-hook",
+      env: { PROJECT_ID: "p1", AGENT_CUSTOMER_CONTEXT: '{"tier":"pro"}' },
+    });
+
+    await vi.waitFor(() => {
+      expect(errorHook).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "peer-hook",
+          projectId: "p1",
+          customerContext: { tier: "pro" },
+          error: expect.objectContaining({ message: "handler fail" }),
+        }),
+      );
+      expect(sendMock.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "agent_error",
+          sessionId: "peer-hook",
+          message: "handler fail",
+        }),
+      );
     });
 
     sendMock.restore();

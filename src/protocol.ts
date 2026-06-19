@@ -144,6 +144,8 @@ export interface AgentErrorMessage {
   sessionId: string;
   /** Human-readable error summary (no stack traces required). */
   message: string;
+  /** Optional stack trace from handler throw. */
+  stack?: string;
 }
 
 /**
@@ -203,6 +205,8 @@ export const ALLOWED_CHILD_ENV_KEYS = [
   "PROJECT_ID",
   "BUILD_ID",
   "IDLE_TIMEOUT_SEC",
+  /** JSON string — opaque customer context from browser session start. */
+  "AGENT_CUSTOMER_CONTEXT",
 ] as const;
 
 /** Union of allowlisted env key names. */

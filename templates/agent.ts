@@ -180,6 +180,11 @@ defineAgent({
   //   // Optional: notify client, persist state — runner disconnects after this returns (max 30s).
   // },
 
+  // async errorHook({ sessionId, error, customerContext }) {
+  //   agentLog("error", `handler failed for ${sessionId}: ${error.message}`);
+  //   // Optional: sendToClient(sessionId, { type: "alert", message: error.message });
+  // },
+
   // Example: disconnect a stale multiplayer client from agent code:
   // onDataChannelMessage({ sessionId, message }) {
   //   if (isStaleGameState(message)) disconnectClient(sessionId, { reason: "stale_state" });

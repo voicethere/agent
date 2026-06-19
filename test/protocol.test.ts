@@ -13,6 +13,7 @@ describe("protocol", () => {
       "PROJECT_ID",
       "BUILD_ID",
       "IDLE_TIMEOUT_SEC",
+      "AGENT_CUSTOMER_CONTEXT",
     ]);
   });
 

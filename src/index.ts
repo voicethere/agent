@@ -36,6 +36,7 @@ export {
   speak,
   broadcastToClients,
   type AgentHandlers,
+  type AgentErrorContext,
   type DataChannelContext,
   type IdleTimeoutContext,
   type SessionContext,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { agentLog, defineAgent, sendBinaryToClient, speak } from "../src/runtime.js";
+import { agentLog, defineAgent, disconnectClient, sendBinaryToClient, speak } from "../src/runtime.js";
 import {
   installProcessMessageCapture,
   installProcessSendMock,
@@ -274,6 +274,41 @@ describe("defineAgent", () => {
     sendMock.restore();
   });
 
+  it("dispatches onIdleTimeout and sends idle_timeout_done", async () => {
+    const onIdleTimeout = vi.fn().mockResolvedValue(undefined);
+    const sendMock = installProcessSendMock();
+    capture = installProcessMessageCapture();
+    defineAgent({ onIdleTimeout });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-idle",
+      env: { SESSION_ID: "peer-idle", IDLE_TIMEOUT_SEC: "120" },
+    });
+
+    capture.emit({
+      type: "idle_timeout",
+      sessionId: "peer-idle",
+      maxGraceMs: 30_000,
+    });
+
+    await vi.waitFor(() => {
+      expect(onIdleTimeout).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "peer-idle",
+          idleTimeoutSeconds: 120,
+        }),
+      );
+      expect(sendMock.send).toHaveBeenCalledWith({
+        type: "idle_timeout_done",
+        sessionId: "peer-idle",
+        error: undefined,
+      });
+    });
+
+    sendMock.restore();
+  });
+
   it("dispatches onDataChannelBinary with rawBinary and channel", async () => {
     const onDataChannelBinary = vi.fn();
     capture = installProcessMessageCapture();
@@ -295,6 +330,24 @@ describe("defineAgent", () => {
         rawBinary: data,
         channel: "sync",
       });
+    });
+  });
+});
+
+describe("disconnectClient", () => {
+  let sendMock: ReturnType<typeof installProcessSendMock>;
+
+  afterEach(() => {
+    sendMock?.restore();
+  });
+
+  it("sends disconnect_client IPC to parent", () => {
+    sendMock = installProcessSendMock();
+    disconnectClient("peer-1", { reason: "stale" });
+    expect(sendMock.send).toHaveBeenCalledWith({
+      type: "disconnect_client",
+      sessionId: "peer-1",
+      reason: "stale",
     });
   });
 });

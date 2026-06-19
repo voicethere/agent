@@ -12,6 +12,7 @@ describe("protocol", () => {
       "SESSION_ID",
       "PROJECT_ID",
       "BUILD_ID",
+      "IDLE_TIMEOUT_SEC",
     ]);
   });
 

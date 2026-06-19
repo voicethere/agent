@@ -44,6 +44,19 @@ export interface AgentHandlers {
   onDataChannelMessage?: (ctx: DataChannelContext) => void | Promise<void>;
   /** Browser data channel binary (game state, custom framing). */
   onDataChannelBinary?: (ctx: DataChannelContext) => void | Promise<void>;
+  /**
+   * Idle timeout fired — run cleanup before the runner disconnects the peer.
+   * Must not throw; errors are logged and reported as session errors.
+   */
+  onIdleTimeout?: (ctx: IdleTimeoutContext) => void | Promise<void>;
+}
+
+export interface IdleTimeoutContext {
+  sessionId: string;
+  projectId?: string;
+  buildId?: string;
+  env: Record<string, string>;
+  idleTimeoutSeconds: number;
 }
 
 function isParentMessage(value: unknown): value is ParentToChildMessage {
@@ -54,7 +67,8 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "speech_event" ||
     msg.type === "session_end" ||
     msg.type === "data_channel_message" ||
-    msg.type === "data_channel_binary"
+    msg.type === "data_channel_binary" ||
+    msg.type === "idle_timeout"
   );
 }
 
@@ -65,6 +79,8 @@ function parseDataChannelPayload(raw: string): unknown {
     return raw;
   }
 }
+
+const peerEnvBySessionId = new Map<string, Record<string, string>>();
 
 /**
  * Register IPC handlers for a customer agent child process.
@@ -78,6 +94,7 @@ export function defineAgent(handlers: AgentHandlers): void {
       try {
         switch (message.type) {
           case "session_start":
+            peerEnvBySessionId.set(message.sessionId, message.env);
             await (handlers.onClientJoin ?? handlers.onSessionStart)?.({
               sessionId: message.sessionId,
               env: message.env,
@@ -118,9 +135,13 @@ export function defineAgent(handlers: AgentHandlers): void {
             });
             break;
           case "session_end":
+            peerEnvBySessionId.delete(message.sessionId);
             await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
               sessionId: message.sessionId,
             });
+            break;
+          case "idle_timeout":
+            await runIdleTimeoutHook(handlers, message);
             break;
         }
       } catch (error) {
@@ -134,6 +155,49 @@ export function defineAgent(handlers: AgentHandlers): void {
       }
     })();
   });
+}
+
+async function runIdleTimeoutHook(
+  handlers: AgentHandlers,
+  message: { sessionId: string; maxGraceMs: number },
+): Promise<void> {
+  const env =
+    peerEnvBySessionId.get(message.sessionId) ??
+    buildIdleEnv(message.sessionId);
+  const idleTimeoutSeconds = Number(env.IDLE_TIMEOUT_SEC) || 0;
+  const ctx: IdleTimeoutContext = {
+    sessionId: message.sessionId,
+    projectId: env.PROJECT_ID,
+    buildId: env.BUILD_ID,
+    env,
+    idleTimeoutSeconds,
+  };
+
+  let error: string | undefined;
+  try {
+    await handlers.onIdleTimeout?.(ctx);
+  } catch (hookError) {
+    error =
+      hookError instanceof Error ? hookError.message : String(hookError);
+    agentLog("error", `onIdleTimeout failed: ${error}`);
+  }
+
+  process.send?.({
+    type: "idle_timeout_done",
+    sessionId: message.sessionId,
+    error,
+  });
+}
+
+function buildIdleEnv(sessionId: string): Record<string, string> {
+  return {
+    SESSION_ID: sessionId,
+    ...(process.env.PROJECT_ID ? { PROJECT_ID: process.env.PROJECT_ID } : {}),
+    ...(process.env.BUILD_ID ? { BUILD_ID: process.env.BUILD_ID } : {}),
+    ...(process.env.IDLE_TIMEOUT_SEC
+      ? { IDLE_TIMEOUT_SEC: process.env.IDLE_TIMEOUT_SEC }
+      : {}),
+  };
 }
 
 /** Ask the runner parent to synthesize speech for the session. */
@@ -174,6 +238,18 @@ export function broadcastToClients(
 /** Structured log forwarded to the runner parent. */
 export function agentLog(level: "info" | "error", message: string): void {
   process.send?.({ type: "log", level, message });
+}
+
+/** Ask the runner to disconnect a browser peer (customer-initiated). */
+export function disconnectClient(
+  sessionId: string,
+  options?: { reason?: string },
+): void {
+  process.send?.({
+    type: "disconnect_client",
+    sessionId,
+    reason: options?.reason,
+  });
 }
 
 /** Extract chat text from a parsed data channel message. */

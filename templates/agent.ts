@@ -18,6 +18,7 @@
 import {
   agentLog,
   defineAgent,
+  disconnectClient,
   speak,
   type SpeechEvent,
 } from "@voicethere/agent";
@@ -173,4 +174,14 @@ defineAgent({
     peers.delete(sessionId);
     agentLog("info", `session_end ${sessionId}`);
   },
+
+  // async onIdleTimeout({ sessionId, idleTimeoutSeconds }) {
+  //   agentLog("info", `idle timeout after ${idleTimeoutSeconds}s for ${sessionId}`);
+  //   // Optional: notify client, persist state — runner disconnects after this returns (max 30s).
+  // },
+
+  // Example: disconnect a stale multiplayer client from agent code:
+  // onDataChannelMessage({ sessionId, message }) {
+  //   if (isStaleGameState(message)) disconnectClient(sessionId, { reason: "stale_state" });
+  // },
 });

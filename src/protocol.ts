@@ -22,7 +22,8 @@ export type ParentToChildMessage =
   | SpeechEventMessage
   | SessionEndMessage
   | DataChannelMessageMessage
-  | DataChannelBinaryMessage;
+  | DataChannelBinaryMessage
+  | IdleTimeoutMessage;
 
 /**
  * Messages the customer child may send back to the runner parent.
@@ -34,7 +35,9 @@ export type ChildToParentMessage =
   | AgentLogMessage
   | AgentErrorMessage
   | SendToClientMessage
-  | SendBinaryToClientMessage;
+  | SendBinaryToClientMessage
+  | IdleTimeoutDoneMessage
+  | DisconnectClientMessage;
 
 /** Which WebRTC data channel carried a binary IPC payload. */
 export type DataChannelKind = "control" | "sync";
@@ -161,6 +164,35 @@ export interface SendBinaryToClientMessage {
 }
 
 /**
+ * Idle timeout fired — run {@link AgentHandlers.onIdleTimeout} before disconnect.
+ */
+export interface IdleTimeoutMessage {
+  type: "idle_timeout";
+  sessionId: string;
+  /** Wall-clock grace for the customer callback (default 30000). */
+  maxGraceMs: number;
+}
+
+/**
+ * Customer callback finished (or failed) after {@link IdleTimeoutMessage}.
+ */
+export interface IdleTimeoutDoneMessage {
+  type: "idle_timeout_done";
+  sessionId: string;
+  /** Set when the customer hook threw or rejected. */
+  error?: string;
+}
+
+/**
+ * Ask the runner to disconnect a browser peer (customer-initiated).
+ */
+export interface DisconnectClientMessage {
+  type: "disconnect_client";
+  sessionId: string;
+  reason?: string;
+}
+
+/**
  * Environment variable names the runner may inject into {@link SessionStartMessage.env}.
  *
  * The runner may add more project-specific keys over time; customer bundles must
@@ -170,6 +202,7 @@ export const ALLOWED_CHILD_ENV_KEYS = [
   "SESSION_ID",
   "PROJECT_ID",
   "BUILD_ID",
+  "IDLE_TIMEOUT_SEC",
 ] as const;
 
 /** Union of allowlisted env key names. */

@@ -1,6 +1,7 @@
 import type { SpeechEvent } from "@node-webrtc-rust/sdk/voice";
 
 import type { DataChannelKind, ParentToChildMessage } from "./protocol.js";
+import { SessionSerialQueue } from "./session-serial-queue.js";
 
 export interface SessionContext {
   sessionId: string;
@@ -96,68 +97,80 @@ function parseDataChannelPayload(raw: string): unknown {
 
 const peerEnvBySessionId = new Map<string, Record<string, string>>();
 
+async function handleParentMessage(
+  message: ParentToChildMessage,
+  handlers: AgentHandlers,
+): Promise<void> {
+  switch (message.type) {
+    case "session_start":
+      peerEnvBySessionId.set(message.sessionId, message.env);
+      await (handlers.onClientJoin ?? handlers.onSessionStart)?.({
+        sessionId: message.sessionId,
+        env: message.env,
+      });
+      break;
+    case "speech_event":
+      await handlers.onSpeechEvent?.(
+        { sessionId: message.sessionId },
+        message.event,
+      );
+      if (
+        message.event.type === "user_speech_final" &&
+        typeof message.event.text === "string" &&
+        message.event.text.trim()
+      ) {
+        await handlers.onUserSpeechFinal?.({
+          sessionId: message.sessionId,
+          text: message.event.text.trim(),
+        });
+      }
+      break;
+    case "data_channel_message":
+      await handlers.onDataChannelMessage?.({
+        sessionId: message.sessionId,
+        message: parseDataChannelPayload(message.payload),
+        raw: message.payload,
+        rawBinary: null,
+        channel: "control",
+      });
+      break;
+    case "data_channel_binary":
+      await handlers.onDataChannelBinary?.({
+        sessionId: message.sessionId,
+        message: null,
+        raw: null,
+        rawBinary: message.data,
+        channel: message.channel ?? "sync",
+      });
+      break;
+    case "session_end":
+      peerEnvBySessionId.delete(message.sessionId);
+      await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
+        sessionId: message.sessionId,
+      });
+      break;
+    case "idle_timeout":
+      await runIdleTimeoutHook(handlers, message);
+      break;
+  }
+}
+
 /**
  * Register IPC handlers for a customer agent child process.
  * Call once at bundle entry; runner parent sends {@link ParentToChildMessage} events.
+ *
+ * Parent messages for the same `sessionId` are handled strictly in arrival order;
+ * different sessions run independently (shared-child / load-safe).
  */
 export function defineAgent(handlers: AgentHandlers): void {
+  const inboundBySession = new SessionSerialQueue();
+
   process.on("message", (message: unknown) => {
     if (!isParentMessage(message)) return;
 
-    void (async () => {
+    inboundBySession.enqueue(message.sessionId, async () => {
       try {
-        switch (message.type) {
-          case "session_start":
-            peerEnvBySessionId.set(message.sessionId, message.env);
-            await (handlers.onClientJoin ?? handlers.onSessionStart)?.({
-              sessionId: message.sessionId,
-              env: message.env,
-            });
-            break;
-          case "speech_event":
-            await handlers.onSpeechEvent?.(
-              { sessionId: message.sessionId },
-              message.event,
-            );
-            if (
-              message.event.type === "user_speech_final" &&
-              typeof message.event.text === "string" &&
-              message.event.text.trim()
-            ) {
-              await handlers.onUserSpeechFinal?.({
-                sessionId: message.sessionId,
-                text: message.event.text.trim(),
-              });
-            }
-            break;
-          case "data_channel_message":
-            await handlers.onDataChannelMessage?.({
-              sessionId: message.sessionId,
-              message: parseDataChannelPayload(message.payload),
-              raw: message.payload,
-              rawBinary: null,
-              channel: "control",
-            });
-            break;
-          case "data_channel_binary":
-            await handlers.onDataChannelBinary?.({
-              sessionId: message.sessionId,
-              message: null,
-              raw: null,
-              rawBinary: message.data,
-              channel: message.channel ?? "sync",
-            });
-            break;
-          case "session_end":
-            peerEnvBySessionId.delete(message.sessionId);
-            await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
-              sessionId: message.sessionId,
-            });
-            break;
-          case "idle_timeout":
-            await runIdleTimeoutHook(handlers, message);
-            break;
-        }
+        await handleParentMessage(message, handlers);
       } catch (error) {
         const err =
           error instanceof Error ? error : new Error(String(error));
@@ -179,7 +192,7 @@ export function defineAgent(handlers: AgentHandlers): void {
           stack: err.stack,
         });
       }
-    })();
+    });
   });
 }
 

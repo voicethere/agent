@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-06-20
+
+### Added
+
+- **`session_start_ack` IPC** — child confirms `session_start` handling completed so the parent can gate `speech_event` / data-channel messages until startup finishes.
+
+### Fixed
+
+- **Session serial queue tail cleanup** — compare the settled promise when removing per-session queue tails (avoids stale tail references under overlapping handlers).
+
 ## [0.1.11] - 2026-06-20
 
 ### Fixed

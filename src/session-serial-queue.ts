@@ -9,14 +9,12 @@ export class SessionSerialQueue {
     const previous =
       this.tails.get(sessionId)?.catch(() => undefined) ?? Promise.resolve();
     const next = previous.then(() => Promise.resolve(task()));
-    this.tails.set(
-      sessionId,
-      next.finally(() => {
-        if (this.tails.get(sessionId) === next) {
-          this.tails.delete(sessionId);
-        }
-      }),
-    );
+    const settled = next.finally(() => {
+      if (this.tails.get(sessionId) === settled) {
+        this.tails.delete(sessionId);
+      }
+    });
+    this.tails.set(sessionId, settled);
   }
 
   clear(sessionId: string): void {

@@ -50,6 +50,10 @@ describe("defineAgent", () => {
           BUILD_ID: "build-1",
         },
       });
+      expect(capture.send).toHaveBeenCalledWith({
+        type: "session_start_ack",
+        sessionId: "peer-1",
+      });
     });
   });
 
@@ -266,8 +270,8 @@ describe("defineAgent", () => {
   });
 
   it("reports handler errors as agent_error IPC", async () => {
-    const sendMock = installProcessSendMock();
     capture = installProcessMessageCapture();
+    const sendMock = installProcessSendMock();
     defineAgent({
       onSessionStart: () => {
         throw new Error("boom");
@@ -293,8 +297,8 @@ describe("defineAgent", () => {
   });
 
   it("reports rejected async handlers as agent_error IPC", async () => {
-    const sendMock = installProcessSendMock();
     capture = installProcessMessageCapture();
+    const sendMock = installProcessSendMock();
     defineAgent({
       onSpeechEvent: async () => {
         throw new Error("async fail");
@@ -322,8 +326,8 @@ describe("defineAgent", () => {
 
   it("runs errorHook before agent_error IPC and swallows hook throws", async () => {
     const errorHook = vi.fn().mockRejectedValue(new Error("hook fail"));
-    const sendMock = installProcessSendMock();
     capture = installProcessMessageCapture();
+    const sendMock = installProcessSendMock();
     defineAgent({
       errorHook,
       onSessionStart: () => {
@@ -360,8 +364,8 @@ describe("defineAgent", () => {
 
   it("dispatches onIdleTimeout and sends idle_timeout_done", async () => {
     const onIdleTimeout = vi.fn().mockResolvedValue(undefined);
-    const sendMock = installProcessSendMock();
     capture = installProcessMessageCapture();
+    const sendMock = installProcessSendMock();
     defineAgent({ onIdleTimeout });
 
     capture.emit({

@@ -108,6 +108,10 @@ async function handleParentMessage(
         sessionId: message.sessionId,
         env: message.env,
       });
+      process.send?.({
+        type: "session_start_ack",
+        sessionId: message.sessionId,
+      });
       break;
     case "speech_event":
       await handlers.onSpeechEvent?.(

@@ -31,6 +31,7 @@ export type ParentToChildMessage =
  * Prefer {@link speak}, {@link sendToClient}, {@link sendBinaryToClient}, and {@link agentLog} helpers over raw `process.send`.
  */
 export type ChildToParentMessage =
+  | SessionStartAckMessage
   | SpeakMessage
   | AgentLogMessage
   | AgentErrorMessage
@@ -84,6 +85,18 @@ export interface SpeechEventMessage {
 export interface SessionEndMessage {
   type: "session_end";
   /** Peer/session id that ended. */
+  sessionId: string;
+}
+
+/**
+ * Child confirms {@link SessionStartMessage} was fully handled.
+ *
+ * Parent may gate `speech_event` / data-channel IPC until this arrives, which
+ * prevents races where `session_start` async setup overlaps later messages.
+ */
+export interface SessionStartAckMessage {
+  type: "session_start_ack";
+  /** Peer/session id that completed startup inside the child. */
   sessionId: string;
 }
 

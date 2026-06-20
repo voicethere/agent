@@ -4,9 +4,11 @@ type ProcessMessageListener = (message: unknown) => void;
 
 export function installProcessMessageCapture(): {
   emit: (message: unknown) => void;
+  send: ReturnType<typeof vi.fn>;
   restore: () => void;
 } {
   const listeners = new Set<ProcessMessageListener>();
+  const sendStub = installProcessSendMock();
   const originalOn = process.on.bind(process);
   const spy = vi.spyOn(process, "on").mockImplementation(((
     event: string | symbol,
@@ -25,9 +27,11 @@ export function installProcessMessageCapture(): {
         listener(message);
       }
     },
+    send: sendStub.send,
     restore: () => {
       spy.mockRestore();
       listeners.clear();
+      sendStub.restore();
     },
   };
 }

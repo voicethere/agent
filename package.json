@@ -1,6 +1,6 @@
 {
   "name": "@voicethere/agent",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "VoiceThere customer agent SDK — IPC types and runtime helpers for sandboxed child bundles",
   "type": "module",
   "exports": {

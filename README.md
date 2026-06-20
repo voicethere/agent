@@ -94,6 +94,16 @@ Forwarded from the runner voice pipeline as SDK `SpeechEvent` payloads on `speec
 
 Copy [`templates/agent.ts`](./templates/agent.ts) as a starting point — exhaustive `switch` over all 14 `SpeechEvent` types with per-peer state stubs and `agentLog` tracing.
 
+## Multiplayer / shared state
+
+Each end-user connection must call **`startSession()`** once — one orchestrator session id per client (one signaling room per client). Do **not** join multiple browsers to the same session credentials.
+
+When the VoiceThere project has **`shared_child_per_session`** enabled, every session on a runner pod shares **one** sandboxed `agent.js` process. Your handlers receive `sessionId` equal to the orchestrator session id (see `onClientJoin` / `onSessionStart`). Use that id with `speak`, `sendToClient`, and `broadcastToClients` to target the right WebRTC client.
+
+For isolated voice agents (default), leave **`shared_child_per_session`** disabled — each session gets its own child process.
+
+See [`templates/game-sync.ts`](./templates/game-sync.ts) for a data-only authoritative server example.
+
 ## Building your agent bundle
 
 **Recommended:** bundle with the package CLI (same esbuild settings VoiceThere uses in production):

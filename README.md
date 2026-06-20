@@ -100,6 +100,8 @@ Each end-user connection must call **`startSession()`** once — one orchestrato
 
 When the VoiceThere project has **`shared_child_per_session`** enabled, every session on a runner pod shares **one** sandboxed `agent.js` process. Your handlers receive `sessionId` equal to the orchestrator session id (see `onClientJoin` / `onSessionStart`). Use that id with `speak`, `sendToClient`, and `broadcastToClients` to target the right WebRTC client.
 
+The runtime processes parent IPC **in order per `sessionId`** while different sessions run independently — safe for greet-on-join and load with many concurrent connections.
+
 For isolated voice agents (default), leave **`shared_child_per_session`** disabled — each session gets its own child process.
 
 See [`templates/game-sync.ts`](./templates/game-sync.ts) for a data-only authoritative server example.

@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-06-20
+
+### Fixed
+
+- **Shared child IPC ordering** — `defineAgent` serializes inbound parent messages per `sessionId` (FIFO) so `session_start` handlers (e.g. greet `speak`) complete before `session_end` for the same session under `shared_child_per_session` load.
+
 ## [0.1.10] - 2026-06-18
 
 ### Fixed

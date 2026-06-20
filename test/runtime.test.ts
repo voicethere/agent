@@ -222,6 +222,49 @@ describe("defineAgent", () => {
     await vi.waitFor(() => expect(order).toEqual(["start"]));
   });
 
+  it("processes session_start before session_end for the same session", async () => {
+    const order: string[] = [];
+    capture = installProcessMessageCapture();
+    defineAgent({
+      onSessionStart: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        order.push("start");
+      },
+      onSessionEnd: async () => {
+        order.push("end");
+      },
+    });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: {},
+    });
+    capture.emit({ type: "session_end", sessionId: "peer-1" });
+
+    await vi.waitFor(() => expect(order).toEqual(["start", "end"]));
+  });
+
+  it("processes different sessions independently", async () => {
+    const order: string[] = [];
+    capture = installProcessMessageCapture();
+    defineAgent({
+      onSessionStart: async ({ sessionId }) => {
+        await new Promise((resolve) =>
+          setTimeout(resolve, sessionId === "slow" ? 30 : 5),
+        );
+        order.push(`start:${sessionId}`);
+      },
+    });
+
+    capture.emit({ type: "session_start", sessionId: "slow", env: {} });
+    capture.emit({ type: "session_start", sessionId: "fast", env: {} });
+
+    await vi.waitFor(() =>
+      expect(order).toEqual(["start:fast", "start:slow"]),
+    );
+  });
+
   it("reports handler errors as agent_error IPC", async () => {
     const sendMock = installProcessSendMock();
     capture = installProcessMessageCapture();

@@ -96,6 +96,8 @@ function parseDataChannelPayload(raw: string): unknown {
 }
 
 const peerEnvBySessionId = new Map<string, Record<string, string>>();
+/** Sessions that received `session_end`; `speak()` becomes a no-op. */
+const endedSessionIds = new Set<string>();
 
 async function handleParentMessage(
   message: ParentToChildMessage,
@@ -103,6 +105,7 @@ async function handleParentMessage(
 ): Promise<void> {
   switch (message.type) {
     case "session_start":
+      endedSessionIds.delete(message.sessionId);
       peerEnvBySessionId.set(message.sessionId, message.env);
       await (handlers.onClientJoin ?? handlers.onSessionStart)?.({
         sessionId: message.sessionId,
@@ -174,6 +177,10 @@ export function defineAgent(handlers: AgentHandlers): void {
 
     inboundBySession.enqueue(message.sessionId, async () => {
       try {
+        if (message.type === "session_end") {
+          endedSessionIds.add(message.sessionId);
+          inboundBySession.clear(message.sessionId);
+        }
         await handleParentMessage(message, handlers);
       } catch (error) {
         const err =
@@ -272,8 +279,15 @@ function buildIdleEnv(sessionId: string): Record<string, string> {
   };
 }
 
+/** @internal Vitest helper — clears module-level session lifecycle between tests. */
+export function resetAgentIpcStateForTests(): void {
+  endedSessionIds.clear();
+  peerEnvBySessionId.clear();
+}
+
 /** Ask the runner parent to synthesize speech for the session. */
 export function speak(sessionId: string, text: string): void {
+  if (endedSessionIds.has(sessionId)) return;
   process.send?.({ type: "speak", sessionId, text });
 }
 

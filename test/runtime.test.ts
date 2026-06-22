@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { agentLog, defineAgent, disconnectClient, sendBinaryToClient, speak } from "../src/runtime.js";
+import { agentLog, defineAgent, disconnectClient, resetAgentIpcStateForTests, sendBinaryToClient, speak } from "../src/runtime.js";
 import {
   installProcessMessageCapture,
   installProcessSendMock,
@@ -28,6 +28,7 @@ describe("defineAgent", () => {
 
   afterEach(() => {
     capture?.restore();
+    resetAgentIpcStateForTests();
   });
 
   it("dispatches onSessionStart with sessionId and env", async () => {
@@ -443,6 +444,10 @@ describe("disconnectClient", () => {
 describe("speak", () => {
   let sendMock: ReturnType<typeof installProcessSendMock>;
 
+  beforeEach(() => {
+    resetAgentIpcStateForTests();
+  });
+
   afterEach(() => {
     sendMock?.restore();
   });
@@ -455,6 +460,31 @@ describe("speak", () => {
       sessionId: "peer-1",
       text: "Hello there",
     });
+  });
+
+  it("does not speak after session_end for the same session", async () => {
+    const capture = installProcessMessageCapture();
+    defineAgent({
+      onSessionStart: async ({ sessionId }) => {
+        speak(sessionId, "ready");
+      },
+    });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1", PEER_ID: "p1" },
+    });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    capture.send.mockClear();
+
+    capture.emit({ type: "session_end", sessionId: "peer-1" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    speak("peer-1", "too late");
+    expect(capture.send).not.toHaveBeenCalled();
+    capture.restore();
   });
 });
 

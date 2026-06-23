@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-06-23
+
+### Fixed
+
+- **`speak()` after `session_end`** — no-op when the session is already ended (avoids errors from late TTS in teardown races).
+
+### Changed
+
+- **Peer dependency** — `@node-webrtc-rust/sdk` `>=0.6.2` (aligns with inbound STT finalize and post-utterance silence).
+
 ## [0.1.12] - 2026-06-20
 
 ### Added

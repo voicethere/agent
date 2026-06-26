@@ -14,22 +14,28 @@ function formatArgs(args) {
   return args.map((value) => String(value)).join(" ");
 }
 
+function consoleLogPayload(level, message) {
+  const sessionId = process.env.SESSION_ID?.trim();
+  return {
+    type: "log",
+    level,
+    message,
+    ...(sessionId ? { sessionId } : {}),
+  };
+}
+
 console.log = (...args) => {
-  process.send?.({ type: "log", level: "info", message: formatArgs(args) });
+  process.send?.(consoleLogPayload("info", formatArgs(args)));
 };
 
 console.info = console.log;
 
 console.error = (...args) => {
-  process.send?.({ type: "log", level: "error", message: formatArgs(args) });
+  process.send?.(consoleLogPayload("error", formatArgs(args)));
 };
 
 console.warn = (...args) => {
-  process.send?.({
-    type: "log",
-    level: "info",
-    message: `[warn] ${formatArgs(args)}`,
-  });
+  process.send?.(consoleLogPayload("info", `[warn] ${formatArgs(args)}`));
 };
 
 const { pathToFileURL } = await import("node:url");

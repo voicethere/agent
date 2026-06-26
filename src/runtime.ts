@@ -1,4 +1,5 @@
 import type { SpeechEvent } from "@node-webrtc-rust/sdk/voice";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { DataChannelKind, ParentToChildMessage } from "./protocol.js";
 import { SessionSerialQueue } from "./session-serial-queue.js";
@@ -98,6 +99,8 @@ function parseDataChannelPayload(raw: string): unknown {
 const peerEnvBySessionId = new Map<string, Record<string, string>>();
 /** Sessions that received `session_end`; `speak()` becomes a no-op. */
 const endedSessionIds = new Set<string>();
+/** Active orchestrator session while a parent IPC handler runs (per-session queue). */
+const agentLogSessionContext = new AsyncLocalStorage<string>();
 
 async function handleParentMessage(
   message: ParentToChildMessage,
@@ -176,33 +179,35 @@ export function defineAgent(handlers: AgentHandlers): void {
     if (!isParentMessage(message)) return;
 
     inboundBySession.enqueue(message.sessionId, async () => {
-      try {
-        if (message.type === "session_end") {
-          endedSessionIds.add(message.sessionId);
-          inboundBySession.clear(message.sessionId);
+      await agentLogSessionContext.run(message.sessionId, async () => {
+        try {
+          if (message.type === "session_end") {
+            endedSessionIds.add(message.sessionId);
+            inboundBySession.clear(message.sessionId);
+          }
+          await handleParentMessage(message, handlers);
+        } catch (error) {
+          const err =
+            error instanceof Error ? error : new Error(String(error));
+          const env =
+            peerEnvBySessionId.get(message.sessionId) ??
+            buildIdleEnv(message.sessionId);
+          await runErrorHook(handlers, {
+            sessionId: message.sessionId,
+            projectId: env.PROJECT_ID,
+            buildId: env.BUILD_ID,
+            env,
+            error: err,
+            customerContext: parseCustomerContext(env.AGENT_CUSTOMER_CONTEXT),
+          });
+          process.send?.({
+            type: "agent_error",
+            sessionId: message.sessionId,
+            message: err.message,
+            stack: err.stack,
+          });
         }
-        await handleParentMessage(message, handlers);
-      } catch (error) {
-        const err =
-          error instanceof Error ? error : new Error(String(error));
-        const env =
-          peerEnvBySessionId.get(message.sessionId) ??
-          buildIdleEnv(message.sessionId);
-        await runErrorHook(handlers, {
-          sessionId: message.sessionId,
-          projectId: env.PROJECT_ID,
-          buildId: env.BUILD_ID,
-          env,
-          error: err,
-          customerContext: parseCustomerContext(env.AGENT_CUSTOMER_CONTEXT),
-        });
-        process.send?.({
-          type: "agent_error",
-          sessionId: message.sessionId,
-          message: err.message,
-          stack: err.stack,
-        });
-      }
+      });
     });
   });
 }
@@ -232,7 +237,7 @@ async function runErrorHook(
   } catch (hookError) {
     const message =
       hookError instanceof Error ? hookError.message : String(hookError);
-    agentLog("error", `errorHook failed: ${message}`);
+    agentLog("error", `errorHook failed: ${message}`, ctx.sessionId);
   }
 }
 
@@ -258,7 +263,7 @@ async function runIdleTimeoutHook(
   } catch (hookError) {
     error =
       hookError instanceof Error ? hookError.message : String(hookError);
-    agentLog("error", `onIdleTimeout failed: ${error}`);
+    agentLog("error", `onIdleTimeout failed: ${error}`, message.sessionId);
   }
 
   process.send?.({
@@ -321,9 +326,19 @@ export function broadcastToClients(
   }
 }
 
-/** Structured log forwarded to the runner parent. */
-export function agentLog(level: "info" | "error", message: string): void {
-  process.send?.({ type: "log", level, message });
+/** Structured log forwarded to the runner parent (includes session when in a handler). */
+export function agentLog(
+  level: "info" | "error",
+  message: string,
+  sessionId?: string,
+): void {
+  const resolvedSessionId = sessionId ?? agentLogSessionContext.getStore();
+  process.send?.({
+    type: "log",
+    level,
+    message,
+    ...(resolvedSessionId ? { sessionId: resolvedSessionId } : {}),
+  });
 }
 
 /** Ask the runner to disconnect a browser peer (customer-initiated). */

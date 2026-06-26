@@ -143,6 +143,8 @@ export interface AgentLogMessage {
   type: "log";
   level: "info" | "error";
   message: string;
+  /** Orchestrator session id when the log originates from a session handler. */
+  sessionId?: string;
 }
 
 /**

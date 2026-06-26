@@ -510,9 +510,12 @@ describe("sendBinaryToClient", () => {
 
 describe("agentLog", () => {
   let sendMock: ReturnType<typeof installProcessSendMock>;
+  let capture: ReturnType<typeof installProcessMessageCapture>;
 
   afterEach(() => {
     sendMock?.restore();
+    capture?.restore();
+    resetAgentIpcStateForTests();
   });
 
   it("sends structured log IPC", () => {
@@ -528,6 +531,40 @@ describe("agentLog", () => {
       type: "log",
       level: "error",
       message: "failed",
+    });
+  });
+
+  it("includes explicit sessionId in log IPC", () => {
+    sendMock = installProcessSendMock();
+    agentLog("info", "hello", "session-a");
+    expect(sendMock.send).toHaveBeenCalledWith({
+      type: "log",
+      level: "info",
+      message: "hello",
+      sessionId: "session-a",
+    });
+  });
+
+  it("includes active session from handler context", async () => {
+    capture = installProcessMessageCapture();
+    sendMock = installProcessSendMock();
+    defineAgent({
+      onSpeechEvent: async () => {
+        agentLog("info", "inside handler");
+      },
+    });
+    capture.emit({
+      type: "speech_event",
+      sessionId: "session-b",
+      event: { type: "user_speech_final", text: "hi" },
+    });
+    await vi.waitFor(() => {
+      expect(sendMock.send).toHaveBeenCalledWith({
+        type: "log",
+        level: "info",
+        message: "inside handler",
+        sessionId: "session-b",
+      });
     });
   });
 });

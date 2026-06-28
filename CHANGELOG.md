@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-06-28
+
+### Added
+
+- **`agentLog` session context** — `sessionId` is now automatically attached to `AgentLogMessage` IPC; the runtime injects the active orchestrator session from handler context so `agentLog(level, message)` keeps its two-arg signature.
+
+### Changed
+
+- **Peer dependency** — `@node-webrtc-rust/sdk` `>=0.6.5` (aligns with latest SDK release).
+
 ## [0.1.13] - 2026-06-23
 
 ### Fixed

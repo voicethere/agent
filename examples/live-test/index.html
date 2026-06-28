@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VoiceThere agent live test</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        background: #070b12;
+        color: #e5e7eb;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 1.5rem;
+        max-width: 960px;
+      }
+      .panel {
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        background: rgba(15, 23, 42, 0.6);
+      }
+      label {
+        display: block;
+        margin: 0.5rem 0;
+        font-size: 0.92rem;
+      }
+      input,
+      button {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 0.2rem;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        border-radius: 8px;
+        padding: 0.55rem 0.7rem;
+        background: #0f172a;
+        color: #e5e7eb;
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+      }
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+      }
+      .chat-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.75rem;
+        margin: 0.65rem 0;
+      }
+      .chat-row button {
+        width: auto;
+        min-width: 140px;
+      }
+      details.settings {
+        margin-top: 0.8rem;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 10px;
+        padding: 0.2rem 0.75rem 0.75rem;
+        background: rgba(2, 6, 23, 0.4);
+      }
+      details.settings > summary {
+        cursor: pointer;
+        padding: 0.45rem 0;
+        color: #bfdbfe;
+      }
+      canvas {
+        width: 100%;
+        height: 120px;
+        border-radius: 8px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: #020617;
+      }
+      #log {
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.82rem;
+        max-height: 240px;
+        overflow: auto;
+      }
+      .status {
+        margin-top: 0.6rem;
+        color: #93c5fd;
+      }
+      .err {
+        color: #fda4af;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>VoiceThere agent live test</h1>
+    <p>Connect to your running agent session and inspect mic/incoming audio in real time.</p>
+
+    <section class="panel">
+      <div class="actions">
+        <button id="connect-btn">Connect</button>
+        <button id="disconnect-btn" disabled>Disconnect</button>
+      </div>
+      <div id="status" class="status"></div>
+      <details class="settings">
+        <summary>Connection settings</summary>
+        <label>
+          Signaling URL
+          <input id="signaling-url" value="ws://127.0.0.1:8080/ws" />
+        </label>
+        <label>
+          Session ID
+          <input id="session-id" value="local-dev" />
+        </label>
+        <label>
+          Room ID
+          <input id="room-id" value="local-dev" />
+        </label>
+        <label>
+          Join token
+          <input id="join-token" value="local-dev" />
+        </label>
+      </details>
+      <h3>Log</h3>
+      <div id="log"></div>
+      <div class="chat-row">
+        <input id="chat-input" placeholder="Type a chat payload (type=chat) to test echo..." />
+        <button id="chat-send-btn" disabled>Send chat</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Mic visualizer (local)</h3>
+      <canvas id="mic-canvas" width="920" height="120"></canvas>
+    </section>
+
+    <section class="panel">
+      <h3>Incoming visualizer (remote)</h3>
+      <canvas id="incoming-canvas" width="920" height="120"></canvas>
+      <audio id="incoming-audio" autoplay playsinline controls style="margin-top: 0.7rem; width: 100%"></audio>
+    </section>
+
+    <script type="module">
+      import {
+        attachAudioVisualizer,
+        connectBrowserVoiceSession,
+      } from "https://esm.sh/@voicethere/client@0.6.1/browser";
+
+      const signalingUrlEl = document.getElementById("signaling-url");
+      const sessionIdEl = document.getElementById("session-id");
+      const roomIdEl = document.getElementById("room-id");
+      const joinTokenEl = document.getElementById("join-token");
+      const connectBtn = document.getElementById("connect-btn");
+      const disconnectBtn = document.getElementById("disconnect-btn");
+      const statusEl = document.getElementById("status");
+      const logEl = document.getElementById("log");
+      const chatInput = document.getElementById("chat-input");
+      const chatSendBtn = document.getElementById("chat-send-btn");
+      const micCanvas = document.getElementById("mic-canvas");
+      const incomingCanvas = document.getElementById("incoming-canvas");
+      const incomingAudio = document.getElementById("incoming-audio");
+
+      let session = null;
+      let micVisualizer = null;
+      let incomingVisualizer = null;
+      let incomingResumeHandler = null;
+      let incomingAttachRetryA = null;
+      let incomingAttachRetryB = null;
+
+      function log(message) {
+        const stamp = new Date().toLocaleTimeString();
+        logEl.textContent += `${logEl.textContent ? "\n" : ""}[${stamp}] ${message}`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function setStatus(text, isError = false) {
+        statusEl.textContent = text;
+        statusEl.className = isError ? "status err" : "status";
+      }
+
+      function stopVisualizers() {
+        if (incomingAttachRetryA) {
+          clearTimeout(incomingAttachRetryA);
+          incomingAttachRetryA = null;
+        }
+        if (incomingAttachRetryB) {
+          clearTimeout(incomingAttachRetryB);
+          incomingAttachRetryB = null;
+        }
+        if (incomingResumeHandler) {
+          incomingAudio.removeEventListener("playing", incomingResumeHandler);
+          incomingResumeHandler = null;
+        }
+        micVisualizer?.stop();
+        incomingVisualizer?.stop();
+        micVisualizer = null;
+        incomingVisualizer = null;
+      }
+
+      function attachIncomingVisualizer(track) {
+        incomingVisualizer?.stop();
+        const sourceStream = incomingAudio.srcObject instanceof MediaStream
+          ? incomingAudio.srcObject
+          : null;
+        const stream = sourceStream?.getAudioTracks().length
+          ? sourceStream
+          : new MediaStream([track]);
+        try {
+          incomingVisualizer = attachAudioVisualizer({
+            canvas: incomingCanvas,
+            mediaStream: stream,
+            waveColor: "#34d399",
+            barColor: "#22d3ee",
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          log(`incoming visualizer stream-source failed, falling back to audio element: ${message}`);
+          incomingVisualizer = attachAudioVisualizer({
+            canvas: incomingCanvas,
+            audioElement: incomingAudio,
+            waveColor: "#34d399",
+            barColor: "#22d3ee",
+          });
+        }
+
+        incomingVisualizer.resume();
+        incomingResumeHandler = () => incomingVisualizer?.resume();
+        incomingAudio.addEventListener("playing", incomingResumeHandler);
+        track.addEventListener("unmute", incomingResumeHandler);
+      }
+
+      function parseWsOriginAsHttp(wsUrl) {
+        const url = new URL(wsUrl);
+        url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+        url.pathname = "/";
+        url.search = "";
+        url.hash = "";
+        return url.toString().replace(/\/$/, "");
+      }
+
+      function cleanupSession() {
+        stopVisualizers();
+        if (incomingAudio.srcObject instanceof MediaStream) {
+          for (const track of incomingAudio.srcObject.getTracks()) {
+            track.stop();
+          }
+        }
+        incomingAudio.srcObject = null;
+        session = null;
+        disconnectBtn.disabled = true;
+        chatSendBtn.disabled = true;
+      }
+
+      function sendChat() {
+        if (!session) return;
+        const text = String(chatInput.value || "").trim();
+        if (!text) return;
+        try {
+          session.sendChat(text);
+          log(`chat->agent ${JSON.stringify({ type: "chat", text })}`);
+          chatInput.value = "";
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          log(`chat send failed: ${message}`);
+          setStatus(message, true);
+        }
+      }
+
+      async function connect() {
+        if (session) {
+          session.disconnect();
+          cleanupSession();
+        }
+
+        connectBtn.disabled = true;
+        setStatus("Connecting...");
+        try {
+          const credentials = {
+            session_id: String(sessionIdEl.value || "").trim(),
+            room_id: String(roomIdEl.value || "").trim(),
+            join_token: String(joinTokenEl.value || "").trim(),
+            signaling_url: String(signalingUrlEl.value || "").trim(),
+            ice_servers: [],
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          };
+
+          if (!credentials.signaling_url || !credentials.session_id || !credentials.room_id) {
+            throw new Error("Signaling URL, session ID, and room ID are required");
+          }
+
+          const signalingHttp = parseWsOriginAsHttp(credentials.signaling_url);
+          const bootstrap = await fetch(`${signalingHttp}/api/rooms`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ room: credentials.room_id }),
+          });
+          if (!bootstrap.ok) {
+            throw new Error(`Failed to prepare room (${bootstrap.status})`);
+          }
+
+          session = await connectBrowserVoiceSession({
+            credentials,
+            requestMic: true,
+            audioElement: incomingAudio,
+            onDebugEvent: {
+              debug: (scope, event, detail) =>
+                log(`debug ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`),
+              info: (scope, event, detail) =>
+                log(`info ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`),
+              warn: (scope, event, detail) =>
+                log(`warn ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`),
+              error: (scope, event, detail) =>
+                log(`error ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`),
+            },
+            onAgentAudioTrack: (track) => {
+              attachIncomingVisualizer(track);
+              log("incoming audio track attached");
+            },
+            onControlMessage: (payload) => {
+              if (payload.type === "chat_echo" && typeof payload.text === "string") {
+                log(`agent->chat_echo "${payload.text}"`);
+                return;
+              }
+              log(`control ${JSON.stringify(payload)}`);
+            },
+          });
+
+          await session.waitForConnected(15000);
+
+          const micStream = session.getMicStream();
+          if (micStream) {
+            micVisualizer = attachAudioVisualizer({
+              canvas: micCanvas,
+              mediaStream: micStream,
+              waveColor: "#38bdf8",
+              barColor: "#818cf8",
+            });
+          }
+
+          setStatus(`Connected (${session.peerId})`);
+          disconnectBtn.disabled = false;
+          chatSendBtn.disabled = false;
+          log(`connected peer=${session.peerId}`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          setStatus(message, true);
+          log(`connect failed: ${message}`);
+          cleanupSession();
+        } finally {
+          connectBtn.disabled = false;
+        }
+      }
+
+      connectBtn.addEventListener("click", () => {
+        void connect();
+      });
+
+      disconnectBtn.addEventListener("click", () => {
+        if (session) {
+          session.disconnect();
+          log("disconnected");
+        }
+        cleanupSession();
+        setStatus("Disconnected");
+      });
+
+      chatSendBtn.addEventListener("click", () => {
+        sendChat();
+      });
+
+      chatInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          sendChat();
+        }
+      });
+    </script>
+  </body>
+</html>

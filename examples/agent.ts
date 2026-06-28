@@ -7,7 +7,13 @@
  */
 
 import type { SpeechEvent } from "../src/protocol.js";
-import { agentLog, defineAgent, speak } from "../src/runtime.js";
+import {
+  agentLog,
+  defineAgent,
+  parseChatText,
+  sendToClient,
+  speak,
+} from "../src/runtime.js";
 
 interface PeerState {
   userSpeaking: boolean;
@@ -112,6 +118,14 @@ defineAgent({
 
   onUserSpeechFinal({ sessionId, text }) {
     speak(sessionId, `You said: ${text}`);
+  },
+
+  onDataChannelMessage({ sessionId, message }) {
+    const text = parseChatText(message);
+    if (!text) return;
+    agentLog("info", `[${sessionId}] chat_received "${text}"`);
+    speak(sessionId, `You wrote: ${text}`);
+    sendToClient(sessionId, { type: "chat_echo", text });
   },
 
   onSessionEnd({ sessionId }) {

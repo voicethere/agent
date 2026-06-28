@@ -10,6 +10,7 @@
  */
 
 import type { SpeechEvent } from "@node-webrtc-rust/sdk/voice";
+export type { SpeechEvent } from "@node-webrtc-rust/sdk/voice";
 
 /**
  * Messages the trusted runner parent may send to the sandboxed customer child.

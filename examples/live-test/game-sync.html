@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VoiceThere game-sync live test</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        background: #05070e;
+        color: #e5e7eb;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 1rem;
+      }
+      .panel {
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 12px;
+        padding: 0.9rem;
+        margin-bottom: 0.8rem;
+        background: rgba(15, 23, 42, 0.55);
+      }
+      .row {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.7rem;
+      }
+      label {
+        display: block;
+        font-size: 0.86rem;
+      }
+      input,
+      button {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 0.25rem;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        border-radius: 8px;
+        padding: 0.5rem 0.65rem;
+        background: #0f172a;
+        color: #e5e7eb;
+      }
+      .actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.7rem;
+        margin-top: 0.7rem;
+      }
+      #status {
+        margin-top: 0.7rem;
+        color: #93c5fd;
+      }
+      #status.err {
+        color: #fda4af;
+      }
+      #board {
+        width: 100%;
+        height: auto;
+        max-height: 72vh;
+        border-radius: 10px;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        background: #020617;
+      }
+      #log {
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.8rem;
+        max-height: 180px;
+        overflow: auto;
+      }
+      #chat-log {
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.82rem;
+        max-height: 180px;
+        overflow: auto;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 8px;
+        padding: 0.6rem;
+        background: #020617;
+      }
+      .chat-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.6rem;
+        margin-top: 0.6rem;
+      }
+      .chat-row button {
+        width: auto;
+        min-width: 130px;
+      }
+      .meta {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.7rem;
+        margin-top: 0.6rem;
+        font-size: 0.84rem;
+        color: #cbd5e1;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Game sync live test</h1>
+    <p>Tests <code>templates/game-sync.ts</code> register + binary world sync flow.</p>
+
+    <section class="panel">
+      <div class="row">
+        <label>
+          Signaling URL
+          <input id="signaling-url" value="ws://127.0.0.1:8080/ws" />
+        </label>
+        <label>
+          Session ID
+          <input id="session-id" value="game-live" />
+        </label>
+        <label>
+          Room ID
+          <input id="room-id" value="game-live" />
+        </label>
+        <label>
+          Join token
+          <input id="join-token" value="game-live" />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="connect-btn">Connect</button>
+        <button id="disconnect-btn" disabled>Disconnect</button>
+        <button id="add-object-btn" disabled>Add new object</button>
+      </div>
+      <div id="status"></div>
+      <div class="meta">
+        <div id="meta-peer">Peer: -</div>
+        <div id="meta-owned">Owned objects: 0</div>
+        <div id="meta-total">Tracked objects: 0</div>
+        <div id="meta-sync-rate">Server sync avg/s: 0.0 (last 0)</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Chat</h3>
+      <div id="chat-log"></div>
+      <div class="chat-row">
+        <input id="chat-input" placeholder="Write message to all connected clients..." />
+        <button id="chat-send-btn" disabled>Send</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <canvas id="board" width="1280" height="720"></canvas>
+    </section>
+
+    <section class="panel">
+      <h3>Log</h3>
+      <div id="log"></div>
+    </section>
+
+    <script type="module">
+      import { connectDataSession } from "https://esm.sh/@voicethere/client@0.6.1/browser";
+
+      const STRIDE = 9;
+      const FPS = 60;
+      const TICK_MS = Math.floor(1000 / FPS);
+      const OBJECT_RADIUS = 25;
+
+      const signalingUrlEl = document.getElementById("signaling-url");
+      const sessionIdEl = document.getElementById("session-id");
+      const roomIdEl = document.getElementById("room-id");
+      const joinTokenEl = document.getElementById("join-token");
+      const connectBtn = document.getElementById("connect-btn");
+      const disconnectBtn = document.getElementById("disconnect-btn");
+      const addObjectBtn = document.getElementById("add-object-btn");
+      const chatSendBtn = document.getElementById("chat-send-btn");
+      const statusEl = document.getElementById("status");
+      const logEl = document.getElementById("log");
+      const chatLogEl = document.getElementById("chat-log");
+      const chatInputEl = document.getElementById("chat-input");
+      const board = document.getElementById("board");
+      const ctx = board.getContext("2d");
+
+      const metaPeer = document.getElementById("meta-peer");
+      const metaOwned = document.getElementById("meta-owned");
+      const metaTotal = document.getElementById("meta-total");
+      const metaSyncRate = document.getElementById("meta-sync-rate");
+
+      let session = null;
+      let tickTimer = null;
+      let metricsTimer = null;
+      let serverSyncTotal = 0;
+      let serverSyncWindow = 0;
+      let connectedAtMs = 0;
+
+      const ownerByObjectId = new Map();
+      const ownedObjectIds = new Set();
+      const objects = new Map();
+      const colorByOwner = new Map();
+      const hueByOwner = new Map();
+
+      function log(message) {
+        const stamp = new Date().toLocaleTimeString();
+        logEl.textContent += `${logEl.textContent ? "\n" : ""}[${stamp}] ${message}`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function setStatus(text, isError = false) {
+        statusEl.textContent = text;
+        statusEl.className = isError ? "err" : "";
+      }
+
+      function chatLog(message) {
+        const stamp = new Date().toLocaleTimeString();
+        chatLogEl.textContent += `${chatLogEl.textContent ? "\n" : ""}[${stamp}] ${message}`;
+        chatLogEl.scrollTop = chatLogEl.scrollHeight;
+      }
+
+      function rand(min, max) {
+        return min + Math.random() * (max - min);
+      }
+
+      function randomVelocity(minAbs = 90, maxAbs = 180) {
+        const speed = rand(minAbs, maxAbs);
+        return (Math.random() < 0.5 ? -1 : 1) * speed;
+      }
+
+      function hashString(value) {
+        let hash = 2166136261;
+        for (let i = 0; i < value.length; i += 1) {
+          hash ^= value.charCodeAt(i);
+          hash = Math.imul(hash, 16777619);
+        }
+        return hash >>> 0;
+      }
+
+      function hueDistance(a, b) {
+        const d = Math.abs(a - b) % 360;
+        return Math.min(d, 360 - d);
+      }
+
+      function pickDistinctHue(ownerSessionId) {
+        const existing = [...hueByOwner.values()];
+        if (existing.length === 0) {
+          return hashString(ownerSessionId) % 360;
+        }
+
+        const seed = hashString(ownerSessionId) % 360;
+        let bestHue = seed;
+        let bestScore = -1;
+        for (let i = 0; i < 24; i += 1) {
+          const candidate = (seed + i * 137.508) % 360;
+          let minDist = 360;
+          for (const used of existing) {
+            minDist = Math.min(minDist, hueDistance(candidate, used));
+          }
+          if (minDist > bestScore) {
+            bestScore = minDist;
+            bestHue = candidate;
+          }
+        }
+        return bestHue;
+      }
+
+      function ownerColor(ownerSessionId) {
+        let color = colorByOwner.get(ownerSessionId);
+        if (color) return color;
+        const hue = Math.round(pickDistinctHue(ownerSessionId));
+        color = `hsl(${hue} 78% 60%)`;
+        colorByOwner.set(ownerSessionId, color);
+        hueByOwner.set(ownerSessionId, hue);
+        return color;
+      }
+
+      function ensureObject(objectId) {
+        let obj = objects.get(objectId);
+        if (obj) return obj;
+        obj = {
+          x: rand(20, board.width - 20),
+          y: rand(20, board.height - 20),
+          vx: randomVelocity(),
+          vy: randomVelocity(),
+        };
+        objects.set(objectId, obj);
+        return obj;
+      }
+
+      function removeObject(objectId) {
+        objects.delete(objectId);
+        ownerByObjectId.delete(objectId);
+        ownedObjectIds.delete(objectId);
+      }
+
+      function refreshMeta() {
+        metaPeer.textContent = `Peer: ${session?.peerId ?? "-"}`;
+        metaOwned.textContent = `Owned objects: ${ownedObjectIds.size}`;
+        metaTotal.textContent = `Tracked objects: ${ownerByObjectId.size}`;
+      }
+
+      function updateSyncRateMeta() {
+        const elapsedSec = connectedAtMs > 0 ? Math.max(1e-6, (Date.now() - connectedAtMs) / 1000) : 0;
+        const avgPerSec = elapsedSec > 0 ? serverSyncTotal / elapsedSec : 0;
+        metaSyncRate.textContent = `Server sync avg/s: ${avgPerSec.toFixed(1)} (last ${serverSyncWindow})`;
+      }
+
+      function startMetricsLoop() {
+        stopMetricsLoop();
+        connectedAtMs = Date.now();
+        metricsTimer = setInterval(() => {
+          updateSyncRateMeta();
+          serverSyncWindow = 0;
+        }, 1000);
+      }
+
+      function stopMetricsLoop() {
+        if (metricsTimer) {
+          clearInterval(metricsTimer);
+          metricsTimer = null;
+        }
+      }
+
+      function draw() {
+        if (!ctx) return;
+        ctx.clearRect(0, 0, board.width, board.height);
+        ctx.fillStyle = "#071022";
+        ctx.fillRect(0, 0, board.width, board.height);
+
+        for (const [objectId, owner] of ownerByObjectId) {
+          const obj = objects.get(objectId);
+          if (!obj) continue;
+          const color = ownerColor(owner);
+
+          ctx.beginPath();
+          ctx.arc(obj.x, obj.y, OBJECT_RADIUS, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+
+          ctx.fillStyle = "#e2e8f0";
+          ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+          ctx.fillText(`#${objectId} ${owner.slice(0, 7)}`, obj.x + 14, obj.y + 4);
+        }
+      }
+
+      function isDcBinaryEvent(scope, event) {
+        return scope === "dc" && typeof event === "string" && event.toLowerCase().includes("binary");
+      }
+
+      function parseWorldSync(data) {
+        const values = new Float32Array(data);
+        if (values.length % STRIDE !== 0) return;
+        serverSyncTotal += 1;
+        serverSyncWindow += 1;
+
+        for (let i = 0; i < values.length; i += STRIDE) {
+          const objectId = Math.trunc(values[i] ?? 0);
+          if (objectId <= 0) continue;
+          const obj = ensureObject(objectId);
+          obj.x = values[i + 1] ?? obj.x;
+          obj.y = values[i + 2] ?? obj.y;
+          obj.vx = values[i + 5] ?? obj.vx;
+          obj.vy = values[i + 6] ?? obj.vy;
+        }
+      }
+
+      function handleControlMessage(payload) {
+        log(`control ${JSON.stringify(payload)}`);
+        if (payload.type === "register_ack" && typeof payload.objectId === "number") {
+          const objectId = payload.objectId;
+          ownerByObjectId.set(objectId, session.peerId);
+          ownedObjectIds.add(objectId);
+          ensureObject(objectId);
+          refreshMeta();
+          log(`register_ack object=${objectId}`);
+          return;
+        }
+
+        if (
+          payload.type === "world_snapshot" &&
+          Array.isArray(payload.objects)
+        ) {
+          ownerByObjectId.clear();
+          ownedObjectIds.clear();
+          for (const item of payload.objects) {
+            if (!item || typeof item !== "object") continue;
+            const objectId = Number(item.objectId);
+            const ownerSessionId = String(item.ownerSessionId ?? "");
+            if (!Number.isFinite(objectId) || objectId <= 0 || !ownerSessionId) continue;
+            ownerByObjectId.set(objectId, ownerSessionId);
+            if (ownerSessionId === session.peerId) ownedObjectIds.add(objectId);
+            ensureObject(objectId);
+          }
+          refreshMeta();
+          log(`snapshot objects=${ownerByObjectId.size}`);
+          return;
+        }
+
+        if (
+          payload.type === "object_registered" &&
+          typeof payload.objectId === "number" &&
+          typeof payload.ownerSessionId === "string"
+        ) {
+          ownerByObjectId.set(payload.objectId, payload.ownerSessionId);
+          ensureObject(payload.objectId);
+          refreshMeta();
+          log(`object_registered object=${payload.objectId} owner=${payload.ownerSessionId}`);
+          return;
+        }
+
+        if (
+          payload.type === "object_released" &&
+          typeof payload.objectId === "number"
+        ) {
+          removeObject(payload.objectId);
+          refreshMeta();
+          log(`object_released object=${payload.objectId}`);
+          return;
+        }
+
+        if (
+          payload.type === "chat_broadcast" &&
+          typeof payload.senderSessionId === "string" &&
+          typeof payload.text === "string"
+        ) {
+          chatLog(`${payload.senderSessionId}: ${payload.text}`);
+          return;
+        }
+      }
+
+      function stopTickLoop() {
+        if (tickTimer) {
+          clearInterval(tickTimer);
+          tickTimer = null;
+        }
+      }
+
+      function requestRegisterWithRetry(maxAttempts = 30, delayMs = 100) {
+        if (!session) return;
+        let attempt = 0;
+
+        const trySend = () => {
+          if (!session) return;
+          attempt += 1;
+          try {
+            session.sendToAgent({ type: "register" });
+            log(`register request sent (attempt ${attempt})`);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (
+              message.includes("voice-control data channel is not open") &&
+              attempt < maxAttempts
+            ) {
+              setTimeout(trySend, delayMs);
+              return;
+            }
+            log(`register request failed: ${message}`);
+          }
+        };
+
+        trySend();
+      }
+
+      function startTickLoop() {
+        stopTickLoop();
+        tickTimer = setInterval(() => {
+          draw();
+        }, TICK_MS);
+      }
+
+      function parseWsOriginAsHttp(wsUrl) {
+        const url = new URL(wsUrl);
+        url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+        url.pathname = "/";
+        url.search = "";
+        url.hash = "";
+        return url.toString().replace(/\/$/, "");
+      }
+
+      async function bootstrapRoom(credentials) {
+        const origin = parseWsOriginAsHttp(credentials.signaling_url);
+        const response = await fetch(`${origin}/api/rooms`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ room: credentials.room_id }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to prepare room (${response.status})`);
+        }
+      }
+
+      function cleanupConnection() {
+        stopTickLoop();
+        stopMetricsLoop();
+        session?.disconnect();
+        session = null;
+        serverSyncTotal = 0;
+        serverSyncWindow = 0;
+        connectedAtMs = 0;
+        metaSyncRate.textContent = "Server sync avg/s: 0.0 (last 0)";
+        connectBtn.disabled = false;
+        disconnectBtn.disabled = true;
+        addObjectBtn.disabled = true;
+        chatSendBtn.disabled = true;
+        ownerByObjectId.clear();
+        ownedObjectIds.clear();
+        objects.clear();
+        colorByOwner.clear();
+        hueByOwner.clear();
+        refreshMeta();
+        draw();
+      }
+
+      async function connect() {
+        cleanupConnection();
+        connectBtn.disabled = true;
+        setStatus("Connecting...");
+
+        try {
+          const credentials = {
+            session_id: String(sessionIdEl.value || "").trim(),
+            room_id: String(roomIdEl.value || "").trim(),
+            join_token: String(joinTokenEl.value || "").trim(),
+            signaling_url: String(signalingUrlEl.value || "").trim(),
+            ice_servers: [],
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          };
+          if (!credentials.signaling_url || !credentials.room_id || !credentials.session_id) {
+            throw new Error("Signaling URL, session ID and room ID are required");
+          }
+
+          await bootstrapRoom(credentials);
+
+          session = await connectDataSession({
+            credentials,
+            onControlMessage: handleControlMessage,
+            onSyncBinaryMessage: parseWorldSync,
+            onDebugEvent: {
+              debug: (scope, event, detail) => {
+                if (isDcBinaryEvent(scope, event)) return;
+                log(`debug ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`);
+              },
+              info: (scope, event, detail) => {
+                if (isDcBinaryEvent(scope, event)) return;
+                log(`info ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`);
+              },
+              warn: (scope, event, detail) => {
+                if (isDcBinaryEvent(scope, event)) return;
+                log(`warn ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`);
+              },
+              error: (scope, event, detail) => {
+                if (isDcBinaryEvent(scope, event)) return;
+                log(`error ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`);
+              },
+            },
+          });
+
+          await session.waitForConnected(15000);
+          setStatus(`Connected (${session.peerId})`);
+          connectBtn.disabled = true;
+          disconnectBtn.disabled = false;
+          addObjectBtn.disabled = false;
+          chatSendBtn.disabled = false;
+          refreshMeta();
+          startTickLoop();
+          startMetricsLoop();
+
+          // Each client starts with one owned object.
+          requestRegisterWithRetry();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          setStatus(message, true);
+          log(`connect failed: ${message}`);
+          cleanupConnection();
+        }
+      }
+
+      connectBtn.addEventListener("click", () => {
+        void connect();
+      });
+
+      disconnectBtn.addEventListener("click", () => {
+        cleanupConnection();
+        setStatus("Disconnected");
+      });
+
+      addObjectBtn.addEventListener("click", () => {
+        if (!session) return;
+        requestRegisterWithRetry();
+      });
+
+      function sendChat() {
+        if (!session) return;
+        const text = String(chatInputEl.value || "").trim();
+        if (!text) return;
+        try {
+          session.sendChat(text);
+          chatLog(`me: ${text}`);
+          chatInputEl.value = "";
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          chatLog(`send failed: ${message}`);
+        }
+      }
+
+      chatSendBtn.addEventListener("click", () => {
+        sendChat();
+      });
+
+      chatInputEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          sendChat();
+        }
+      });
+
+      draw();
+    </script>
+  </body>
+</html>

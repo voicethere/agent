@@ -316,6 +316,30 @@ export function sendBinaryToClient(
   });
 }
 
+/**
+ * Broadcasts binary data to specified clients over a specific data channel.
+ *
+ * @param data The binary data to be sent, either as a Buffer or Uint8Array.
+ * @param sessionIds An array of session IDs representing the target clients.
+ * @param channel The data channel over which the binary data is sent. Defaults to "sync".
+ * @return void
+ */
+export function broadCastBinaryToClients(
+  data: Buffer | Uint8Array,
+  sessionIds: readonly string[],
+  channel: DataChannelKind = "sync",
+): void {
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  for (const sessionId of sessionIds) {
+    process.send?.({
+      type: "send_binary_to_client",
+      sessionId,
+      data: buffer,
+      channel,
+    });
+  }
+}
+
 /** Send the same JSON payload to one or more browser peers. */
 export function broadcastToClients(
   payload: unknown,

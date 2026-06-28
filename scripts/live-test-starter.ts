@@ -15,6 +15,7 @@ const AGENT_ROOT = resolve(__dirname, "..");
 const DEFAULT_BUNDLE_PATH = join(AGENT_ROOT, "dist/agent.js");
 const PORT = Number(process.env.LIVE_TEST_STARTER_PORT ?? process.env.PORT ?? 8080);
 const SIGNALING_PATH = "/ws";
+const PAGE_PATH = process.env.LIVE_TEST_PAGE_PATH?.trim() || "/examples/live-test/index.html";
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 
 const MIME_TYPES: Record<string, string> = {
@@ -26,16 +27,33 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 interface LiveSession {
-  sessionId: string;
-  peerId: string;
+  roomId: string;
   child: SandboxedChild;
-  pendingStartAck: boolean;
-  buffered: ParentToChildMessage[];
-  ctx: VoiceSessionContext;
+  peers: Set<string>;
+  pendingStartAck: Set<string>;
+  bufferedBySession: Map<string, ParentToChildMessage[]>;
 }
 
-const liveSessions = new Map<string, LiveSession>();
-const peerToSession = new Map<string, string>();
+const liveRooms = new Map<string, LiveSession>();
+const sessionContexts = new Map<string, VoiceSessionContext>();
+const sessionToRoom = new Map<string, string>();
+
+function coerceBinaryPayload(value: unknown): Buffer | Uint8Array | null {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  if (ArrayBuffer.isView(value)) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (typeof value === "object") {
+    const maybeBufferLike = value as { type?: unknown; data?: unknown };
+    if (maybeBufferLike.type === "Buffer" && Array.isArray(maybeBufferLike.data)) {
+      return Buffer.from(maybeBufferLike.data);
+    }
+  }
+  return null;
+}
 
 function cors(res: ServerResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -44,7 +62,19 @@ function cors(res: ServerResponse): void {
 }
 
 function normalizeSessionId(ctx: VoiceSessionContext): string {
-  return ctx.roomId?.trim() || ctx.peerId;
+  return ctx.peerId;
+}
+
+function resolveRoomId(ctx: VoiceSessionContext, podRef: { current?: SessionPod }): string {
+  const roomFromContext = ctx.roomId?.trim();
+  if (roomFromContext) return roomFromContext;
+
+  const sessions = podRef.current?.listSessions() ?? [];
+  if (sessions.length === 1) {
+    return sessions[0]?.sessionId ?? ctx.peerId;
+  }
+
+  return ctx.peerId;
 }
 
 function resolveVoiceConfig(): { config: VoiceAgentConfig; label: string } {
@@ -89,61 +119,92 @@ function resolveVoiceConfig(): { config: VoiceAgentConfig; label: string } {
   };
 }
 
-function sendToChild(session: LiveSession, message: ParentToChildMessage): void {
+function sendToChild(session: LiveSession, sessionId: string, message: ParentToChildMessage): void {
   if (
-    session.pendingStartAck &&
+    session.pendingStartAck.has(sessionId) &&
     (message.type === "speech_event" ||
       message.type === "data_channel_message" ||
       message.type === "data_channel_binary" ||
       message.type === "idle_timeout")
   ) {
-    session.buffered.push(message);
+    const queue = session.bufferedBySession.get(sessionId) ?? [];
+    queue.push(message);
+    session.bufferedBySession.set(sessionId, queue);
     return;
   }
   session.child.send(message);
 }
 
 function closeSession(sessionId: string): void {
-  const session = liveSessions.get(sessionId);
+  const roomId = sessionToRoom.get(sessionId);
+  if (!roomId) return;
+  const session = liveRooms.get(roomId);
   if (!session) return;
   try {
     session.child.send({ type: "session_end", sessionId });
   } catch {
     // no-op
   }
-  session.child.kill("SIGTERM");
-  liveSessions.delete(sessionId);
-  peerToSession.delete(session.peerId);
+  session.peers.delete(sessionId);
+  session.pendingStartAck.delete(sessionId);
+  session.bufferedBySession.delete(sessionId);
+  sessionContexts.delete(sessionId);
+  sessionToRoom.delete(sessionId);
+
+  if (session.peers.size === 0) {
+    session.child.kill("SIGTERM");
+    liveRooms.delete(roomId);
+  }
 }
 
-function mapChildMessageToSession(sessionId: string, message: ChildToParentMessage, pod: SessionPod): void {
-  const session = liveSessions.get(sessionId);
+function mapChildMessageToSession(roomId: string, message: ChildToParentMessage, pod: SessionPod): void {
+  const session = liveRooms.get(roomId);
   if (!session) return;
+
+  const targetSessionId = "sessionId" in message ? message.sessionId : undefined;
+  const targetCtx = targetSessionId ? sessionContexts.get(targetSessionId) : undefined;
 
   switch (message.type) {
     case "session_start_ack":
-      session.pendingStartAck = false;
-      for (const buffered of session.buffered.splice(0)) {
+      session.pendingStartAck.delete(message.sessionId);
+      for (const buffered of session.bufferedBySession.get(message.sessionId) ?? []) {
         session.child.send(buffered);
       }
+      session.bufferedBySession.delete(message.sessionId);
       return;
     case "log":
-      console.log(`[child:${sessionId}] ${message.level}: ${message.message}`);
+      console.log(`[child:${roomId}] ${message.level}: ${message.message}`);
       return;
     case "agent_error":
-      console.error(`[child:${sessionId}] agent_error: ${message.message}`);
+      console.error(`[child:${roomId}] agent_error: ${message.message}`);
       return;
     case "speak":
-      void session.ctx.speak(message.text, { nonBlocking: true });
+      if (!targetCtx) return;
+      void targetCtx.speak(message.text, { nonBlocking: true });
       return;
     case "send_to_client":
-      session.ctx.sendToClient(message.payload);
+      if (!targetCtx) return;
+      targetCtx.sendToClient(message.payload);
       return;
     case "send_binary_to_client":
-      session.ctx.sendBinaryToClient(message.data, message.channel);
+      if (!targetCtx) return;
+      {
+        const rawPayload =
+          (message as { data?: unknown; payload?: unknown }).data ??
+          (message as { data?: unknown; payload?: unknown }).payload;
+        const payload = coerceBinaryPayload(rawPayload);
+        if (!payload) {
+          console.error(
+            `[child:${roomId}] invalid send_binary_to_client payload for session ${targetSessionId ?? "unknown"}`,
+          );
+          return;
+        }
+        targetCtx.sendBinaryToClient(payload, message.channel);
+      }
       return;
     case "disconnect_client":
-      pod.disconnectPeer(sessionId, session.peerId, message.reason);
+      if (!targetSessionId || !targetCtx) return;
+      pod.disconnectPeer(targetSessionId, targetCtx.peerId, message.reason);
       return;
     case "idle_timeout_done":
       return;
@@ -156,45 +217,56 @@ function createVoiceHandler(bundlePath: string, podRef: { current?: SessionPod }
   return {
     onPeerConnected(ctx) {
       const sessionId = normalizeSessionId(ctx);
-      const existing = liveSessions.get(sessionId);
-      if (existing && existing.peerId !== ctx.peerId) {
+      const roomId = resolveRoomId(ctx, podRef);
+
+      if (sessionContexts.has(sessionId)) {
         closeSession(sessionId);
       }
 
-      if (liveSessions.has(sessionId)) return;
+      let live = liveRooms.get(roomId);
+      if (!live) {
+        const child = startSandboxedChild({
+          sessionId: roomId,
+          bundlePath,
+          onStderr(message, childPid) {
+            console.error(`[child:${childPid}] ${message}`);
+          },
+        });
 
-      const child = startSandboxedChild({
-        sessionId,
-        bundlePath,
-        onStderr(message, childPid) {
-          console.error(`[child:${childPid}] ${message}`);
-        },
-      });
+        live = {
+          roomId,
+          child,
+          peers: new Set<string>(),
+          pendingStartAck: new Set<string>(),
+          bufferedBySession: new Map<string, ParentToChildMessage[]>(),
+        };
+        liveRooms.set(roomId, live);
 
-      const live: LiveSession = {
-        sessionId,
-        peerId: ctx.peerId,
-        child,
-        pendingStartAck: true,
-        buffered: [],
-        ctx,
-      };
-      liveSessions.set(sessionId, live);
-      peerToSession.set(ctx.peerId, sessionId);
+        child.onMessage((message) => {
+          mapChildMessageToSession(roomId, message as ChildToParentMessage, podRef.current!);
+        });
+        child.onExit((code, signal) => {
+          console.error(`[child:${roomId}] exited code=${String(code)} signal=${String(signal)}`);
+          for (const peerSessionId of [...live!.peers]) {
+            sessionContexts.delete(peerSessionId);
+            sessionToRoom.delete(peerSessionId);
+          }
+          liveRooms.delete(roomId);
+        });
+      }
 
-      child.onMessage((message) => {
-        mapChildMessageToSession(sessionId, message as ChildToParentMessage, podRef.current!);
-      });
-      child.onExit((code, signal) => {
-        console.error(`[child:${sessionId}] exited code=${String(code)} signal=${String(signal)}`);
-        closeSession(sessionId);
-      });
+      live.peers.add(sessionId);
+      live.pendingStartAck.add(sessionId);
+      live.bufferedBySession.set(sessionId, []);
+      sessionContexts.set(sessionId, ctx);
+      sessionToRoom.set(sessionId, roomId);
 
-      sendToChild(live, {
+      sendToChild(live, sessionId, {
         type: "session_start",
         sessionId,
         env: {
           SESSION_ID: sessionId,
+          ROOM_ID: roomId,
           PEER_ID: ctx.peerId,
           ...(process.env.PROJECT_ID ? { PROJECT_ID: process.env.PROJECT_ID } : {}),
           ...(process.env.BUILD_ID ? { BUILD_ID: process.env.BUILD_ID } : {}),
@@ -202,25 +274,34 @@ function createVoiceHandler(bundlePath: string, podRef: { current?: SessionPod }
       });
     },
     onSpeechEvent(ctx, event: SpeechEvent) {
-      const session = liveSessions.get(normalizeSessionId(ctx));
+      const sessionId = normalizeSessionId(ctx);
+      const roomId = sessionToRoom.get(sessionId);
+      if (!roomId) return;
+      const session = liveRooms.get(roomId);
       if (!session) return;
-      sendToChild(session, { type: "speech_event", sessionId: session.sessionId, event });
+      sendToChild(session, sessionId, { type: "speech_event", sessionId, event });
     },
     onDataChannelMessage(ctx, payload) {
-      const session = liveSessions.get(normalizeSessionId(ctx));
+      const sessionId = normalizeSessionId(ctx);
+      const roomId = sessionToRoom.get(sessionId);
+      if (!roomId) return;
+      const session = liveRooms.get(roomId);
       if (!session) return;
-      sendToChild(session, {
+      sendToChild(session, sessionId, {
         type: "data_channel_message",
-        sessionId: session.sessionId,
+        sessionId,
         payload,
       });
     },
     onDataChannelBinary(ctx, data, channel) {
-      const session = liveSessions.get(normalizeSessionId(ctx));
+      const sessionId = normalizeSessionId(ctx);
+      const roomId = sessionToRoom.get(sessionId);
+      if (!roomId) return;
+      const session = liveRooms.get(roomId);
       if (!session) return;
-      sendToChild(session, {
+      sendToChild(session, sessionId, {
         type: "data_channel_binary",
-        sessionId: session.sessionId,
+        sessionId,
         data,
         channel,
       });
@@ -274,6 +355,7 @@ async function main(): Promise<void> {
     DEFAULT_BUNDLE_PATH,
   );
   const { config: voiceConfig, label: voiceLabel } = resolveVoiceConfig();
+  const sessionMode = process.env.LIVE_TEST_SESSION_MODE?.trim() === "data-only" ? "data-only" : "voice";
 
   const podRef: { current?: SessionPod } = {};
 
@@ -317,8 +399,8 @@ async function main(): Promise<void> {
   const pod = new SessionPod(signaling, {
     signalingUrl,
     iceServers: ICE_SERVERS,
+    sessionMode,
     voiceConfig,
-    sessionMode: "voice",
     syncChannel: { enabled: true },
     voiceHandler: createVoiceHandler(bundlePath, podRef),
   });
@@ -326,12 +408,15 @@ async function main(): Promise<void> {
 
   console.log(`[live-test] starter ready on :${PORT}`);
   console.log(`[live-test] signaling: ${signalingUrl}`);
-  console.log(`[live-test] voice config: ${voiceLabel}`);
+  console.log(`[live-test] session mode: ${sessionMode}`);
+  if (sessionMode === "voice") {
+    console.log(`[live-test] voice config: ${voiceLabel}`);
+  }
   console.log(`[live-test] bundle: ${bundlePath}`);
-  console.log(`[live-test] open: http://127.0.0.1:${PORT}/examples/live-test/index.html`);
+  console.log(`[live-test] open: http://127.0.0.1:${PORT}${PAGE_PATH}`);
 
   const shutdown = async () => {
-    for (const sessionId of [...liveSessions.keys()]) {
+    for (const sessionId of [...sessionContexts.keys()]) {
       closeSession(sessionId);
     }
     await pod.close();

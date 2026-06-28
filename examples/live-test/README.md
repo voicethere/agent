@@ -5,6 +5,7 @@ Manual voice test harness for local/dev sessions with dual visualizers:
 - **Mic visualizer** (local input)
 - **Incoming visualizer** (remote/agent audio)
 - **Data channel chat** send/echo (`{ type: "chat", text }`)
+- **Game sync canvas** (`game-sync.html`) for server-authoritative binary world sync + collisions
 
 ## Run (agent-only local stack)
 
@@ -27,16 +28,29 @@ Voice config notes:
 - `npm run live-test:models` writes SHERPA_* values into `agent/.env.live-test`
 - vendor env setup reference: https://github.com/akirilyuk/node-webrtc-rust#stttts-vendors-and-config
 
-2. From `agent/`, start everything:
+2. From `agent/`, start one of the predefined stacks:
 
 ```bash
 npm install
-npm run live-test:stack
+npm run live-test:stack:echo   # voice echo template (examples/agent.ts)
+npm run live-test:stack:game   # data-only, server-authoritative game sync (templates/game-sync.ts)
 ```
 
 Open:
 
 `http://127.0.0.1:8080/examples/live-test/index.html`
+
+Game sync page:
+
+`http://127.0.0.1:8080/examples/live-test/game-sync.html`
+
+Each command rebuilds the selected bundle on start. You can still override entry/mode manually:
+
+```bash
+export LIVE_TEST_AGENT_ENTRY=templates/game-sync.ts
+export LIVE_TEST_SESSION_MODE=data-only
+npm run live-test:stack
+```
 
 `live-test:stack` starts one process that serves both signaling and this page.
 

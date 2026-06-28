@@ -43,6 +43,90 @@ Optional flags: `--entry` / `-e`, `--outfile` / `-o` (same as `build`).
 
 This does **not** replace a voice roundtrip with mic/WebRTC — deploy to the VoiceThere platform for full E2E.
 
+For repository-local verify scripts, `dist/cli.js` is generated from `src/cli.ts` by `npm run build:lib`.
+That is the package-local `@voicethere/agent` CLI artifact (not `@voicethere/cli`).
+
+## Live browser test page (local stack)
+
+The live harness runs fully from the `agent` repo:
+
+1. local starter (`node-webrtc-rust` signaling + voice pipeline + sandboxed child bundle)
+2. built child bundle (`dist/agent.js`)
+3. browser page (`examples/live-test/index.html`, served by the starter)
+
+### One-time setup
+
+```bash
+# 1) agent live-test config (optional overrides for scripts)
+cd agent
+cp .env.live-test.example .env.live-test
+```
+
+### Configure STT/TTS for local live testing
+
+The starter reads env in this order: shell env → `agent/.env.live-test`.
+
+For local Sherpa, at minimum ensure:
+
+- `SHERPA_STT_MODEL_PATH`
+- `SHERPA_TTS_MODEL_PATH`
+- optional: `SHERPA_STT_LANGUAGE`, `SHERPA_TTS_SPEAKER`
+
+Where the paths come from:
+
+- Sherpa bundles are downloaded into:
+  - `agent/.models/`
+- Catalog/source list:
+  - `agent/scripts/sherpa-stt-catalog.json` (STT)
+  - `agent/scripts/sherpa-tts-catalog.json` (TTS)
+
+Use the agent helper to select models, download if missing, and emit absolute env exports:
+
+```bash
+npm run live-test:models
+```
+
+The script writes selected values into `agent/.env.live-test`.
+
+To use hosted providers instead of local Sherpa, set in `agent/.env.live-test`:
+
+- `VOICE_STT_PROVIDER` (`openai` | `deepgram` | `assemblyai` | `google`)
+- `VOICE_TTS_PROVIDER` (`openai` | `elevenlabs` | `cartesia` | `google`)
+- provider API keys (`OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, `ASSEMBLYAI_API_KEY`, `ELEVENLABS_API_KEY`, `CARTESIA_API_KEY`, `GOOGLE_API_KEY`)
+- optional model/voice overrides: `VOICE_STT_MODEL`, `VOICE_TTS_MODEL`, `VOICE_TTS_VOICE`, `VOICE_STT_LANGUAGE`
+
+Vendor setup reference: https://github.com/akirilyuk/node-webrtc-rust#stttts-vendors-and-config
+
+### Start local stack
+
+From `agent/`:
+
+```bash
+npm install
+npm run live-test:models   # select/download sherpa models and export env values
+npm run live-test:stack
+```
+
+This starts the local starter with your sandboxed bundle and serves the page.
+
+Live-test scripts load optional overrides from `agent/.env.live-test` (or `LIVE_TEST_ENV_FILE`).
+
+Open:
+
+`http://127.0.0.1:8080/examples/live-test/index.html`
+
+If you prefer separate terminals:
+
+```bash
+# Terminal A (agent starter + bundle + signaling)
+npm run live-test:starter
+```
+
+The page uses `@voicethere/client/browser` (loaded via esm.sh) and renders two visualizers:
+
+- local microphone input
+- incoming remote/agent audio
+
 ## API
 
 ```typescript
@@ -77,6 +161,22 @@ defineAgent({
 | `speak`                                         | Request parent TTS                                                                    |
 | `agentLog`                                      | Forward structured logs to parent                                                     |
 | `ParentToChildMessage` / `ChildToParentMessage` | IPC contract shared with the VoiceThere agent runner                                   |
+
+### Runner runtime subpath (minimal shared sandbox API)
+
+For runner-side child bootstrap reuse, `@voicethere/agent` exposes:
+
+```ts
+import {
+  buildChildExecArgv,
+  collectAllowFsReadDirs,
+  resolveBundlePath,
+  startSandboxedChild,
+} from "@voicethere/agent/runner";
+```
+
+This subpath is intentionally narrow: sandbox/startup primitives only. Runner-specific
+session orchestration and crash policy remain in the runner codebase.
 
 ### Speech events (parent → child)
 

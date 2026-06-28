@@ -21,10 +21,14 @@ const LOADER_ENTRY = join(SANDBOX_DIR, "loader-entry.js");
 
 export interface StartSandboxedChildOptions {
   sessionId: string;
-  bundlePath: string;
+  /** Absolute path to customer bundle. If omitted, uses `defaultBundlePath`. */
+  bundlePath?: string;
+  /** Optional fallback bundle when `bundlePath` is not provided. */
+  defaultBundlePath?: string;
   projectId?: string;
   buildId?: string;
-  onStderr?: (message: string) => void;
+  allowlistedEnv?: Record<string, string>;
+  onStderr?: (message: string, childPid: number) => void;
 }
 
 export interface SandboxedChild {
@@ -38,8 +42,15 @@ export interface SandboxedChild {
   ): () => void;
 }
 
-export function resolveBundlePath(bundlePath: string): string {
-  const resolved = resolve(bundlePath.trim());
+export function resolveBundlePath(
+  bundlePath?: string,
+  defaultBundlePath?: string,
+): string {
+  const raw = bundlePath?.trim() || defaultBundlePath?.trim();
+  if (!raw) {
+    throw new Error("Bundle path is required");
+  }
+  const resolved = resolve(raw);
   if (!existsSync(resolved)) {
     throw new Error(`Bundle not found: ${resolved}`);
   }
@@ -53,7 +64,10 @@ export function resolveBundlePath(bundlePath: string): string {
 export function startSandboxedChild(
   options: StartSandboxedChildOptions,
 ): SandboxedChild {
-  const bundlePath = resolveBundlePath(options.bundlePath);
+  const bundlePath = resolveBundlePath(
+    options.bundlePath,
+    options.defaultBundlePath,
+  );
   const env: NodeJS.ProcessEnv = {
     NODE_ENV: "production",
     __CHILD_BUNDLE_PATH__: bundlePath,
@@ -63,6 +77,15 @@ export function startSandboxedChild(
     if (key === "SESSION_ID") env[key] = options.sessionId;
     if (key === "PROJECT_ID" && options.projectId) env[key] = options.projectId;
     if (key === "BUILD_ID" && options.buildId) env[key] = options.buildId;
+  }
+
+  for (const [key, value] of Object.entries(options.allowlistedEnv ?? {})) {
+    if (
+      (ALLOWED_CHILD_ENV_KEYS as readonly string[]).includes(key) ||
+      key.startsWith("AGENT_")
+    ) {
+      env[key] = value;
+    }
   }
 
   const child: ChildProcess = fork(LOADER_ENTRY, [], {
@@ -76,7 +99,7 @@ export function startSandboxedChild(
 
   child.stderr?.on("data", (chunk) => {
     const message = String(chunk).trim();
-    if (message) options.onStderr?.(message);
+    if (message) options.onStderr?.(message, child.pid ?? -1);
   });
 
   const messageHandlers = new Set<(message: ChildToParentMessage) => void>();

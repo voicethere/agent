@@ -3,4 +3,7 @@
 .env.local
 .npmrc
 dist/
+.models/
 node_modules/
+!.env.live-test.example
+.env.live-test

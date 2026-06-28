@@ -10,6 +10,12 @@
       "require": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./runner": {
+      "types": "./dist/runner.d.ts",
+      "import": "./dist/runner.js",
+      "require": "./dist/runner.js",
+      "default": "./dist/runner.js"
+    },
     "./verify": {
       "types": "./dist/verify/run-verify.d.ts",
       "import": "./dist/verify/run-verify.js",
@@ -31,8 +37,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:ci": "npm run typecheck && npm run build && npm run test && node scripts/ci/verify-package-exports.mjs",
-    "verify:local": "npm run build && node dist/cli.js verify --no-build --bundle dist/agent.js",
-    "verify:local:only": "node dist/cli.js verify --no-build --bundle dist/agent.js",
+    "verify:local": "npm run build && node ./dist/cli.js verify --no-build --bundle ./dist/agent.js",
+    "verify:local:only": "node ./dist/cli.js verify --no-build --bundle ./dist/agent.js",
+    "live-test:models": "bash ./scripts/select-sherpa-models.sh",
+    "live-test:page": "bash ./scripts/live-test-page.sh",
+    "live-test:starter": "bash ./scripts/live-test-starter.sh",
+    "live-test:stack": "bash ./scripts/live-test-stack.sh",
     "prepublishOnly": "npm run build"
   },
   "repository": {
@@ -63,8 +73,11 @@
     "@node-webrtc-rust/sdk": ">=0.6.5"
   },
   "devDependencies": {
+    "@node-webrtc-rust/helpers": "0.6.5",
     "@node-webrtc-rust/sdk": "0.6.5",
+    "@node-webrtc-rust/signaling": "0.6.5",
     "@types/node": "^22.10.0",
+    "http-server": "^14.1.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0",
     "vitest": "^2.1.8"

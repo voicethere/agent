@@ -93,7 +93,7 @@
       }
       .meta {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 0.7rem;
         margin-top: 0.6rem;
         font-size: 0.84rem;
@@ -135,6 +135,7 @@
         <div id="meta-owned">Owned objects: 0</div>
         <div id="meta-total">Tracked objects: 0</div>
         <div id="meta-sync-rate">Server sync avg/s: 0.0 (last 0)</div>
+        <div id="meta-sync-buffer">Last sync payload: 0.00 kB</div>
       </div>
     </section>
 
@@ -183,6 +184,7 @@
       const metaOwned = document.getElementById("meta-owned");
       const metaTotal = document.getElementById("meta-total");
       const metaSyncRate = document.getElementById("meta-sync-rate");
+      const metaSyncBuffer = document.getElementById("meta-sync-buffer");
 
       let session = null;
       let tickTimer = null;
@@ -190,6 +192,7 @@
       let serverSyncTotal = 0;
       let serverSyncWindow = 0;
       let connectedAtMs = 0;
+      let lastSyncPayloadBytes = 0;
 
       const ownerByObjectId = new Map();
       const ownedObjectIds = new Set();
@@ -301,6 +304,11 @@
         metaSyncRate.textContent = `Server sync avg/s: ${avgPerSec.toFixed(1)} (last ${serverSyncWindow})`;
       }
 
+      function updateSyncBufferMeta() {
+        const sizeKb = lastSyncPayloadBytes / 1024;
+        metaSyncBuffer.textContent = `Last sync payload: ${sizeKb.toFixed(2)} kB`;
+      }
+
       function startMetricsLoop() {
         stopMetricsLoop();
         connectedAtMs = Date.now();
@@ -344,6 +352,8 @@
       }
 
       function parseWorldSync(data) {
+        lastSyncPayloadBytes = data.byteLength;
+        updateSyncBufferMeta();
         const values = new Float32Array(data);
         if (values.length % STRIDE !== 0) return;
         serverSyncTotal += 1;
@@ -493,7 +503,9 @@
         serverSyncTotal = 0;
         serverSyncWindow = 0;
         connectedAtMs = 0;
+        lastSyncPayloadBytes = 0;
         metaSyncRate.textContent = "Server sync avg/s: 0.0 (last 0)";
+        metaSyncBuffer.textContent = "Last sync payload: 0.00 kB";
         connectBtn.disabled = false;
         disconnectBtn.disabled = true;
         addObjectBtn.disabled = true;

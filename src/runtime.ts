@@ -4,6 +4,12 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { DataChannelKind, ParentToChildMessage } from "./protocol.js";
 import { SessionSerialQueue } from "./session-serial-queue.js";
 
+export const SESSION_START_INIT_DELAY_ENABLED_ENV =
+  "AGENT_SESSION_START_INIT_DELAY_ENABLED";
+export const SESSION_START_INIT_DELAY_MS_ENV =
+  "AGENT_SESSION_START_INIT_DELAY_MS";
+const DEFAULT_SESSION_START_INIT_DELAY_MS = 500;
+
 export interface SessionContext {
   sessionId: string;
   env: Record<string, string>;
@@ -102,6 +108,40 @@ const endedSessionIds = new Set<string>();
 /** Active orchestrator session while a parent IPC handler runs (per-session queue). */
 const agentLogSessionContext = new AsyncLocalStorage<string>();
 
+function parseBooleanEnv(
+  value: string | undefined,
+  defaultValue: boolean,
+): boolean {
+  if (value === undefined) return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "") return defaultValue;
+  if (["0", "false", "off", "no"].includes(normalized)) return false;
+  if (["1", "true", "on", "yes"].includes(normalized)) return true;
+  return defaultValue;
+}
+
+function parseNonNegativeIntegerEnv(
+  value: string | undefined,
+  defaultValue: number,
+): number {
+  if (value === undefined) return defaultValue;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return defaultValue;
+  return Math.floor(parsed);
+}
+
+function resolveSessionStartInitDelayMs(): number {
+  const enabled = parseBooleanEnv(
+    process.env[SESSION_START_INIT_DELAY_ENABLED_ENV],
+    true,
+  );
+  if (!enabled) return 0;
+  return parseNonNegativeIntegerEnv(
+    process.env[SESSION_START_INIT_DELAY_MS_ENV],
+    DEFAULT_SESSION_START_INIT_DELAY_MS,
+  );
+}
+
 async function handleParentMessage(
   message: ParentToChildMessage,
   handlers: AgentHandlers,
@@ -110,6 +150,12 @@ async function handleParentMessage(
     case "session_start":
       endedSessionIds.delete(message.sessionId);
       peerEnvBySessionId.set(message.sessionId, message.env);
+      const sessionStartInitDelayMs = resolveSessionStartInitDelayMs();
+      if (sessionStartInitDelayMs > 0) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, sessionStartInitDelayMs),
+        );
+      }
       await (handlers.onClientJoin ?? handlers.onSessionStart)?.({
         sessionId: message.sessionId,
         env: message.env,
@@ -187,8 +233,7 @@ export function defineAgent(handlers: AgentHandlers): void {
           }
           await handleParentMessage(message, handlers);
         } catch (error) {
-          const err =
-            error instanceof Error ? error : new Error(String(error));
+          const err = error instanceof Error ? error : new Error(String(error));
           const env =
             peerEnvBySessionId.get(message.sessionId) ??
             buildIdleEnv(message.sessionId);
@@ -261,8 +306,7 @@ async function runIdleTimeoutHook(
   try {
     await handlers.onIdleTimeout?.(ctx);
   } catch (hookError) {
-    error =
-      hookError instanceof Error ? hookError.message : String(hookError);
+    error = hookError instanceof Error ? hookError.message : String(hookError);
     agentLog("error", `onIdleTimeout failed: ${error}`, message.sessionId);
   }
 

@@ -33,4 +33,18 @@ describe("SessionSerialQueue", () => {
 
     await vi.waitFor(() => expect(order).toEqual(["fast", "slow"]));
   });
+
+  it("reports pending state", async () => {
+    const queue = new SessionSerialQueue();
+    let release = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    queue.enqueue("s1", () => gate);
+    expect(queue.hasPending("s1")).toBe(true);
+    release();
+
+    await vi.waitFor(() => expect(queue.hasPending("s1")).toBe(false));
+  });
 });

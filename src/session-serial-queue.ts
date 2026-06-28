@@ -24,4 +24,8 @@ export class SessionSerialQueue {
   clearAll(): void {
     this.tails.clear();
   }
+
+  hasPending(sessionId: string): boolean {
+    return this.tails.has(sessionId);
+  }
 }

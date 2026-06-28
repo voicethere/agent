@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { agentLog, defineAgent, disconnectClient, resetAgentIpcStateForTests, sendBinaryToClient, speak } from "../src/runtime.js";
+import {
+  agentLog,
+  defineAgent,
+  disconnectClient,
+  resetAgentIpcStateForTests,
+  sendBinaryToClient,
+  speak,
+  SESSION_START_INIT_DELAY_MS_ENV,
+  SESSION_START_INIT_DELAY_ENABLED_ENV,
+} from "../src/runtime.js";
 import {
   installProcessMessageCapture,
   installProcessSendMock,
@@ -56,6 +65,135 @@ describe("defineAgent", () => {
         sessionId: "peer-1",
       });
     });
+  });
+
+  it("applies the default session_start init delay when enabled by default", async () => {
+    vi.useFakeTimers();
+    const originalEnabled = process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+    const originalMs = process.env[SESSION_START_INIT_DELAY_MS_ENV];
+    delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+    delete process.env[SESSION_START_INIT_DELAY_MS_ENV];
+
+    try {
+      const onSessionStart = vi.fn();
+      capture = installProcessMessageCapture();
+      defineAgent({ onSessionStart });
+
+      capture.emit({
+        type: "session_start",
+        sessionId: "peer-delay-default",
+        env: { SESSION_ID: "peer-delay-default" },
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(onSessionStart).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(499);
+      expect(onSessionStart).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(onSessionStart).toHaveBeenCalledWith({
+        sessionId: "peer-delay-default",
+        env: { SESSION_ID: "peer-delay-default" },
+      });
+    } finally {
+      if (originalEnabled === undefined) {
+        delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+      } else {
+        process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = originalEnabled;
+      }
+      if (originalMs === undefined) {
+        delete process.env[SESSION_START_INIT_DELAY_MS_ENV];
+      } else {
+        process.env[SESSION_START_INIT_DELAY_MS_ENV] = originalMs;
+      }
+      vi.useRealTimers();
+    }
+  });
+
+  it("supports overriding session_start init delay via env", async () => {
+    vi.useFakeTimers();
+    const originalEnabled = process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+    const originalMs = process.env[SESSION_START_INIT_DELAY_MS_ENV];
+    process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = "true";
+    process.env[SESSION_START_INIT_DELAY_MS_ENV] = "120";
+
+    try {
+      const onSessionStart = vi.fn();
+      capture = installProcessMessageCapture();
+      defineAgent({ onSessionStart });
+
+      capture.emit({
+        type: "session_start",
+        sessionId: "peer-delay-custom",
+        env: { SESSION_ID: "peer-delay-custom" },
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(onSessionStart).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(119);
+      expect(onSessionStart).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(onSessionStart).toHaveBeenCalledWith({
+        sessionId: "peer-delay-custom",
+        env: { SESSION_ID: "peer-delay-custom" },
+      });
+    } finally {
+      if (originalEnabled === undefined) {
+        delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+      } else {
+        process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = originalEnabled;
+      }
+      if (originalMs === undefined) {
+        delete process.env[SESSION_START_INIT_DELAY_MS_ENV];
+      } else {
+        process.env[SESSION_START_INIT_DELAY_MS_ENV] = originalMs;
+      }
+      vi.useRealTimers();
+    }
+  });
+
+  it("supports disabling session_start init delay via env", async () => {
+    vi.useFakeTimers();
+    const originalEnabled = process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+    const originalMs = process.env[SESSION_START_INIT_DELAY_MS_ENV];
+    process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = "false";
+    process.env[SESSION_START_INIT_DELAY_MS_ENV] = "500";
+
+    try {
+      const onSessionStart = vi.fn();
+      capture = installProcessMessageCapture();
+      defineAgent({ onSessionStart });
+
+      capture.emit({
+        type: "session_start",
+        sessionId: "peer-delay-disabled",
+        env: { SESSION_ID: "peer-delay-disabled" },
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(onSessionStart).toHaveBeenCalledWith({
+        sessionId: "peer-delay-disabled",
+        env: { SESSION_ID: "peer-delay-disabled" },
+      });
+    } finally {
+      if (originalEnabled === undefined) {
+        delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+      } else {
+        process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = originalEnabled;
+      }
+      if (originalMs === undefined) {
+        delete process.env[SESSION_START_INIT_DELAY_MS_ENV];
+      } else {
+        process.env[SESSION_START_INIT_DELAY_MS_ENV] = originalMs;
+      }
+      vi.useRealTimers();
+    }
   });
 
   it("dispatches onSessionEnd", async () => {
@@ -265,9 +403,7 @@ describe("defineAgent", () => {
     capture.emit({ type: "session_start", sessionId: "slow", env: {} });
     capture.emit({ type: "session_start", sessionId: "fast", env: {} });
 
-    await vi.waitFor(() =>
-      expect(order).toEqual(["start:fast", "start:slow"]),
-    );
+    await vi.waitFor(() => expect(order).toEqual(["start:fast", "start:slow"]));
   });
 
   it("reports handler errors as agent_error IPC", async () => {

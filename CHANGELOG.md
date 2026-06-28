@@ -6,6 +6,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-28
+
+### Added
+
+- **Standalone local live-test stack in `agent`** — added a self-contained starter and browser page (`scripts/live-test-starter.*`, `examples/live-test`) to run signaling + sandboxed agent bundle locally without runner-repo coupling.
+- **Public runner runtime surface** — added `@voicethere/agent/runner` export and runtime entry (`src/runner.ts`) for shared sandbox child startup and bundle resolution logic.
+- **Sherpa local model tooling in `agent`** — added standalone model catalogs (`scripts/sherpa-*.json`) and interactive selector (`scripts/select-sherpa-models.sh`) that downloads models into `agent/.models` and writes live-test env settings.
+
+### Changed
+
+- **Live-test scripts and docs** — moved local live testing to agent-only workflows (`live-test:starter`, `live-test:stack`), updated README/live-test docs, and added `.env.live-test.example`.
+- **Protocol/runtime ergonomics** — re-exported `SpeechEvent` from `protocol.ts` for consistent type imports from `@voicethere/agent`.
+
 ## [0.1.14] - 2026-06-28
 
 ### Added

@@ -6,6 +6,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-28
+
+### Added
+
+- **Configurable session start init delay** — runtime now supports `AGENT_SESSION_START_INIT_DELAY_ENABLED` (default `true`) and `AGENT_SESSION_START_INIT_DELAY_MS` (default `500`) to control startup stabilization wait before `onSessionStart`.
+- **Runner export for queue utility** — `SessionSerialQueue` is now exported from `@voicethere/agent/runner`.
+- **Queue pending-state API** — added `SessionSerialQueue.hasPending(sessionId)` for per-session queue state checks.
+
+### Changed
+
+- **Runtime tests** — added coverage for default/custom/disabled session-start delay behavior.
+
 ## [0.2.1] - 2026-06-28
 
 ### Added

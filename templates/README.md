@@ -46,3 +46,21 @@ npx @voicethere/agent verify
 ```
 
 **Voice E2E:** host with the VoiceThere agent runner (platform or internal deployment) — set `AGENT_BUNDLE_PATH` to your built `dist/agent.js`.
+
+## `game-sync.ts`
+
+Authoritative multi-object sync sample for real-time games/simulations:
+
+- register tracked objects via control DC (`{ type: "register" }`)
+- receive `register_ack` + `object_registered` ownership notifications
+- run server-authoritative simulation (position + velocity) at 60Hz
+- resolve wall bounce + object-object collisions on the server
+- broadcast world-state snapshots to clients over binary sync channel (9-float records)
+- ignore client binary writes by default (safe base for adding intent/input messages later)
+- reuse freed slots on leave to keep world state compact
+
+Build:
+
+```bash
+npx @voicethere/agent build --entry templates/game-sync.ts
+```

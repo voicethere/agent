@@ -42,7 +42,9 @@
     "live-test:models": "bash ./scripts/select-sherpa-models.sh",
     "live-test:page": "bash ./scripts/live-test-page.sh",
     "live-test:starter": "bash ./scripts/live-test-starter.sh",
-    "live-test:stack": "bash ./scripts/live-test-stack.sh",
+    "live-test:stack": "npm run live-test:stack:echo",
+    "live-test:stack:echo": "LIVE_TEST_AGENT_ENTRY=examples/agent.ts LIVE_TEST_PAGE_PATH=/examples/live-test/index.html LIVE_TEST_SESSION_MODE=voice bash ./scripts/live-test-stack.sh",
+    "live-test:stack:game": "LIVE_TEST_AGENT_ENTRY=templates/game-sync.ts LIVE_TEST_PAGE_PATH=/examples/live-test/game-sync.html LIVE_TEST_SESSION_MODE=data-only bash ./scripts/live-test-stack.sh",
     "prepublishOnly": "npm run build"
   },
   "repository": {

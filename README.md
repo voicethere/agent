@@ -104,7 +104,9 @@ From `agent/`:
 ```bash
 npm install
 npm run live-test:models   # select/download sherpa models and export env values
-npm run live-test:stack
+npm run live-test:stack:echo  # voice echo template
+# or
+npm run live-test:stack:game  # data-only game-sync template
 ```
 
 This starts the local starter with your sandboxed bundle and serves the page.
@@ -204,7 +206,7 @@ The runtime processes parent IPC **in order per `sessionId`** while different se
 
 For isolated voice agents (default), leave **`shared_child_per_session`** disabled — each session gets its own child process.
 
-See [`templates/game-sync.ts`](./templates/game-sync.ts) for a data-only authoritative server example.
+See [`templates/game-sync.ts`](./templates/game-sync.ts) for a data-only authoritative server example (60Hz server-side movement + collisions, client render-only).
 
 ## Building your agent bundle
 

@@ -36,7 +36,7 @@ describe("SessionSerialQueue", () => {
 
   it("reports pending state", async () => {
     const queue = new SessionSerialQueue();
-    let release = () => undefined;
+    let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });

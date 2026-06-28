@@ -208,6 +208,22 @@ For isolated voice agents (default), leave **`shared_child_per_session`** disabl
 
 See [`templates/game-sync.ts`](./templates/game-sync.ts) for a data-only authoritative server example (60Hz server-side movement + collisions, client render-only).
 
+### Game servers + parent/child IPC payload size guidance
+
+For game-server style agents, state updates are sent back and forth between the trusted parent and sandboxed child over IPC (`process.send` / `process.on("message")`) using Node V8 serialization.
+
+Current guidance:
+
+- V8 serialization is fast enough for typical real-time sync payloads up to about **64kB**
+- That is roughly **16,000 `float32` values** (4 bytes each)
+
+If you need larger/faster transfers, we can support an alternative transport strategy, for example:
+
+- direct process-to-process streaming over `stdin`/`stdout`
+- shared-memory IPC between processes via a dedicated package
+
+If you require this, please open an issue in this repository and we will prioritize implementation accordingly.
+
 ## Building your agent bundle
 
 **Recommended:** bundle with the package CLI (same esbuild settings VoiceThere uses in production):

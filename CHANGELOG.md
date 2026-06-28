@@ -6,6 +6,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-28
+
+### Added
+
+- **Server-authoritative game live test page** — added `examples/live-test/game-sync.html` with room bootstrap, binary world render, per-client ownership colors, and incoming server sync-rate metrics.
+- **Dedicated game stack command** — added `live-test:stack:game` for one-command data-only runs using `templates/game-sync.ts` and the game page.
+
+### Changed
+
+- **`templates/game-sync.ts` behavior** — switched to server-authoritative 60Hz simulation with wall/object collision bounce; client binary state writes are ignored by default.
+- **Game template docs** — expanded `templates/README.md` and root/live-test docs to describe server-authoritative sync flow and usage.
+- **Live-test binary robustness** — improved starter/runtime handling for binary payload forwarding across IPC/DataChannel boundaries.
+
 ## [0.2.0] - 2026-06-28
 
 ### Added

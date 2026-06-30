@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- **`verify-start` command** — new `npx @voicethere/agent verify-start` runs a sandbox startup check that launches the bundle in the restricted child process, validates sandbox permission flags, and requires `session_start_ack`.
+
 ## [0.2.3] - 2026-06-30
 
 ### Changed

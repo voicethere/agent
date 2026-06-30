@@ -34,6 +34,7 @@ export interface StartSandboxedChildOptions {
 export interface SandboxedChild {
   pid: number;
   bundlePath: string;
+  execArgv: string[];
   send(message: ParentToChildMessage): boolean;
   kill(signal?: NodeJS.Signals): void;
   onMessage(handler: (message: ChildToParentMessage) => void): () => void;
@@ -88,13 +89,15 @@ export function startSandboxedChild(
     }
   }
 
+  const execArgv = buildChildExecArgv({
+    loaderDir: SANDBOX_DIR,
+    bundlePath,
+  });
+
   const child: ChildProcess = fork(LOADER_ENTRY, [], {
     env,
     stdio: ["ignore", "pipe", "pipe", "ipc"],
-    execArgv: buildChildExecArgv({
-      loaderDir: SANDBOX_DIR,
-      bundlePath,
-    }),
+    execArgv,
   });
 
   child.stderr?.on("data", (chunk) => {
@@ -124,6 +127,7 @@ export function startSandboxedChild(
   return {
     pid: child.pid ?? -1,
     bundlePath,
+    execArgv: [...execArgv],
     send(message: ParentToChildMessage) {
       if (!child.connected) return false;
       return child.send(message);

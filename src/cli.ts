@@ -4,6 +4,7 @@
  *
  *   npx @voicethere/agent build
  *   npx @voicethere/agent verify
+ *   npx @voicethere/agent verify-start
  */
 
 import { buildAgentBundle } from "./build-bundle.js";
@@ -15,6 +16,7 @@ import {
   formatVerifyFailure,
   runAgentVerify,
 } from "./verify/run-verify.js";
+import { runAgentVerifyStart } from "./verify/run-verify-start.js";
 
 const DEFAULT_ENTRY = DEFAULT_VERIFY_ENTRY;
 const DEFAULT_OUTFILE = DEFAULT_VERIFY_BUNDLE;
@@ -26,10 +28,12 @@ Usage:
   npx @voicethere/agent
   npx @voicethere/agent build [options]
   npx @voicethere/agent verify [options]
+  npx @voicethere/agent verify-start [options]
 
 Commands:
   build    Bundle agent source to a single ESM file
   verify   Build (optional) and run static bundle checks
+  verify-start  Start bundle in sandbox with restricted Node flags and verify startup
 
 Build options:
   --entry, -e <path>     Agent entry file (default: ${DEFAULT_ENTRY})
@@ -47,6 +51,7 @@ Examples:
   npx @voicethere/agent build --entry src/agent.ts --outfile dist/agent.js
   npx @voicethere/agent verify
   npx @voicethere/agent verify --no-build --bundle dist/agent.js
+  npx @voicethere/agent verify-start --no-build --bundle dist/agent.js
 `);
 }
 
@@ -171,6 +176,23 @@ async function runVerify(argv: string[]): Promise<void> {
   }
 }
 
+async function runVerifyStart(argv: string[]): Promise<void> {
+  const { entry, outfile, bundlePath, noBuild } = parseVerifyArgs(argv);
+  if (!noBuild) {
+    await buildAgentBundle({ entry, outfile });
+  }
+  const result = await runAgentVerifyStart({
+    bundlePath,
+  });
+
+  if (!result.ok) {
+    process.stderr.write(
+      `[@voicethere/agent verify-start] FAIL: ${formatVerifyFailure(result)}\n`,
+    );
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
@@ -194,9 +216,14 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args[0] === "verify-start") {
+    await runVerifyStart(args.slice(1));
+    return;
+  }
+
   if (args[0]?.startsWith("-")) {
     process.stderr.write(
-      "Missing command. Use `build` or `verify` before options.\n\n",
+      "Missing command. Use `build`, `verify`, or `verify-start` before options.\n\n",
     );
     printHelp();
     process.exit(1);

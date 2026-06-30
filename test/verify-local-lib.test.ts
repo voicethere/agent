@@ -8,6 +8,7 @@ import {
   detectVerifyCallbacks,
   hasDefineAgentRegistration,
   parseBundleArg,
+  waitForSessionStartAck,
   waitForSpeak,
 } from "../src/verify/lib.js";
 
@@ -75,6 +76,29 @@ describe("waitForSpeak", () => {
     await expect(
       waitForSpeak(messages, VERIFY_SESSION_ID, 150),
     ).rejects.toThrow(/Timed out/);
+  });
+});
+
+describe("waitForSessionStartAck", () => {
+  it("resolves when a matching session_start_ack message appears", async () => {
+    const messages: ChildToParentMessage[] = [];
+    const promise = waitForSessionStartAck(messages, VERIFY_SESSION_ID, 1000);
+
+    setTimeout(() => {
+      messages.push({
+        type: "session_start_ack",
+        sessionId: VERIFY_SESSION_ID,
+      });
+    }, 100);
+
+    const ack = await promise;
+    expect(ack.sessionId).toBe(VERIFY_SESSION_ID);
+  });
+
+  it("rejects on timeout when no ack arrives", async () => {
+    await expect(waitForSessionStartAck([], VERIFY_SESSION_ID, 150)).rejects.toThrow(
+      /Timed out/,
+    );
   });
 });
 

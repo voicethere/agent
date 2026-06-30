@@ -59,6 +59,35 @@ export function waitForSpeak(
   });
 }
 
+export function waitForSessionStartAck(
+  messages: ChildToParentMessage[],
+  sessionId: string,
+  timeoutMs: number,
+): Promise<Extract<ChildToParentMessage, { type: "session_start_ack" }>> {
+  return new Promise((resolvePromise, reject) => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      const ack = messages.find(
+        (m): m is Extract<ChildToParentMessage, { type: "session_start_ack" }> =>
+          m.type === "session_start_ack" && m.sessionId === sessionId,
+      );
+      if (ack) {
+        clearInterval(timer);
+        resolvePromise(ack);
+        return;
+      }
+      if (Date.now() - started >= timeoutMs) {
+        clearInterval(timer);
+        reject(
+          new Error(
+            `Timed out after ${timeoutMs}ms waiting for child session_start_ack IPC`,
+          ),
+        );
+      }
+    }, 50);
+  });
+}
+
 export function detectVerifyCallbacks(
   bundleSource: string,
 ): VerifyCallbackKey[] {

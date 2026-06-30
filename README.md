@@ -33,11 +33,20 @@ npx @voicethere/agent verify
 
 This runs a short checklist: Node version, bundle build, bundle presence, `defineAgent(...)` registration, and at least one supported callback (`onSpeechEvent`, `onUserSpeechFinal`, `onDataChannelMessage`, or `onDataChannelBinary`).
 
+For sandbox startup validation (without full voice/WebRTC E2E), use:
+
+```bash
+npx @voicethere/agent verify-start --no-build --bundle ./dist/agent.js
+```
+
+`verify-start` launches the bundle in the sandboxed child with restricted Node flags (`--permission` + fs-read allowlist), sends `session_start`, and requires `session_start_ack`.
+
 | Command | When to use |
 | ------- | ----------- |
 | `npx @voicethere/agent verify` | **Default** — build `agent.ts` → `dist/agent.js`, then run all static checks |
 | `npx @voicethere/agent verify --no-build` | Re-run checks on an existing bundle |
 | `npx @voicethere/agent verify --no-build --bundle ./dist/agent.js` | Verify a specific bundle path |
+| `npx @voicethere/agent verify-start --no-build --bundle ./dist/agent.js` | Verify sandbox startup + restricted Node flags on a specific bundle |
 
 Optional flags: `--entry` / `-e`, `--outfile` / `-o` (same as `build`).
 

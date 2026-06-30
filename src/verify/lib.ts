@@ -5,6 +5,13 @@ import type { ChildToParentMessage } from "../protocol.js";
 export const VERIFY_SESSION_ID = "local-verify";
 export const DEFAULT_VERIFY_BUNDLE = "dist/agent.js";
 export const DEFAULT_VERIFY_ENTRY = "agent.ts";
+export const VERIFY_CALLBACK_KEYS = [
+  "onSpeechEvent",
+  "onUserSpeechFinal",
+  "onDataChannelMessage",
+  "onDataChannelBinary",
+] as const;
+export type VerifyCallbackKey = (typeof VERIFY_CALLBACK_KEYS)[number];
 
 export function parseBundleArg(
   argv: string[],
@@ -50,4 +57,33 @@ export function waitForSpeak(
       }
     }, 50);
   });
+}
+
+export function detectVerifyCallbacks(
+  bundleSource: string,
+): VerifyCallbackKey[] {
+  const matched = new Set<VerifyCallbackKey>();
+
+  for (const key of VERIFY_CALLBACK_KEYS) {
+    // Detect common object-literal forms in transpiled bundles:
+    // - onSpeechEvent: fn
+    // - onSpeechEvent(ctx) {}
+    // - { onSpeechEvent, ... } (shorthand)
+    const asProperty = new RegExp(`\\b${key}\\b\\s*:`);
+    const asMethod = new RegExp(`\\b${key}\\b\\s*\\(`);
+    const asShorthand = new RegExp(`\\b${key}\\b(?=\\s*[,}])`);
+    if (
+      asProperty.test(bundleSource) ||
+      asMethod.test(bundleSource) ||
+      asShorthand.test(bundleSource)
+    ) {
+      matched.add(key);
+    }
+  }
+
+  return [...matched];
+}
+
+export function hasDefineAgentRegistration(bundleSource: string): boolean {
+  return /\bdefineAgent\s*\(/.test(bundleSource);
 }

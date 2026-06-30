@@ -29,7 +29,7 @@ Usage:
 
 Commands:
   build    Bundle agent source to a single ESM file
-  verify   Build (optional) and run sandbox checks on the bundle
+  verify   Build (optional) and run static bundle checks
 
 Build options:
   --entry, -e <path>     Agent entry file (default: ${DEFAULT_ENTRY})

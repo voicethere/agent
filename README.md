@@ -23,19 +23,19 @@ npm install
 npm run build
 ```
 
-## Verify locally (sandbox, no WebRTC)
+## Verify locally (static checks, no runtime execution)
 
-Before deploying to VoiceThere, build your bundle and run sandbox checks (same Node `--permission` flags as production):
+Before deploying to VoiceThere, build your bundle and run static checks:
 
 ```bash
 npx @voicethere/agent verify
 ```
 
-This runs a short checklist: Node version, bundle build, sandbox load, IPC `session_start`, `user_speech_final` → `speak`, and no `agent_error`. Failures print which check failed and why.
+This runs a short checklist: Node version, bundle build, bundle presence, `defineAgent(...)` registration, and at least one supported callback (`onSpeechEvent`, `onUserSpeechFinal`, `onDataChannelMessage`, or `onDataChannelBinary`).
 
 | Command | When to use |
 | ------- | ----------- |
-| `npx @voicethere/agent verify` | **Default** — build `agent.ts` → `dist/agent.js`, then run all checks |
+| `npx @voicethere/agent verify` | **Default** — build `agent.ts` → `dist/agent.js`, then run all static checks |
 | `npx @voicethere/agent verify --no-build` | Re-run checks on an existing bundle |
 | `npx @voicethere/agent verify --no-build --bundle ./dist/agent.js` | Verify a specific bundle path |
 
@@ -339,7 +339,7 @@ Prefer **one esbuild bundle** so production behavior matches `npm run verify:loc
 
 **Pre-publish checklist**
 
-1. `npx @voicethere/agent verify` — build your bundle and run sandbox checks
+1. `npx @voicethere/agent verify` — build your bundle and run static checks
 2. Deploy the bundle to VoiceThere (platform upload or CLI when available)
 
 For iterative work: `npx @voicethere/agent build` then `npx @voicethere/agent verify --no-build`.
@@ -356,7 +356,7 @@ For iterative work: `npx @voicethere/agent build` then `npx @voicethere/agent ve
 ```bash
 npm run build           # compile SDK + example bundle (repo dev)
 npm run build:lib       # compile SDK only (tsc → dist/)
-npm run verify:local    # repo dev: build example + sandbox verify
+npm run verify:local    # repo dev: build example + static verify
 npm run test:ci         # typecheck + vitest
 ```
 
@@ -364,7 +364,7 @@ Customer project:
 
 ```bash
 npx @voicethere/agent build    # bundle agent.ts → dist/agent.js
-npx @voicethere/agent verify   # build + sandbox checks
+npx @voicethere/agent verify   # build + static checks
 ```
 
 ## Release

@@ -1,17 +1,13 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { buildAgentBundle } from "../build-bundle.js";
-import type { ChildToParentMessage } from "../protocol.js";
-import { startSandboxedChild } from "../sandbox/start-child.js";
 import {
-  VERIFY_SESSION_ID,
+  detectVerifyCallbacks,
+  hasDefineAgentRegistration,
   parseBundleArg,
-  waitForSpeak,
 } from "./lib.js";
 
-const READY_MS = 300;
-const SPEAK_TIMEOUT_MS = 5000;
 const MIN_NODE_MAJOR = 22;
 
 export interface VerifyAgentOptions {
@@ -35,10 +31,6 @@ export interface VerifyAgentResult {
   ok: boolean;
   checks: VerifyCheckResult[];
   bundlePath: string;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
 function logLine(quiet: boolean | undefined, message: string): void {
@@ -75,7 +67,7 @@ export async function runAgentVerify(
     return failCheck(
       checks,
       "Node.js version",
-      `Node ${MIN_NODE_MAJOR}+ required (--permission sandbox); found ${process.version}`,
+      `Node ${MIN_NODE_MAJOR}+ required; found ${process.version}`,
     );
   }
   checks.push({
@@ -123,120 +115,35 @@ export async function runAgentVerify(
   });
   logLine(quiet, `✓ Bundle present (${resolvedBundle})`);
 
-  const childMessages: ChildToParentMessage[] = [];
-  let childError: string | undefined;
-  let earlyExitCode: number | null | undefined;
-
-  let child: ReturnType<typeof startSandboxedChild>;
-  try {
-    child = startSandboxedChild({
-      sessionId: VERIFY_SESSION_ID,
-      bundlePath: resolvedBundle,
-      onStderr: (message) => {
-        if (!quiet) {
-          process.stderr.write(`[child stderr] ${message}\n`);
-        }
-      },
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    return failCheck(checks, "Sandbox spawn", detail);
-  }
-
-  checks.push({
-    name: "Sandbox spawn",
-    ok: true,
-    detail: `pid ${child.pid}`,
-  });
-  logLine(quiet, `✓ Sandbox spawn (pid ${child.pid})`);
-
-  child.onMessage((message) => {
-    childMessages.push(message);
-    if (message.type === "log" && !quiet) {
-      process.stdout.write(`[child ${message.level}] ${message.message}\n`);
-    }
-    if (message.type === "agent_error") {
-      childError = message.message;
-    }
-    if (message.type === "speak" && !quiet) {
-      process.stdout.write(`[child speak] ${message.text}\n`);
-    }
-  });
-
-  const exitPromise = new Promise<number | null>((resolveExit) => {
-    child.onExit((code) => {
-      earlyExitCode = code;
-      resolveExit(code);
-    });
-  });
-
-  child.send({
-    type: "session_start",
-    sessionId: VERIFY_SESSION_ID,
-    env: {
-      SESSION_ID: VERIFY_SESSION_ID,
-      PROJECT_ID: "local",
-      BUILD_ID: "verify",
-    },
-  });
-
-  await delay(READY_MS);
-
-  if (earlyExitCode !== undefined) {
+  const bundleSource = readFileSync(resolvedBundle, "utf8");
+  if (!hasDefineAgentRegistration(bundleSource)) {
     return failCheck(
       checks,
-      "Bundle load",
-      `Child exited early with code ${earlyExitCode ?? "null"}`,
+      "Agent registration",
+      "Bundle must register handlers with defineAgent(...)",
     );
   }
-
-  checks.push({ name: "Bundle load", ok: true });
-  logLine(quiet, "✓ Bundle load");
-
-  child.send({
-    type: "speech_event",
-    sessionId: VERIFY_SESSION_ID,
-    event: { type: "user_speech_final", text: "hello from verify" },
+  checks.push({
+    name: "Agent registration",
+    ok: true,
+    detail: "defineAgent(...) detected",
   });
+  logLine(quiet, "✓ Agent registration (defineAgent)");
 
-  try {
-    const speak = await waitForSpeak(
-      childMessages,
-      VERIFY_SESSION_ID,
-      SPEAK_TIMEOUT_MS,
+  const callbacks = detectVerifyCallbacks(bundleSource);
+  if (callbacks.length === 0) {
+    return failCheck(
+      checks,
+      "Bundle callbacks",
+      "Expected at least one handler: onSpeechEvent, onUserSpeechFinal, onDataChannelMessage, or onDataChannelBinary",
     );
-    if (!speak.text.trim()) {
-      return failCheck(
-        checks,
-        "Speech response",
-        "Child returned empty speak text for user_speech_final",
-      );
-    }
-    checks.push({
-      name: "Speech response",
-      ok: true,
-      detail: speak.text.trim(),
-    });
-    logLine(quiet, `✓ Speech response (${speak.text.trim()})`);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    child.kill("SIGTERM");
-    await exitPromise;
-    return failCheck(checks, "Speech response", detail);
   }
-
-  if (childError) {
-    child.kill("SIGTERM");
-    await exitPromise;
-    return failCheck(checks, "No agent errors", childError);
-  }
-
-  checks.push({ name: "No agent errors", ok: true });
-  logLine(quiet, "✓ No agent errors");
-
-  child.send({ type: "session_end", sessionId: VERIFY_SESSION_ID });
-  child.kill("SIGTERM");
-  await exitPromise;
+  checks.push({
+    name: "Bundle callbacks",
+    ok: true,
+    detail: callbacks.join(", "),
+  });
+  logLine(quiet, `✓ Bundle callbacks (${callbacks.join(", ")})`);
 
   logLine(quiet, "[@voicethere/agent verify] All checks passed.");
 

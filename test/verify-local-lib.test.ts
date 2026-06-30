@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { ChildToParentMessage } from "../src/protocol.js";
 import {
+  VERIFY_CALLBACK_KEYS,
   DEFAULT_VERIFY_BUNDLE,
   VERIFY_SESSION_ID,
+  detectVerifyCallbacks,
+  hasDefineAgentRegistration,
   parseBundleArg,
   waitForSpeak,
 } from "../src/verify/lib.js";
@@ -72,5 +75,40 @@ describe("waitForSpeak", () => {
     await expect(
       waitForSpeak(messages, VERIFY_SESSION_ID, 150),
     ).rejects.toThrow(/Timed out/);
+  });
+});
+
+describe("detectVerifyCallbacks", () => {
+  it("detects callback keys from object literal forms", () => {
+    const source = `
+      defineAgent({
+        onSpeechEvent: async () => {},
+        onDataChannelBinary(ctx) {},
+      });
+    `;
+    expect(detectVerifyCallbacks(source)).toEqual([
+      "onSpeechEvent",
+      "onDataChannelBinary",
+    ]);
+  });
+
+  it("returns empty list when none of the verification callbacks are present", () => {
+    const source = "defineAgent({ onSessionStart: () => {} });";
+    expect(detectVerifyCallbacks(source)).toEqual([]);
+    expect(VERIFY_CALLBACK_KEYS.length).toBeGreaterThan(0);
+  });
+});
+
+describe("hasDefineAgentRegistration", () => {
+  it("detects defineAgent call in bundle source", () => {
+    expect(
+      hasDefineAgentRegistration("import { defineAgent } from '@voicethere/agent'; defineAgent({ onSpeechEvent() {} });"),
+    ).toBe(true);
+  });
+
+  it("returns false when defineAgent is absent", () => {
+    expect(hasDefineAgentRegistration("process.on('message', () => {});")).toBe(
+      false,
+    );
   });
 });

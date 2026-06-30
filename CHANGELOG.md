@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-30
+
+### Changed
+
+- **Static-only bundle verification** — `npx @voicethere/agent verify` no longer executes or imports customer bundle code; verification now performs static checks only.
+- **Verification callback criteria** — replaced the `speak()` runtime requirement with callback coverage checks; bundles pass when they register `defineAgent(...)` and define at least one of: `onSpeechEvent`, `onUserSpeechFinal`, `onDataChannelMessage`, `onDataChannelBinary`.
+- **Game/data-only compatibility** — game-only servers without `speak()` usage now pass verification when valid callback handlers are present.
+
 ## [0.2.2] - 2026-06-28
 
 ### Added

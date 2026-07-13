@@ -499,6 +499,29 @@ describe("defineAgent", () => {
     sendMock.restore();
   });
 
+  it("sends idle_timeout_done immediately when onIdleTimeout is not defined", async () => {
+    const onClientJoin = vi.fn();
+    capture = installProcessMessageCapture();
+    const sendMock = installProcessSendMock();
+    defineAgent({ onClientJoin });
+
+    capture.emit({
+      type: "idle_timeout",
+      sessionId: "peer-no-hook",
+      maxGraceMs: 30_000,
+    });
+
+    await vi.waitFor(() => {
+      expect(sendMock.send).toHaveBeenCalledWith({
+        type: "idle_timeout_done",
+        sessionId: "peer-no-hook",
+      });
+    });
+    expect(onClientJoin).not.toHaveBeenCalled();
+
+    sendMock.restore();
+  });
+
   it("dispatches onIdleTimeout and sends idle_timeout_done", async () => {
     const onIdleTimeout = vi.fn().mockResolvedValue(undefined);
     capture = installProcessMessageCapture();

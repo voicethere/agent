@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-07-13
+
+### Fixed
+
+- **Idle timeout without `onIdleTimeout`** — when the agent bundle does not define `onIdleTimeout`, the child now sends `idle_timeout_done` immediately instead of going through the hook path (avoids an extra runner callback grace wait when no customer handler exists).
+
 ## [0.2.4] - 2026-06-30
 
 ### Added

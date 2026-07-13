@@ -290,11 +290,19 @@ async function runIdleTimeoutHook(
   handlers: AgentHandlers,
   message: { sessionId: string; maxGraceMs: number },
 ): Promise<void> {
-  if (!handlers.onIdleTimeout) {
+  const onIdleTimeout = handlers.onIdleTimeout;
+  agentLog(
+    "info",
+    `idle_timeout ipc received (maxGraceMs=${message.maxGraceMs}, onIdleTimeout=${typeof onIdleTimeout === "function"})`,
+    message.sessionId,
+  );
+
+  if (!onIdleTimeout) {
     process.send?.({
       type: "idle_timeout_done",
       sessionId: message.sessionId,
     });
+    agentLog("info", "idle_timeout_done ipc sent (no onIdleTimeout handler)", message.sessionId);
     return;
   }
 
@@ -312,7 +320,7 @@ async function runIdleTimeoutHook(
 
   let error: string | undefined;
   try {
-    await handlers.onIdleTimeout(ctx);
+    await onIdleTimeout(ctx);
   } catch (hookError) {
     error = hookError instanceof Error ? hookError.message : String(hookError);
     agentLog("error", `onIdleTimeout failed: ${error}`, message.sessionId);
@@ -323,6 +331,13 @@ async function runIdleTimeoutHook(
     sessionId: message.sessionId,
     error,
   });
+  agentLog(
+    "info",
+    error
+      ? `idle_timeout_done ipc sent (onIdleTimeout error: ${error})`
+      : "idle_timeout_done ipc sent (onIdleTimeout completed)",
+    message.sessionId,
+  );
 }
 
 function buildIdleEnv(sessionId: string): Record<string, string> {

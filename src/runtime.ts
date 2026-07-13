@@ -290,6 +290,14 @@ async function runIdleTimeoutHook(
   handlers: AgentHandlers,
   message: { sessionId: string; maxGraceMs: number },
 ): Promise<void> {
+  if (!handlers.onIdleTimeout) {
+    process.send?.({
+      type: "idle_timeout_done",
+      sessionId: message.sessionId,
+    });
+    return;
+  }
+
   const env =
     peerEnvBySessionId.get(message.sessionId) ??
     buildIdleEnv(message.sessionId);
@@ -304,7 +312,7 @@ async function runIdleTimeoutHook(
 
   let error: string | undefined;
   try {
-    await handlers.onIdleTimeout?.(ctx);
+    await handlers.onIdleTimeout(ctx);
   } catch (hookError) {
     error = hookError instanceof Error ? hookError.message : String(hookError);
     agentLog("error", `onIdleTimeout failed: ${error}`, message.sessionId);

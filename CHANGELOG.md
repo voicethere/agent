@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-07-13
+
+### Fixed
+
+- **`onIdleTimeout` TypeScript narrowing** — bind optional handler to a local before `await` so `tsc` accepts the call after the early-return path.
+
+### Added
+
+- **Idle timeout IPC logging** — `agentLog` lines when `idle_timeout` is received and when `idle_timeout_done` is sent (visible in runner Loki as `source: agent-child`).
+
 ## [0.2.5] - 2026-07-13
 
 ### Fixed

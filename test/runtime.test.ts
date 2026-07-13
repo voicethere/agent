@@ -517,6 +517,22 @@ describe("defineAgent", () => {
         sessionId: "peer-no-hook",
       });
     });
+    expect(sendMock.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "log",
+        level: "info",
+        message: expect.stringContaining("idle_timeout ipc received"),
+        sessionId: "peer-no-hook",
+      }),
+    );
+    expect(sendMock.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "log",
+        level: "info",
+        message: expect.stringContaining("idle_timeout_done ipc sent"),
+        sessionId: "peer-no-hook",
+      }),
+    );
     expect(onClientJoin).not.toHaveBeenCalled();
 
     sendMock.restore();

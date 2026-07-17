@@ -75,9 +75,9 @@
     "@node-webrtc-rust/sdk": ">=0.6.5"
   },
   "devDependencies": {
-    "@node-webrtc-rust/helpers": "0.6.5",
-    "@node-webrtc-rust/sdk": "0.6.5",
-    "@node-webrtc-rust/signaling": "0.6.5",
+    "@node-webrtc-rust/helpers": "^0.6.10",
+    "@node-webrtc-rust/sdk": "0.6.9",
+    "@node-webrtc-rust/signaling": "0.6.9",
     "@types/node": "^22.10.0",
     "http-server": "^14.1.1",
     "tsx": "^4.19.2",

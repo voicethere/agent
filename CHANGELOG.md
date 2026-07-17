@@ -6,6 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- **`onAgentStart`** — optional one-shot hook on `defineAgent` that runs before any session IPC is handled. Use it to open process-wide resources (for example an `ioredis` client via `process.env.AGENT_REDIS_URL` / `ctx.env.AGENT_REDIS_URL`). Errors are logged and reported as `agent_error`; session IPC is still accepted afterward so the child does not hang.
+- **Sandbox `allowNetHosts`** — `buildChildExecArgv({ allowNetHosts })` emits scoped `--allow-net=<host>` flags so sandboxed children can reach project Redis while still denying `child_process`, fs writes, and addons.
+
+### Docs
+
+- Prefer depending on **`ioredis`** in your agent bundle and connecting inside `onAgentStart` when VoiceThere injects `AGENT_REDIS_URL`.
+
 ## [0.2.7] - 2026-07-17
 
 ### Changed

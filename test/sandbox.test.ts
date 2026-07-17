@@ -78,6 +78,29 @@ describe("buildChildExecArgv", () => {
     expect(readFlags).toContain("--allow-fs-read=/app/dist");
     expect(readFlags).toContain("--allow-fs-read=/app/dist/agent.js");
   });
+  it("includes allow-net flags when allowNetHosts is set", () => {
+    const argv = buildChildExecArgv({
+      loaderDir: "/app/src/sandbox",
+      bundlePath: "/app/dist/agent.js",
+      allowNetHosts: ["project-redis", "127.0.0.1:6379"],
+    });
+    expect(argv).toContain("--allow-net=project-redis");
+    expect(argv).toContain("--allow-net=127.0.0.1:6379");
+    expect(argv.some((flag) => flag.includes("allow-child-process"))).toBe(
+      false,
+    );
+    expect(argv.some((flag) => flag.includes("allow-fs-write"))).toBe(false);
+    expect(argv.some((flag) => flag.includes("allow-addons"))).toBe(false);
+  });
+
+  it("omits allow-net when allowNetHosts is empty or absent", () => {
+    const argv = buildChildExecArgv({
+      loaderDir: "/app/src/sandbox",
+      bundlePath: "/app/dist/agent.js",
+      allowNetHosts: ["", "  "],
+    });
+    expect(argv.some((flag) => flag.startsWith("--allow-net"))).toBe(false);
+  });
 });
 
 describe("child sandbox enforcement", () => {

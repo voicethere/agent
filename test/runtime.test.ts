@@ -40,6 +40,144 @@ describe("defineAgent", () => {
     resetAgentIpcStateForTests();
   });
 
+  it("runs onAgentStart once before session IPC handlers", async () => {
+    const originalEnabled = process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+    process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = "false";
+    try {
+      const order: string[] = [];
+      let releaseStart!: () => void;
+      const startGate = new Promise<void>((resolve) => {
+        releaseStart = resolve;
+      });
+
+      capture = installProcessMessageCapture();
+      defineAgent({
+        onAgentStart: async () => {
+          order.push("start");
+          await startGate;
+          order.push("start-done");
+        },
+        onSessionStart: async () => {
+          order.push("session");
+        },
+      });
+
+      capture.emit({
+        type: "session_start",
+        sessionId: "peer-agent-start",
+        env: { SESSION_ID: "peer-agent-start" },
+      });
+
+      await vi.waitFor(() => {
+        expect(order).toContain("start");
+      });
+      expect(order).not.toContain("session");
+
+      releaseStart();
+
+      await vi.waitFor(() => {
+        expect(order).toEqual(["start", "start-done", "session"]);
+        expect(capture.send).toHaveBeenCalledWith({
+          type: "session_start_ack",
+          sessionId: "peer-agent-start",
+        });
+      });
+    } finally {
+      if (originalEnabled === undefined) {
+        delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+      } else {
+        process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = originalEnabled;
+      }
+    }
+  });
+
+  it("reports onAgentStart errors without blocking later session IPC", async () => {
+    const originalEnabled = process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+    process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = "false";
+    try {
+      capture = installProcessMessageCapture();
+      const onSessionStart = vi.fn();
+      defineAgent({
+        onAgentStart: async () => {
+          throw new Error("redis unavailable");
+        },
+        onSessionStart,
+      });
+
+      capture.emit({
+        type: "session_start",
+        sessionId: "peer-after-fail",
+        env: { SESSION_ID: "peer-after-fail" },
+      });
+
+      await vi.waitFor(() => {
+        expect(capture.send).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "log",
+            level: "error",
+            message: expect.stringContaining("onAgentStart failed"),
+          }),
+        );
+        expect(capture.send).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "agent_error",
+            message: "redis unavailable",
+          }),
+        );
+        expect(onSessionStart).toHaveBeenCalled();
+        expect(capture.send).toHaveBeenCalledWith({
+          type: "session_start_ack",
+          sessionId: "peer-after-fail",
+        });
+      });
+    } finally {
+      if (originalEnabled === undefined) {
+        delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+      } else {
+        process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = originalEnabled;
+      }
+    }
+  });
+
+  it("passes process.env snapshot to onAgentStart", async () => {
+    const previous = process.env.AGENT_REDIS_URL;
+    const originalEnabled = process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+    process.env.AGENT_REDIS_URL = "redis://127.0.0.1:6379/0";
+    process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = "false";
+    try {
+      const onAgentStart = vi.fn().mockResolvedValue(undefined);
+      capture = installProcessMessageCapture();
+      defineAgent({ onAgentStart });
+
+      capture.emit({
+        type: "session_start",
+        sessionId: "peer-env",
+        env: { SESSION_ID: "peer-env" },
+      });
+
+      await vi.waitFor(() => {
+        expect(onAgentStart).toHaveBeenCalledWith(
+          expect.objectContaining({
+            env: expect.objectContaining({
+              AGENT_REDIS_URL: "redis://127.0.0.1:6379/0",
+            }),
+          }),
+        );
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AGENT_REDIS_URL;
+      } else {
+        process.env.AGENT_REDIS_URL = previous;
+      }
+      if (originalEnabled === undefined) {
+        delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+      } else {
+        process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = originalEnabled;
+      }
+    }
+  });
+
   it("dispatches onSessionStart with sessionId and env", async () => {
     const onSessionStart = vi.fn();
     capture = installProcessMessageCapture();

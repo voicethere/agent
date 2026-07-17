@@ -37,6 +37,7 @@ export {
   broadcastToClients,
   type AgentHandlers,
   type AgentErrorContext,
+  type AgentStartContext,
   type DataChannelContext,
   type IdleTimeoutContext,
   type SessionContext,

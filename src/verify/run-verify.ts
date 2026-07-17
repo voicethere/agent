@@ -8,7 +8,7 @@ import {
   parseBundleArg,
 } from "./lib.js";
 
-const MIN_NODE_MAJOR = 22;
+const MIN_NODE_MAJOR = 26;
 
 export interface VerifyAgentOptions {
   cwd?: string;

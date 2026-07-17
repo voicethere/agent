@@ -27,12 +27,16 @@ export function collectAllowFsReadDirs(paths: string[]): string[] {
 /**
  * Node --permission flags for the customer child: no subprocesses, no fs writes.
  * `fs` read is limited to the loader + bundle directories (no `--allow-child-process`).
- * Optional `allowNetHosts` adds scoped `--allow-net=<host>` entries (e.g. project Redis).
+ * Node 26+ gates outbound network under `--permission`; boolean `--allow-net` restores
+ * fetch/HTTPS for customer LLM calls. Optional `allowNetHosts` emits forward-compatible
+ * `--allow-net=<host>` entries for project Redis when Node adds host-scoped net ACLs.
  */
 export function buildChildExecArgv(options: {
   loaderDir: string;
   bundlePath: string;
-  /** Hostnames (optionally `host:port`) permitted under `--permission` for outbound TCP. */
+  /** When true (default), emit boolean `--allow-net` for HTTPS / LLM egress (Node 26+). */
+  allowInternet?: boolean;
+  /** Hostnames (optionally `host:port`) for future scoped `--allow-net` (e.g. project Redis). */
   allowNetHosts?: string[];
 }): string[] {
   const readDirs = collectAllowFsReadDirs([
@@ -41,10 +45,16 @@ export function buildChildExecArgv(options: {
     options.bundlePath,
   ]);
 
-  const allowNetFlags = (options.allowNetHosts ?? [])
-    .map((host) => host.trim())
-    .filter((host) => host.length > 0)
-    .map((host) => `--allow-net=${host}`);
+  const allowNetFlags: string[] = [];
+  if (options.allowInternet !== false) {
+    allowNetFlags.push("--allow-net");
+  }
+  for (const host of options.allowNetHosts ?? []) {
+    const trimmed = host.trim();
+    if (trimmed.length > 0) {
+      allowNetFlags.push(`--allow-net=${trimmed}`);
+    }
+  }
 
   return [
     "--permission",

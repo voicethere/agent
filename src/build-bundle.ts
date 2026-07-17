@@ -34,7 +34,7 @@ export async function buildAgentBundle(
     platform: "node",
     format: "esm",
     outfile,
-    target: "node22",
+    target: "node26",
     logLevel: "warning",
   });
 }

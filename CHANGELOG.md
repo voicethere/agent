@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-07-17
+
+### Changed
+
+- **Dev tooling** — align `@node-webrtc-rust/helpers` to `^0.6.10` and matching `sdk` / `signaling` `0.6.9` for live-test `SessionPod` typing (no published runtime API change).
+
 ## [0.2.6] - 2026-07-13
 
 ### Fixed

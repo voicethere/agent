@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-07-17
+
 ### Changed
 
 - **Node 26+** — CI, `engines`, and `verify` require Node **26+** because sandbox `--allow-net` is only enforced on Node 26. Runner images use Node 26 as well.
@@ -14,6 +16,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 ### Added
 
 - **`test/fetch-sandbox.test.ts`** — sandboxed child can `fetch` `https://www.google.com/` with production execArgv flags.
+- **`test/ioredis-bundle-sandbox.test.ts`** — builds an `ioredis` agent bundle and verifies `onAgentStart` can PING Redis under production sandbox flags.
+
+### Fixed
+
+- **`build` / `buildAgentBundle`** — bundle banner injects `createRequire` so inlined CJS deps (e.g. `ioredis`) can load Node built-ins (`events`, `net`, `stream`) without `Dynamic require of "events" is not supported`; stubs optional `supports-color` so debug code does not escape the sandbox fs allowlist.
 
 ## [0.2.8] - 2026-07-17
 

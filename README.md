@@ -256,7 +256,9 @@ npx @voicethere/agent build
 # or: npx @voicethere/agent build --entry src/agent.ts --outfile dist/agent.js
 ```
 
-Defaults: entry `agent.ts`, output `dist/agent.js`. Upload the bundle (or point `AGENT_BUNDLE_PATH` at it locally). Inlining dependencies avoids runtime `node_modules` resolution inside the sandbox.
+Defaults: entry `agent.ts`, output `dist/agent.js`. Upload the bundle (or point `AGENT_BUNDLE_PATH` at it locally). The CLI inlines npm dependencies (e.g. `ioredis`) into one file and wires `createRequire` for Node built-ins (`events`, `net`, `stream`, …) so the sandbox child does not need `node_modules` on disk.
+
+After building, run **`npx @voicethere/agent verify-start --no-build --bundle dist/agent.js`** to confirm the bundle loads under production `--permission` flags (catches errors like `Dynamic require of "events" is not supported`).
 
 ## Sandbox and security model
 

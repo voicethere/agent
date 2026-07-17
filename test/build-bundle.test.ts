@@ -26,6 +26,26 @@ describe("buildAgentBundle", () => {
     }
   });
 
+  it("bundles ioredis without esbuild dynamic require shim", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "voicethere-agent-ioredis-"));
+    const outfile = join(dir, "dist", "agent.js");
+
+    try {
+      await buildAgentBundle({
+        cwd: process.cwd(),
+        entry: "test/fixtures/ioredis-bundle-agent.ts",
+        outfile,
+      });
+
+      const source = readFileSync(outfile, "utf8");
+      expect(source).toContain("defineAgent");
+      expect(source).toContain("createRequire(import.meta.url)");
+      expect(source).not.toContain('__require("supports-color")');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("throws when entry is missing", async () => {
     await expect(
       buildAgentBundle({

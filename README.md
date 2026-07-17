@@ -284,7 +284,7 @@ Customer code runs in a **forked child process**, separate from the trusted agen
 
 ### Layer 2 — Node `--permission` (runtime-enforced)
 
-The parent starts the child with Node’s [Permission Model](https://nodejs.org/api/permissions.html) (Node **22+**). Capabilities are **deny-by-default**; only explicitly granted flags apply.
+The parent starts the child with Node’s [Permission Model](https://nodejs.org/api/permissions.html) (Node **26+** on VoiceThere runners). Capabilities are **deny-by-default**; only explicitly granted flags apply.
 
 **Granted today** (via `execArgv` on `fork()`):
 
@@ -293,6 +293,8 @@ The parent starts the child with Node’s [Permission Model](https://nodejs.org/
 | `--permission` | Enables restriction mode |
 | `--allow-fs-read=<loaderDir>` | Read files under the child loader directory |
 | `--allow-fs-read=<bundleParentDir>` | Read files under the **directory containing your `agent.js`** (see below) |
+| `--allow-net` | Outbound network (HTTPS/fetch, TCP) for customer LLM and tool APIs (Node **26+**) |
+| `--allow-net=<host>` | Reserved for project Redis host entries when Node supports host-scoped net ACLs |
 
 **Not granted → blocked at runtime:**
 
@@ -307,7 +309,7 @@ The parent starts the child with Node’s [Permission Model](https://nodejs.org/
 
 This is **not** an import allowlist — Node gates **capability classes**, not package names. Using `node:fs` inside the allowed read tree can work; using it on `/etc/passwd` does not.
 
-**Network is not gated by `--permission`.** `fetch`, `http`, `https`, and other outbound calls use the same network namespace as the parent. On VoiceThere-hosted sessions, **public internet egress is allowed** (e.g. calling your LLM or tool APIs). **Private cluster / internal platform addresses are not reachable** from the child — use the parent IPC surface for voice, not in-cluster services.
+**Network under `--permission` (Node 26+).** Outbound network is blocked unless boolean `--allow-net` is passed. VoiceThere runners always grant `--allow-net` so sandboxed agents can `fetch` LLM and tool APIs. When `AGENT_REDIS_URL` is set, the runner also emits `--allow-net=<redis-host>` entries (forward-compatible with future host-scoped ACLs). **Private cluster addresses** remain unreachable from the child via platform network isolation — use IPC for voice, not in-cluster HTTP.
 
 ### Bundle directory vs single file
 

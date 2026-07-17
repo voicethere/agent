@@ -46,6 +46,7 @@ describe("buildChildExecArgv", () => {
       bundlePath: "/app/dist/agent.js",
     });
     expect(argv).toContain("--permission");
+    expect(argv).toContain("--allow-net");
     expect(argv).toContain("--allow-fs-read=/app/src/sandbox");
     expect(argv).toContain("--allow-fs-read=/app/dist");
     expect(argv).toContain("--allow-fs-read=/app/dist/agent.js");
@@ -78,12 +79,13 @@ describe("buildChildExecArgv", () => {
     expect(readFlags).toContain("--allow-fs-read=/app/dist");
     expect(readFlags).toContain("--allow-fs-read=/app/dist/agent.js");
   });
-  it("includes allow-net flags when allowNetHosts is set", () => {
+  it("includes scoped allow-net hosts when allowNetHosts is set", () => {
     const argv = buildChildExecArgv({
       loaderDir: "/app/src/sandbox",
       bundlePath: "/app/dist/agent.js",
       allowNetHosts: ["project-redis", "127.0.0.1:6379"],
     });
+    expect(argv).toContain("--allow-net");
     expect(argv).toContain("--allow-net=project-redis");
     expect(argv).toContain("--allow-net=127.0.0.1:6379");
     expect(argv.some((flag) => flag.includes("allow-child-process"))).toBe(
@@ -93,10 +95,11 @@ describe("buildChildExecArgv", () => {
     expect(argv.some((flag) => flag.includes("allow-addons"))).toBe(false);
   });
 
-  it("omits allow-net when allowNetHosts is empty or absent", () => {
+  it("omits allow-net when allowInternet is false and no hosts are set", () => {
     const argv = buildChildExecArgv({
       loaderDir: "/app/src/sandbox",
       bundlePath: "/app/dist/agent.js",
+      allowInternet: false,
       allowNetHosts: ["", "  "],
     });
     expect(argv.some((flag) => flag.startsWith("--allow-net"))).toBe(false);

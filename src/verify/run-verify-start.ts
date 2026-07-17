@@ -15,7 +15,7 @@ import type {
 } from "./run-verify.js";
 
 const START_TIMEOUT_MS = 5000;
-const MIN_NODE_MAJOR = 22;
+const MIN_NODE_MAJOR = 26;
 
 function logLine(quiet: boolean | undefined, message: string): void {
   if (!quiet) {

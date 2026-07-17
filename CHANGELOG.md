@@ -6,6 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Changed
+
+- **Node 26+** — CI, `engines`, and `verify` require Node **26+** because sandbox `--allow-net` is only enforced on Node 26. Runner images use Node 26 as well.
+- **Sandbox network** — `buildChildExecArgv` always emits boolean `--allow-net` (opt out with `allowInternet: false`) so customer agents can `fetch` LLM APIs under `--permission`.
+
+### Added
+
+- **`test/fetch-sandbox.test.ts`** — sandboxed child can `fetch` `https://www.google.com/` with production execArgv flags.
+
 ## [0.2.8] - 2026-07-17
 
 ### Added

@@ -60,6 +60,7 @@ function startMiniRedis(): Promise<{ server: Server; port: number }> {
 
 function runIoredisProbe(options: {
   port: number;
+  allowInternet?: boolean;
   allowNetHosts?: string[];
 }): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -71,6 +72,7 @@ function runIoredisProbe(options: {
       ...buildChildExecArgv({
         loaderDir: SANDBOX_DIR,
         bundlePath: IOREDIS_PROBE,
+        allowInternet: options.allowInternet,
         allowNetHosts: options.allowNetHosts,
       }),
       `--allow-fs-read=${NODE_MODULES}`,
@@ -127,6 +129,7 @@ describe("ioredis under child sandbox", () => {
 
     const result = await runIoredisProbe({
       port: mini.port,
+      allowInternet: false,
     });
 
     expect(result.exitCode).not.toBe(0);

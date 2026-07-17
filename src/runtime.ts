@@ -34,7 +34,18 @@ export interface DataChannelContext {
   channel: DataChannelKind;
 }
 
+export interface AgentStartContext {
+  /** Snapshot of `process.env` at child start (includes `AGENT_REDIS_URL` when set). */
+  env: Record<string, string>;
+}
+
 export interface AgentHandlers {
+  /**
+   * Runs once when the child registers handlers — before any session IPC is handled.
+   * Use for process-wide setup (e.g. connect `ioredis` via `process.env.AGENT_REDIS_URL`).
+   * Errors are logged and reported; session IPC is still accepted afterward so the child does not hang.
+   */
+  onAgentStart?: (ctx: AgentStartContext) => void | Promise<void>;
   /** Alias for {@link AgentHandlers.onSessionStart}. */
   onClientJoin?: (ctx: SessionContext) => void | Promise<void>;
   onSessionStart?: (ctx: SessionContext) => void | Promise<void>;
@@ -217,14 +228,19 @@ async function handleParentMessage(
  *
  * Parent messages for the same `sessionId` are handled strictly in arrival order;
  * different sessions run independently (shared-child / load-safe).
+ *
+ * Optional {@link AgentHandlers.onAgentStart} runs once before any session message
+ * is processed (session IPC waits on that gate).
  */
 export function defineAgent(handlers: AgentHandlers): void {
   const inboundBySession = new SessionSerialQueue();
+  const agentStartReady = runAgentStartHook(handlers);
 
   process.on("message", (message: unknown) => {
     if (!isParentMessage(message)) return;
 
     inboundBySession.enqueue(message.sessionId, async () => {
+      await agentStartReady;
       await agentLogSessionContext.run(message.sessionId, async () => {
         try {
           if (message.type === "session_end") {
@@ -255,6 +271,24 @@ export function defineAgent(handlers: AgentHandlers): void {
       });
     });
   });
+}
+
+async function runAgentStartHook(handlers: AgentHandlers): Promise<void> {
+  if (!handlers.onAgentStart) return;
+  try {
+    await handlers.onAgentStart({
+      env: process.env as Record<string, string>,
+    });
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    agentLog("error", `onAgentStart failed: ${err.message}`);
+    process.send?.({
+      type: "agent_error",
+      sessionId: "",
+      message: err.message,
+      stack: err.stack,
+    });
+  }
 }
 
 function parseCustomerContext(

@@ -214,7 +214,11 @@ export interface DisconnectClientMessage {
  * Environment variable names the runner may inject into {@link SessionStartMessage.env}.
  *
  * The runner may add more project-specific keys over time; customer bundles must
- * not read `process.env` directly — only the `env` object on session start.
+ * not read `process.env` for session fields — only the `env` object on session start.
+ *
+ * Process-wide secrets such as `AGENT_REDIS_URL` (when project Redis is enabled) are
+ * still available on `process.env` inside `onAgentStart`.
+ * Keys prefixed with `AGENT_` may also be forwarded into the child environment.
  */
 export const ALLOWED_CHILD_ENV_KEYS = [
   "SESSION_ID",

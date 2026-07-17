@@ -150,6 +150,15 @@ import {
 import { SPEECH_EVENT_TYPE } from '@node-webrtc-rust/sdk/voice'
 
 defineAgent({
+  async onAgentStart({ env }) {
+    // When project Redis is enabled, VoiceThere injects AGENT_REDIS_URL.
+    // Depend on `ioredis` in your agent package and connect here (once per child).
+    const redisUrl = env.AGENT_REDIS_URL // or process.env.AGENT_REDIS_URL
+    if (redisUrl) {
+      // const Redis = (await import('ioredis')).default
+      // globalThis.redis = new Redis(redisUrl)
+    }
+  },
   onSessionStart({ sessionId }) {
     speak(sessionId, 'Hello!')
   },
@@ -164,9 +173,13 @@ defineAgent({
 })
 ```
 
+### Shared Redis (project-scoped)
+
+On plans that include project Redis, the runner injects **`AGENT_REDIS_URL`** into the child environment and grants scoped `--allow-net` for that host. Add **`ioredis`** as a dependency of your agent, bundle it with the CLI, and open the client in **`onAgentStart`** so it is ready before any `onSessionStart` / session IPC.
+
 | Export                                          | Purpose                                                                               |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `defineAgent`                                   | Register `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onSessionEnd`       |
+| `defineAgent`                                   | Register `onAgentStart`, `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onSessionEnd` |
 | `SpeechEvent`, `SpeechEventType`                | Re-exported **types** from `@node-webrtc-rust/sdk/voice`                              |
 | `SPEECH_EVENT_TYPE`                             | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child) |
 | `speak`                                         | Request parent TTS                                                                    |

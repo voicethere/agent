@@ -98,6 +98,8 @@ export function startSandboxedChild(
     env,
     stdio: ["ignore", "pipe", "pipe", "ipc"],
     execArgv,
+    // Preserve real Buffer / TypedArray for send_binary_to_client IPC.
+    serialization: "advanced",
   });
 
   child.stderr?.on("data", (chunk) => {

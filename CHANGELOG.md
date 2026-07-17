@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-07-17
+
+### Fixed
+
+- **Sandbox IPC** — `startSandboxedChild` now forks with `serialization: "advanced"` so `sendBinaryToClient` payloads remain real `Buffer`s across parent/child IPC (default JSON serialization turned them into `{ type: "Buffer", data: [...] }` and broke WebRTC binary fan-out).
+
 ## [0.2.9] - 2026-07-17
 
 ### Changed

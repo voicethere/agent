@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-07-17
+
 ### Added
 
 - **`onAgentStart`** — optional one-shot hook on `defineAgent` that runs before any session IPC is handled. Use it to open process-wide resources (for example an `ioredis` client via `process.env.AGENT_REDIS_URL` / `ctx.env.AGENT_REDIS_URL`). Errors are logged and reported as `agent_error`; session IPC is still accepted afterward so the child does not hang.

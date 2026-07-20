@@ -8,6 +8,7 @@ export type {
 export {
   ALLOWED_CHILD_ENV_KEYS,
   type AgentErrorMessage,
+  type AgentLogLevel,
   type AgentLogMessage,
   type AllowedChildEnvKey,
   type ChildToParentMessage,

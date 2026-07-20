@@ -1,7 +1,12 @@
 import type { SpeechEvent } from "@node-webrtc-rust/sdk/voice";
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import type { DataChannelKind, ParentToChildMessage } from "./protocol.js";
+import type {
+  AgentLogLevel,
+  AgentLogMessage,
+  DataChannelKind,
+  ParentToChildMessage,
+} from "./protocol.js";
 import { SessionSerialQueue } from "./session-serial-queue.js";
 
 export const SESSION_START_INIT_DELAY_ENABLED_ENV =
@@ -336,7 +341,11 @@ async function runIdleTimeoutHook(
       type: "idle_timeout_done",
       sessionId: message.sessionId,
     });
-    agentLog("info", "idle_timeout_done ipc sent (no onIdleTimeout handler)", message.sessionId);
+    agentLog(
+      "info",
+      "idle_timeout_done ipc sent (no onIdleTimeout handler)",
+      message.sessionId,
+    );
     return;
   }
 
@@ -451,19 +460,94 @@ export function broadcastToClients(
   }
 }
 
-/** Structured log forwarded to the runner parent (includes session when in a handler). */
-export function agentLog(
-  level: "info" | "error",
+const AGENT_LOG_MESSAGE_MAX_CHARS = 2048;
+const AGENT_LOG_FIELDS_MAX_CHARS = 8192;
+
+function truncateAgentLogMessage(message: string): string {
+  if (message.length <= AGENT_LOG_MESSAGE_MAX_CHARS) {
+    return message;
+  }
+  const suffix = "…[truncated]";
+  return message.slice(0, AGENT_LOG_MESSAGE_MAX_CHARS - suffix.length) + suffix;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sanitizeAgentLogFields(
+  fields: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (Object.keys(fields).length === 0) {
+    return undefined;
+  }
+  try {
+    const serialized = JSON.stringify(fields);
+    if (serialized.length <= AGENT_LOG_FIELDS_MAX_CHARS) {
+      return fields;
+    }
+    return {
+      _agentLogFieldsTruncated: true,
+      _originalBytes: serialized.length,
+      _preview:
+        serialized.slice(0, AGENT_LOG_FIELDS_MAX_CHARS - 80) + "…[truncated]",
+    };
+  } catch {
+    return { _agentLogFieldsError: "not_serializable" };
+  }
+}
+
+function buildAgentLogPayload(
+  level: AgentLogLevel,
   message: string,
+  fields?: Record<string, unknown>,
   sessionId?: string,
-): void {
+): AgentLogMessage {
   const resolvedSessionId = sessionId ?? agentLogSessionContext.getStore();
-  process.send?.({
+  const sanitizedFields = fields ? sanitizeAgentLogFields(fields) : undefined;
+  return {
     type: "log",
     level,
-    message,
+    message: truncateAgentLogMessage(message),
+    ts: Date.now(),
     ...(resolvedSessionId ? { sessionId: resolvedSessionId } : {}),
-  });
+    ...(sanitizedFields ? { fields: sanitizedFields } : {}),
+  };
+}
+
+/** Structured log forwarded to the runner parent (includes session when in a handler). */
+export function agentLog(
+  level: AgentLogLevel,
+  message: string,
+  sessionId?: string,
+): void;
+export function agentLog(
+  level: AgentLogLevel,
+  message: string,
+  fields: Record<string, unknown>,
+  sessionId?: string,
+): void;
+export function agentLog(
+  level: AgentLogLevel,
+  message: string,
+  fieldsOrSessionId?: Record<string, unknown> | string,
+  sessionId?: string,
+): void {
+  let fields: Record<string, unknown> | undefined;
+  let resolvedSessionId: string | undefined;
+
+  if (typeof fieldsOrSessionId === "string") {
+    resolvedSessionId = fieldsOrSessionId;
+  } else if (isPlainObject(fieldsOrSessionId)) {
+    fields = fieldsOrSessionId;
+    resolvedSessionId = sessionId;
+  } else {
+    resolvedSessionId = sessionId;
+  }
+
+  process.send?.(
+    buildAgentLogPayload(level, message, fields, resolvedSessionId),
+  );
 }
 
 /** Ask the runner to disconnect a browser peer (customer-initiated). */

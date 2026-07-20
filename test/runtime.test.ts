@@ -831,7 +831,7 @@ describe("agentLog", () => {
     resetAgentIpcStateForTests();
   });
 
-  it("sends structured log IPC", () => {
+  it("sends structured log IPC with timestamp", () => {
     sendMock = installProcessSendMock();
     agentLog("info", "started");
     agentLog("error", "failed");
@@ -839,12 +839,28 @@ describe("agentLog", () => {
       type: "log",
       level: "info",
       message: "started",
+      ts: expect.any(Number),
     });
     expect(sendMock.send).toHaveBeenNthCalledWith(2, {
       type: "log",
       level: "error",
       message: "failed",
+      ts: expect.any(Number),
     });
+  });
+
+  it("supports debug and warn levels", () => {
+    sendMock = installProcessSendMock();
+    agentLog("debug", "trace");
+    agentLog("warn", "careful");
+    expect(sendMock.send).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ level: "debug", message: "trace" }),
+    );
+    expect(sendMock.send).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ level: "warn", message: "careful" }),
+    );
   });
 
   it("includes explicit sessionId in log IPC", () => {
@@ -855,7 +871,35 @@ describe("agentLog", () => {
       level: "info",
       message: "hello",
       sessionId: "session-a",
+      ts: expect.any(Number),
     });
+  });
+
+  it("includes structured fields and optional sessionId", () => {
+    sendMock = installProcessSendMock();
+    agentLog("info", "event", { count: 3, peer: "p1" }, "session-a");
+    expect(sendMock.send).toHaveBeenCalledWith({
+      type: "log",
+      level: "info",
+      message: "event",
+      fields: { count: 3, peer: "p1" },
+      sessionId: "session-a",
+      ts: expect.any(Number),
+    });
+  });
+
+  it("truncates oversized message and fields", () => {
+    sendMock = installProcessSendMock();
+    const longMessage = "x".repeat(3000);
+    const longFields = { blob: "y".repeat(10_000) };
+    agentLog("info", longMessage, longFields);
+    const payload = sendMock.send.mock.calls[0]?.[0] as {
+      message: string;
+      fields: Record<string, unknown>;
+    };
+    expect(payload.message.length).toBeLessThanOrEqual(2048);
+    expect(payload.message.endsWith("…[truncated]")).toBe(true);
+    expect(payload.fields._agentLogFieldsTruncated).toBe(true);
   });
 
   it("includes active session from handler context", async () => {
@@ -877,6 +921,7 @@ describe("agentLog", () => {
         level: "info",
         message: "inside handler",
         sessionId: "session-b",
+        ts: expect.any(Number),
       });
     });
   });

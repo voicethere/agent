@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-07-20
+
+### Added
+
+- **Structured `agentLog`** — levels `debug|info|warn|error`, optional `fields` JSON, and `ts` on IPC `{ type: "log" }` payloads (backward-compatible sessionId argument).
+- **Sandbox console overrides** — `console.debug/log/info/warn/error` send structured log IPC (object first-arg with `message`/`fields` supported).
+
 ## [0.2.10] - 2026-07-17
 
 ### Fixed

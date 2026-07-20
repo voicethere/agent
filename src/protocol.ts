@@ -135,6 +135,9 @@ export interface SpeakMessage {
   text: string;
 }
 
+/** Log severity forwarded to the runner parent process. */
+export type AgentLogLevel = "debug" | "info" | "warn" | "error";
+
 /**
  * Structured log line forwarded to runner stdout / Winston.
  *
@@ -142,10 +145,14 @@ export interface SpeakMessage {
  */
 export interface AgentLogMessage {
   type: "log";
-  level: "info" | "error";
+  level: AgentLogLevel;
   message: string;
+  /** Optional structured key/value context (serialized size capped by {@link agentLog}). */
+  fields?: Record<string, unknown>;
   /** Orchestrator session id when the log originates from a session handler. */
   sessionId?: string;
+  /** Milliseconds since epoch when the child emitted the log. */
+  ts?: number;
 }
 
 /**

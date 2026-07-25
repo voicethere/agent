@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-07-25
+
 ### Fixed
 
 - **`SessionSerialQueue`** — task rejections are contained at the queue tail so they do not surface as process `unhandledRejection` events; pending state clears and later same-session tasks still run.

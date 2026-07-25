@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- **`SessionSerialQueue`** — task rejections are contained at the queue tail so they do not surface as process `unhandledRejection` events; pending state clears and later same-session tasks still run.
+- **`defineAgent`** — installs a once-per-process `unhandledRejection` guard for detached customer promises, reporting a single `agent_error` (with active session id when AsyncLocalStorage context is available). Awaited handler failures remain reported only by the existing try/catch path. Does not install a non-fatal `uncaughtException` listener.
+
 ## [0.2.11] - 2026-07-20
 
 ### Added

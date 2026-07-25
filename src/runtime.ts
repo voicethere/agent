@@ -124,6 +124,43 @@ const endedSessionIds = new Set<string>();
 /** Active orchestrator session while a parent IPC handler runs (per-session queue). */
 const agentLogSessionContext = new AsyncLocalStorage<string>();
 
+/** Idempotent: at most one child-process `unhandledRejection` listener. */
+let childUnhandledRejectionGuardInstalled = false;
+
+function normalizeRejectionReason(reason: unknown): Error {
+  return reason instanceof Error ? reason : new Error(String(reason));
+}
+
+/**
+ * Once-per-process safety net for detached customer promises (fire-and-forget
+ * work outside awaited handlers). Awaited handler failures stay reported only by
+ * the try/catch in {@link defineAgent} — this listener must not double-report those.
+ *
+ * Does not install `uncaughtException` (a corrupted child must still exit).
+ */
+function installChildUnhandledRejectionGuard(): void {
+  if (childUnhandledRejectionGuardInstalled) {
+    return;
+  }
+  childUnhandledRejectionGuardInstalled = true;
+
+  process.on("unhandledRejection", (reason: unknown) => {
+    const err = normalizeRejectionReason(reason);
+    const sessionId = agentLogSessionContext.getStore() ?? "";
+    agentLog(
+      "error",
+      `unhandledRejection: ${err.message}`,
+      sessionId || undefined,
+    );
+    process.send?.({
+      type: "agent_error",
+      sessionId,
+      message: err.message,
+      stack: err.stack,
+    });
+  });
+}
+
 function parseBooleanEnv(
   value: string | undefined,
   defaultValue: boolean,
@@ -238,6 +275,7 @@ async function handleParentMessage(
  * is processed (session IPC waits on that gate).
  */
 export function defineAgent(handlers: AgentHandlers): void {
+  installChildUnhandledRejectionGuard();
   const inboundBySession = new SessionSerialQueue();
   const agentStartReady = runAgentStartHook(handlers);
 

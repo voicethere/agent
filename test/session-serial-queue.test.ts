@@ -47,4 +47,55 @@ describe("SessionSerialQueue", () => {
 
     await vi.waitFor(() => expect(queue.hasPending("s1")).toBe(false));
   });
+
+  it("contains rejected tasks without process unhandledRejection", async () => {
+    const queue = new SessionSerialQueue();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      queue.enqueue("s1", async () => {
+        throw new Error("task fail");
+      });
+
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(unhandled).toEqual([]);
+      expect(queue.hasPending("s1")).toBe(false);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  it("clears pending state and runs later same-session tasks after a rejection", async () => {
+    const queue = new SessionSerialQueue();
+    const order: string[] = [];
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      queue.enqueue("s1", async () => {
+        order.push("fail");
+        throw new Error("boom");
+      });
+      queue.enqueue("s1", async () => {
+        order.push("next");
+      });
+
+      await vi.waitFor(() => expect(order).toEqual(["fail", "next"]));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(unhandled).toEqual([]);
+      expect(queue.hasPending("s1")).toBe(false);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });

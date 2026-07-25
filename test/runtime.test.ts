@@ -296,7 +296,6 @@ describe("defineAgent", () => {
   });
 
   it("supports disabling session_start init delay via env", async () => {
-    vi.useFakeTimers();
     const originalEnabled = process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
     const originalMs = process.env[SESSION_START_INIT_DELAY_MS_ENV];
     process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = "false";
@@ -313,11 +312,12 @@ describe("defineAgent", () => {
         env: { SESSION_ID: "peer-delay-disabled" },
       });
 
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(onSessionStart).toHaveBeenCalledWith({
-        sessionId: "peer-delay-disabled",
-        env: { SESSION_ID: "peer-delay-disabled" },
+      // Queue containment adds terminal catch microtasks; wait until the handler runs.
+      await vi.waitFor(() => {
+        expect(onSessionStart).toHaveBeenCalledWith({
+          sessionId: "peer-delay-disabled",
+          env: { SESSION_ID: "peer-delay-disabled" },
+        });
       });
     } finally {
       if (originalEnabled === undefined) {
@@ -330,7 +330,6 @@ describe("defineAgent", () => {
       } else {
         process.env[SESSION_START_INIT_DELAY_MS_ENV] = originalMs;
       }
-      vi.useRealTimers();
     }
   });
 
@@ -571,6 +570,90 @@ describe("defineAgent", () => {
     sendMock.restore();
   });
 
+  it("reports awaited handler rejection once (not doubled by unhandledRejection guard)", async () => {
+    capture = installProcessMessageCapture();
+    defineAgent({
+      onSessionStart: () => {
+        throw new Error("once");
+      },
+    });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-once",
+      env: {},
+    });
+
+    await vi.waitFor(() => {
+      const agentErrors = capture.send.mock.calls.filter(
+        ([message]) =>
+          message !== null &&
+          typeof message === "object" &&
+          (message as { type?: string }).type === "agent_error",
+      );
+      expect(agentErrors).toHaveLength(1);
+      expect(agentErrors[0]?.[0]).toEqual(
+        expect.objectContaining({
+          type: "agent_error",
+          sessionId: "peer-once",
+          message: "once",
+        }),
+      );
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const agentErrors = capture.send.mock.calls.filter(
+      ([message]) =>
+        message !== null &&
+        typeof message === "object" &&
+        (message as { type?: string }).type === "agent_error",
+    );
+    expect(agentErrors).toHaveLength(1);
+  });
+
+  it("reports detached unhandledRejection as one agent_error", async () => {
+    capture = installProcessMessageCapture();
+    defineAgent({});
+
+    const reason = new Error("detached boom");
+    process.emit("unhandledRejection", reason, Promise.resolve());
+
+    await vi.waitFor(() => {
+      const agentErrors = capture.send.mock.calls.filter(
+        ([message]) =>
+          message !== null &&
+          typeof message === "object" &&
+          (message as { type?: string }).type === "agent_error",
+      );
+      expect(agentErrors).toHaveLength(1);
+      expect(agentErrors[0]?.[0]).toEqual(
+        expect.objectContaining({
+          type: "agent_error",
+          sessionId: "",
+          message: "detached boom",
+          stack: expect.stringContaining("detached boom"),
+        }),
+      );
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "log",
+          level: "error",
+          message: expect.stringContaining("unhandledRejection: detached boom"),
+        }),
+      );
+    });
+  });
+
+  it("does not install duplicate unhandledRejection listeners across defineAgent calls", () => {
+    capture = installProcessMessageCapture();
+    defineAgent({});
+    const afterFirst = process.listenerCount("unhandledRejection");
+    defineAgent({});
+    expect(process.listenerCount("unhandledRejection")).toBe(afterFirst);
+  });
+
   it("reports rejected async handlers as agent_error IPC", async () => {
     capture = installProcessMessageCapture();
     const sendMock = installProcessSendMock();
@@ -777,10 +860,12 @@ describe("speak", () => {
 
   it("does not speak after session_end for the same session", async () => {
     const capture = installProcessMessageCapture();
+    const onSessionEnd = vi.fn();
     defineAgent({
       onSessionStart: async ({ sessionId }) => {
         speak(sessionId, "ready");
       },
+      onSessionEnd,
     });
 
     capture.emit({
@@ -792,8 +877,8 @@ describe("speak", () => {
     capture.send.mockClear();
 
     capture.emit({ type: "session_end", sessionId: "peer-1" });
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(onSessionEnd).toHaveBeenCalled());
+    capture.send.mockClear();
 
     speak("peer-1", "too late");
     expect(capture.send).not.toHaveBeenCalled();

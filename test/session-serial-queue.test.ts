@@ -167,8 +167,27 @@ describe("SessionSerialQueue", () => {
     finishOld();
     await expect(old).resolves.toBe("cancelled");
     expect(emits).toHaveLength(1);
-    // Fresh generation must still be idle-deletable without corruption.
-    await vi.waitFor(() => expect(queue.activeSessionCount).toBe(0));
+    // Fresh generation stays registered until clear (no idle-delete).
+    expect(queue.isLive("reuse")).toBe(true);
+    expect(queue.activeSessionCount).toBe(1);
+    queue.clear("reuse");
+    expect(queue.activeSessionCount).toBe(0);
+  });
+
+  it("keeps session registered while idle between handlers", async () => {
+    const queue = new SessionSerialQueue();
+    await queue.enqueue("s1", async () => undefined);
+    expect(queue.hasPending("s1")).toBe(false);
+    expect(queue.isLive("s1")).toBe(true);
+    expect(queue.activeSessionCount).toBe(1);
+
+    await queue.enqueue("s1", async () => undefined);
+    expect(queue.isLive("s1")).toBe(true);
+    expect(queue.generationOf("s1")).toBeDefined();
+
+    queue.clear("s1");
+    expect(queue.isLive("s1")).toBe(false);
+    expect(queue.activeSessionCount).toBe(0);
   });
 
   it("unique session ID churn leaves no map residue", async () => {
@@ -206,6 +225,10 @@ describe("SessionSerialQueue", () => {
     }
 
     await vi.waitFor(() => expect(queue.hasPending(sessionId)).toBe(false));
+    // Last completed generation stays until explicit clear (session_end).
+    expect(queue.isLive(sessionId)).toBe(true);
+    expect(queue.activeSessionCount).toBe(1);
+    queue.clear(sessionId);
     expect(queue.activeSessionCount).toBe(0);
   });
 

@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-07-28
+
+### Fixed
+
+- **`SessionSerialQueue`** — keep the per-session row while connected (`pending === 0` no longer deletes it). Idle-delete made `isLive` false between inbound handlers and silently dropped timer/`sendBinaryToClient` fan-out (redis-sync world broadcast). Rows are removed only by `clear` (`session_end`); the leave-hook generation is cleared after the end handler finishes.
+- **Outbound guards** — detached sends again require a registered live session that has not received `session_end` (not “a handler is currently running”).
+
 ## [0.2.13] - 2026-07-28
 
 ### Fixed

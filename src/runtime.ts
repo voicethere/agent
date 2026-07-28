@@ -132,8 +132,7 @@ export type SessionExecutionStore = {
  * (`speak`, `sendToClient`, …) consult this so a late old-generation callback
  * cannot emit after `clear` / session-id reuse.
  */
-const sessionExecutionContext =
-  new AsyncLocalStorage<SessionExecutionStore>();
+const sessionExecutionContext = new AsyncLocalStorage<SessionExecutionStore>();
 
 /** @deprecated Prefer {@link sessionExecutionContext}; kept for log session id. */
 const agentLogSessionContext = new AsyncLocalStorage<string>();
@@ -185,7 +184,11 @@ function installChildUnhandledRejectionGuard(): void {
 
 /**
  * True when outbound IPC/logs for `sessionId` are allowed under the current
- * generation-aware ALS + live queue state.
+ * generation-aware ALS + live session registration.
+ *
+ * Detached sends (timers, Redis fan-out) run outside handler ALS. The inbound
+ * queue keeps a session row until `session_end` clears it — `isLive` means
+ * "still connected/registered", not "a handler is currently running".
  */
 export function allowOutboundForSession(sessionId?: string): boolean {
   if (!sessionId) {
@@ -198,7 +201,8 @@ export function allowOutboundForSession(sessionId?: string): boolean {
     if (!queue) return !endedSessionIds.has(sessionId);
     return queue.isCurrentGeneration(sessionId, store.generation);
   }
-  // No ALS (or cross-session target): require a live generation and not ended.
+  // No ALS (or cross-session target): require a registered session that has
+  // not been marked ended. Stale same-id handlers are blocked via ALS above.
   if (endedSessionIds.has(sessionId)) return false;
   if (!queue) return true;
   return queue.isLive(sessionId);
@@ -339,18 +343,22 @@ export function defineAgent(handlers: AgentHandlers): void {
     if (!isParentMessage(message)) return;
 
     // Invalidate immediately on arrival — do not wait behind queued work that
-    // must be cancelled. session_end then enqueues on a fresh generation.
+    // must be cancelled. session_end then enqueues on a fresh generation for
+    // the leave hook only.
     if (message.type === "session_end") {
       endedSessionIds.add(message.sessionId);
       inboundBySession.clear(message.sessionId);
     }
-    // session_start after end always materializes a new generation via enqueue
-    // on an empty/cleared map entry (clear left no tombstone).
+    // session_start must not chain onto a dying session_end generation — clear
+    // first so enqueue always gets a new live row for the new connection.
+    if (message.type === "session_start") {
+      endedSessionIds.delete(message.sessionId);
+      inboundBySession.clear(message.sessionId);
+    }
 
-    inboundBySession.enqueue(
-      message.sessionId,
-      async (_signal, context) => {
-        await agentStartReady;
+    inboundBySession.enqueue(message.sessionId, async (_signal, context) => {
+      await agentStartReady;
+      try {
         await sessionExecutionContext.run(
           {
             sessionId: message.sessionId,
@@ -385,8 +393,20 @@ export function defineAgent(handlers: AgentHandlers): void {
               }
             }),
         );
-      },
-    );
+      } finally {
+        // Leave-hook row is temporary. Drop it only if this generation is
+        // still current (a racing session_start already cleared + replaced).
+        if (
+          message.type === "session_end" &&
+          inboundBySession.isCurrentGeneration(
+            message.sessionId,
+            context.generation,
+          )
+        ) {
+          inboundBySession.clear(message.sessionId);
+        }
+      }
+    });
   });
 }
 

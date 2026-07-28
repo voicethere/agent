@@ -7,11 +7,15 @@
  * unless {@link clear} invalidated the generation.
  *
  * Lifecycle ordering:
- * 1. `clear(sessionId)` aborts the live state and removes it from the map.
- * 2. Each live row has a unique monotonic generation token (global counter).
- * 3. Old task `finally` only mutates the captured state object; it deletes the
- *    map entry only when `sessions.get(id) === captured` and pending is 0.
- * 4. No per-session tombstone / generations map — idle unique IDs leave no residue.
+ * 1. First `enqueue` creates a live map row (generation token).
+ * 2. The row stays registered for the session lifetime — including when
+ *    `pending === 0` between inbound handlers. Clients send continuously and
+ *    agents fan out on timers; "no handler in flight" is not "session gone".
+ * 3. `clear(sessionId)` aborts live work and removes the row (session_end).
+ * 4. Old task `finally` only mutates the captured state object; it never
+ *    deletes a newer generation's map entry.
+ * 5. No per-session tombstone map — callers must `clear` ended sessions so
+ *    unique-ID churn leaves no residue.
  */
 
 export class SessionSerialQueueCancellationError extends Error {
@@ -118,15 +122,12 @@ export class SessionSerialQueue {
       })
       .finally(() => {
         // Only the captured state identity may be mutated by this task.
+        // Do not delete the map row when pending hits 0 — the session stays
+        // live until {@link clear} (session_end). Idle-delete broke timer
+        // fan-out / isLive for still-connected sessions.
         captured.pending = Math.max(0, captured.pending - 1);
         if (taskAbort && captured.abort === taskAbort) {
           captured.abort = null;
-        }
-        if (
-          captured.pending === 0 &&
-          this.sessions.get(sessionId) === captured
-        ) {
-          this.sessions.delete(sessionId);
         }
       });
 
@@ -158,7 +159,7 @@ export class SessionSerialQueue {
     return (this.sessions.get(sessionId)?.pending ?? 0) > 0;
   }
 
-  /** Live generation token for a session, or `undefined` when idle/cleared. */
+  /** Live generation token for a session, or `undefined` when cleared. */
   generationOf(sessionId: string): number | undefined {
     return this.sessions.get(sessionId)?.generation;
   }
@@ -168,12 +169,15 @@ export class SessionSerialQueue {
     return this.sessions.get(sessionId)?.generation === generation;
   }
 
-  /** True when a live queue row exists for the session. */
+  /**
+   * True when a queue row exists for the session (registered since first
+   * enqueue, until {@link clear}). Not the same as {@link hasPending}.
+   */
   isLive(sessionId: string): boolean {
     return this.sessions.has(sessionId);
   }
 
-  /** Live queue rows (tests: unique-ID churn must not grow this unbounded). */
+  /** Registered session rows (must not grow without matching `clear` calls). */
   get activeSessionCount(): number {
     return this.sessions.size;
   }

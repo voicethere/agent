@@ -1031,6 +1031,74 @@ describe("generation-aware outbound guards", () => {
     delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
   });
 
+  it("allows detached sendBinaryToClient after inbound queue drains", async () => {
+    capture = installProcessMessageCapture();
+    defineAgent({
+      onSessionStart: async () => {
+        // no-op — queue becomes idle after this handler completes
+      },
+    });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "fanout-1",
+      env: { SESSION_ID: "fanout-1" },
+    });
+    await vi.waitFor(() => {
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "session_start_ack",
+          sessionId: "fanout-1",
+        }),
+      );
+    });
+    capture.send.mockClear();
+
+    // Simulate timer/Redis world loop outside handler ALS after idle drain.
+    sendBinaryToClient("fanout-1", Buffer.from([9, 9]), "sync");
+    expect(capture.send).toHaveBeenCalledWith({
+      type: "send_binary_to_client",
+      sessionId: "fanout-1",
+      data: Buffer.from([9, 9]),
+      channel: "sync",
+    });
+
+    sendToClient("fanout-1", { type: "tick" });
+    expect(capture.send).toHaveBeenCalledWith({
+      type: "send_to_client",
+      sessionId: "fanout-1",
+      payload: { type: "tick" },
+    });
+  });
+
+  it("blocks detached outbound after session_end", async () => {
+    capture = installProcessMessageCapture();
+    defineAgent({
+      onSessionStart: async () => {},
+    });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "fanout-end",
+      env: { SESSION_ID: "fanout-end" },
+    });
+    await vi.waitFor(() => {
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session_start_ack" }),
+      );
+    });
+    capture.emit({ type: "session_end", sessionId: "fanout-end" });
+    await vi.waitFor(() => {
+      // session_end processing may emit logs; clear then assert drop
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    capture.send.mockClear();
+
+    sendBinaryToClient("fanout-end", Buffer.from([1]), "sync");
+    sendToClient("fanout-end", { type: "tick" });
+    expect(capture.send).not.toHaveBeenCalled();
+  });
+
   it("blocks old handler outbound after session_end + same-id reuse", async () => {
     capture = installProcessMessageCapture();
     let releaseOld!: () => void;

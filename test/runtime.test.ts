@@ -6,6 +6,7 @@ import {
   disconnectClient,
   resetAgentIpcStateForTests,
   sendBinaryToClient,
+  sendToClient,
   speak,
   SESSION_START_INIT_DELAY_MS_ENV,
   SESSION_START_INIT_DELAY_ENABLED_ENV,
@@ -502,7 +503,7 @@ describe("defineAgent", () => {
     await vi.waitFor(() => expect(order).toEqual(["start"]));
   });
 
-  it("processes session_start before session_end for the same session", async () => {
+  it("invalidates session_start immediately when session_end arrives", async () => {
     const order: string[] = [];
     capture = installProcessMessageCapture();
     defineAgent({
@@ -520,9 +521,12 @@ describe("defineAgent", () => {
       sessionId: "peer-1",
       env: {},
     });
+    // Immediate clear must cancel the not-yet-run start; only end runs.
     capture.emit({ type: "session_end", sessionId: "peer-1" });
 
-    await vi.waitFor(() => expect(order).toEqual(["start", "end"]));
+    await vi.waitFor(() => expect(order).toEqual(["end"]));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(order).toEqual(["end"]);
   });
 
   it("processes different sessions independently", async () => {
@@ -891,9 +895,11 @@ describe("sendBinaryToClient", () => {
 
   afterEach(() => {
     sendMock?.restore();
+    resetAgentIpcStateForTests();
   });
 
   it("sends binary IPC to parent", () => {
+    resetAgentIpcStateForTests();
     sendMock = installProcessSendMock();
     const payload = Uint8Array.of(1, 2, 3);
     sendBinaryToClient("peer-1", payload, "sync");
@@ -1009,5 +1015,105 @@ describe("agentLog", () => {
         ts: expect.any(Number),
       });
     });
+  });
+});
+
+describe("generation-aware outbound guards", () => {
+  let capture: ReturnType<typeof installProcessMessageCapture>;
+
+  beforeEach(() => {
+    process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = "false";
+  });
+
+  afterEach(() => {
+    capture?.restore();
+    resetAgentIpcStateForTests();
+    delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+  });
+
+  it("blocks old handler outbound after session_end + same-id reuse", async () => {
+    capture = installProcessMessageCapture();
+    let releaseOld!: () => void;
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let oldHandlerReached = false;
+
+    defineAgent({
+      onSessionStart: async ({ sessionId }) => {
+        if (sessionId === "reuse-1" && !oldHandlerReached) {
+          oldHandlerReached = true;
+          await oldGate;
+          speak(sessionId, "stale-speak");
+          sendBinaryToClient(sessionId, Buffer.from([1]));
+          disconnectClient(sessionId);
+          agentLog("info", "stale-log", sessionId);
+          sendToClient(sessionId, { type: "stale" });
+        } else {
+          speak(sessionId, "fresh-speak");
+          sendToClient(sessionId, { type: "fresh" });
+        }
+      },
+    });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "reuse-1",
+      env: { SESSION_ID: "reuse-1" },
+    });
+    await vi.waitFor(() => expect(oldHandlerReached).toBe(true));
+
+    capture.emit({ type: "session_end", sessionId: "reuse-1" });
+    capture.emit({
+      type: "session_start",
+      sessionId: "reuse-1",
+      env: { SESSION_ID: "reuse-1" },
+    });
+
+    await vi.waitFor(() => {
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "speak",
+          sessionId: "reuse-1",
+          text: "fresh-speak",
+        }),
+      );
+    });
+
+    const sendsBeforeOld = capture.send.mock.calls.length;
+    releaseOld();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const newCalls = capture.send.mock.calls.slice(sendsBeforeOld);
+    expect(
+      newCalls.some(
+        (call) =>
+          (call[0] as { type?: string; text?: string }).type === "speak" &&
+          (call[0] as { text?: string }).text === "stale-speak",
+      ),
+    ).toBe(false);
+    expect(
+      newCalls.some(
+        (call) => (call[0] as { type?: string }).type === "send_to_client",
+      ),
+    ).toBe(false);
+    expect(
+      newCalls.some(
+        (call) =>
+          (call[0] as { type?: string }).type === "send_binary_to_client",
+      ),
+    ).toBe(false);
+    expect(
+      newCalls.some(
+        (call) => (call[0] as { type?: string }).type === "disconnect_client",
+      ),
+    ).toBe(false);
+    expect(
+      newCalls.some(
+        (call) =>
+          (call[0] as { type?: string; message?: string }).type === "log" &&
+          (call[0] as { message?: string }).message === "stale-log",
+      ),
+    ).toBe(false);
   });
 });

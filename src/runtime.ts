@@ -119,10 +119,27 @@ function parseDataChannelPayload(raw: string): unknown {
 }
 
 const peerEnvBySessionId = new Map<string, Record<string, string>>();
-/** Sessions that received `session_end`; `speak()` becomes a no-op. */
+/** Sessions that received `session_end`; `speak()` becomes a no-op when no live gen. */
 const endedSessionIds = new Set<string>();
-/** Active orchestrator session while a parent IPC handler runs (per-session queue). */
+
+export type SessionExecutionStore = {
+  sessionId: string;
+  generation: number;
+};
+
+/**
+ * Generation-aware execution context for inbound handlers. Outbound helpers
+ * (`speak`, `sendToClient`, …) consult this so a late old-generation callback
+ * cannot emit after `clear` / session-id reuse.
+ */
+const sessionExecutionContext =
+  new AsyncLocalStorage<SessionExecutionStore>();
+
+/** @deprecated Prefer {@link sessionExecutionContext}; kept for log session id. */
 const agentLogSessionContext = new AsyncLocalStorage<string>();
+
+/** Live inbound queue for the child process (set by {@link defineAgent}). */
+let inboundQueueAuthority: SessionSerialQueue | null = null;
 
 /** Idempotent: at most one child-process `unhandledRejection` listener. */
 let childUnhandledRejectionGuardInstalled = false;
@@ -146,19 +163,57 @@ function installChildUnhandledRejectionGuard(): void {
 
   process.on("unhandledRejection", (reason: unknown) => {
     const err = normalizeRejectionReason(reason);
-    const sessionId = agentLogSessionContext.getStore() ?? "";
+    const store = sessionExecutionContext.getStore();
+    const sessionId =
+      store?.sessionId ?? agentLogSessionContext.getStore() ?? "";
+    if (!allowOutboundForSession(sessionId || undefined)) {
+      return;
+    }
     agentLog(
       "error",
       `unhandledRejection: ${err.message}`,
       sessionId || undefined,
     );
-    process.send?.({
+    sendParentMessage({
       type: "agent_error",
       sessionId,
       message: err.message,
       stack: err.stack,
     });
   });
+}
+
+/**
+ * True when outbound IPC/logs for `sessionId` are allowed under the current
+ * generation-aware ALS + live queue state.
+ */
+export function allowOutboundForSession(sessionId?: string): boolean {
+  if (!sessionId) {
+    // Process-wide logs without a session are always allowed.
+    return true;
+  }
+  const store = sessionExecutionContext.getStore();
+  const queue = inboundQueueAuthority;
+  if (store && store.sessionId === sessionId) {
+    if (!queue) return !endedSessionIds.has(sessionId);
+    return queue.isCurrentGeneration(sessionId, store.generation);
+  }
+  // No ALS (or cross-session target): require a live generation and not ended.
+  if (endedSessionIds.has(sessionId)) return false;
+  if (!queue) return true;
+  return queue.isLive(sessionId);
+}
+
+function sendParentMessage(message: unknown): void {
+  const sessionId =
+    message &&
+    typeof message === "object" &&
+    "sessionId" in message &&
+    typeof (message as { sessionId?: unknown }).sessionId === "string"
+      ? (message as { sessionId: string }).sessionId
+      : undefined;
+  if (!allowOutboundForSession(sessionId)) return;
+  process.send?.(message as never);
 }
 
 function parseBooleanEnv(
@@ -213,7 +268,7 @@ async function handleParentMessage(
         sessionId: message.sessionId,
         env: message.env,
       });
-      process.send?.({
+      sendParentMessage({
         type: "session_start_ack",
         sessionId: message.sessionId,
       });
@@ -277,42 +332,61 @@ async function handleParentMessage(
 export function defineAgent(handlers: AgentHandlers): void {
   installChildUnhandledRejectionGuard();
   const inboundBySession = new SessionSerialQueue();
+  inboundQueueAuthority = inboundBySession;
   const agentStartReady = runAgentStartHook(handlers);
 
   process.on("message", (message: unknown) => {
     if (!isParentMessage(message)) return;
 
-    inboundBySession.enqueue(message.sessionId, async () => {
-      await agentStartReady;
-      await agentLogSessionContext.run(message.sessionId, async () => {
-        try {
-          if (message.type === "session_end") {
-            endedSessionIds.add(message.sessionId);
-            inboundBySession.clear(message.sessionId);
-          }
-          await handleParentMessage(message, handlers);
-        } catch (error) {
-          const err = error instanceof Error ? error : new Error(String(error));
-          const env =
-            peerEnvBySessionId.get(message.sessionId) ??
-            buildIdleEnv(message.sessionId);
-          await runErrorHook(handlers, {
+    // Invalidate immediately on arrival — do not wait behind queued work that
+    // must be cancelled. session_end then enqueues on a fresh generation.
+    if (message.type === "session_end") {
+      endedSessionIds.add(message.sessionId);
+      inboundBySession.clear(message.sessionId);
+    }
+    // session_start after end always materializes a new generation via enqueue
+    // on an empty/cleared map entry (clear left no tombstone).
+
+    inboundBySession.enqueue(
+      message.sessionId,
+      async (_signal, context) => {
+        await agentStartReady;
+        await sessionExecutionContext.run(
+          {
             sessionId: message.sessionId,
-            projectId: env.PROJECT_ID,
-            buildId: env.BUILD_ID,
-            env,
-            error: err,
-            customerContext: parseCustomerContext(env.AGENT_CUSTOMER_CONTEXT),
-          });
-          process.send?.({
-            type: "agent_error",
-            sessionId: message.sessionId,
-            message: err.message,
-            stack: err.stack,
-          });
-        }
-      });
-    });
+            generation: context.generation,
+          },
+          async () =>
+            agentLogSessionContext.run(message.sessionId, async () => {
+              try {
+                await handleParentMessage(message, handlers);
+              } catch (error) {
+                const err =
+                  error instanceof Error ? error : new Error(String(error));
+                const env =
+                  peerEnvBySessionId.get(message.sessionId) ??
+                  buildIdleEnv(message.sessionId);
+                await runErrorHook(handlers, {
+                  sessionId: message.sessionId,
+                  projectId: env.PROJECT_ID,
+                  buildId: env.BUILD_ID,
+                  env,
+                  error: err,
+                  customerContext: parseCustomerContext(
+                    env.AGENT_CUSTOMER_CONTEXT,
+                  ),
+                });
+                sendParentMessage({
+                  type: "agent_error",
+                  sessionId: message.sessionId,
+                  message: err.message,
+                  stack: err.stack,
+                });
+              }
+            }),
+        );
+      },
+    );
   });
 }
 
@@ -325,7 +399,7 @@ async function runAgentStartHook(handlers: AgentHandlers): Promise<void> {
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     agentLog("error", `onAgentStart failed: ${err.message}`);
-    process.send?.({
+    sendParentMessage({
       type: "agent_error",
       sessionId: "",
       message: err.message,
@@ -375,7 +449,7 @@ async function runIdleTimeoutHook(
   );
 
   if (!onIdleTimeout) {
-    process.send?.({
+    sendParentMessage({
       type: "idle_timeout_done",
       sessionId: message.sessionId,
     });
@@ -407,7 +481,7 @@ async function runIdleTimeoutHook(
     agentLog("error", `onIdleTimeout failed: ${error}`, message.sessionId);
   }
 
-  process.send?.({
+  sendParentMessage({
     type: "idle_timeout_done",
     sessionId: message.sessionId,
     error,
@@ -436,17 +510,17 @@ function buildIdleEnv(sessionId: string): Record<string, string> {
 export function resetAgentIpcStateForTests(): void {
   endedSessionIds.clear();
   peerEnvBySessionId.clear();
+  inboundQueueAuthority = null;
 }
 
 /** Ask the runner parent to synthesize speech for the session. */
 export function speak(sessionId: string, text: string): void {
-  if (endedSessionIds.has(sessionId)) return;
-  process.send?.({ type: "speak", sessionId, text });
+  sendParentMessage({ type: "speak", sessionId, text });
 }
 
 /** Send a JSON payload to the browser peer via the runner parent. */
 export function sendToClient(sessionId: string, payload: unknown): void {
-  process.send?.({ type: "send_to_client", sessionId, payload });
+  sendParentMessage({ type: "send_to_client", sessionId, payload });
 }
 
 /** Send raw bytes to the browser peer via the runner parent. */
@@ -456,7 +530,7 @@ export function sendBinaryToClient(
   channel: DataChannelKind = "sync",
 ): void {
   const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
-  process.send?.({
+  sendParentMessage({
     type: "send_binary_to_client",
     sessionId,
     data: buffer,
@@ -479,7 +553,7 @@ export function broadCastBinaryToClients(
 ): void {
   const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
   for (const sessionId of sessionIds) {
-    process.send?.({
+    sendParentMessage({
       type: "send_binary_to_client",
       sessionId,
       data: buffer,
@@ -541,7 +615,10 @@ function buildAgentLogPayload(
   fields?: Record<string, unknown>,
   sessionId?: string,
 ): AgentLogMessage {
-  const resolvedSessionId = sessionId ?? agentLogSessionContext.getStore();
+  const resolvedSessionId =
+    sessionId ??
+    sessionExecutionContext.getStore()?.sessionId ??
+    agentLogSessionContext.getStore();
   const sanitizedFields = fields ? sanitizeAgentLogFields(fields) : undefined;
   return {
     type: "log",
@@ -583,7 +660,7 @@ export function agentLog(
     resolvedSessionId = sessionId;
   }
 
-  process.send?.(
+  sendParentMessage(
     buildAgentLogPayload(level, message, fields, resolvedSessionId),
   );
 }
@@ -593,7 +670,7 @@ export function disconnectClient(
   sessionId: string,
   options?: { reason?: string },
 ): void {
-  process.send?.({
+  sendParentMessage({
     type: "disconnect_client",
     sessionId,
     reason: options?.reason,

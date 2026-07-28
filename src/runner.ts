@@ -10,4 +10,9 @@ export {
   type StartSandboxedChildOptions,
 } from "./sandbox/start-child.js";
 
-export { SessionSerialQueue } from "./session-serial-queue.js";
+export {
+  SessionSerialQueue,
+  SessionSerialQueueCancellationError,
+  type SessionSerialTask,
+  type SessionSerialTaskContext,
+} from "./session-serial-queue.js";

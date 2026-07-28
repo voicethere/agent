@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SessionSerialQueue } from "../src/session-serial-queue.js";
+import {
+  SessionSerialQueue,
+  SessionSerialQueueCancellationError,
+} from "../src/session-serial-queue.js";
 
 describe("SessionSerialQueue", () => {
   it("serializes tasks for the same session", async () => {
@@ -97,5 +100,140 @@ describe("SessionSerialQueue", () => {
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }
+  });
+
+  it("generation clear cancels queued work and aborts running AbortSignal tasks", async () => {
+    const queue = new SessionSerialQueue();
+    const events: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const first = queue.enqueue("s1", async (signal: AbortSignal) => {
+      events.push("start-1");
+      await gate;
+      if (signal.aborted) {
+        events.push("aborted-1");
+        throw new SessionSerialQueueCancellationError("s1", 0);
+      }
+      events.push("finish-1");
+    });
+    const second = queue.enqueue("s1", async () => {
+      events.push("start-2");
+    });
+
+    await vi.waitFor(() => expect(events).toContain("start-1"));
+    const genBefore = queue.generationOf("s1");
+    expect(genBefore).toBeDefined();
+    queue.clear("s1");
+    expect(queue.generationOf("s1")).toBeUndefined();
+    release();
+
+    await expect(first).resolves.toBe("cancelled");
+    await expect(second).resolves.toBe("cancelled");
+    expect(events).not.toContain("start-2");
+    expect(events).not.toContain("finish-1");
+  });
+
+  it("enqueue after clear belongs to a fresh generation token; old finally cannot delete it", async () => {
+    const queue = new SessionSerialQueue();
+    const emits: string[] = [];
+    let finishOld: () => void = () => {};
+    const oldGate = new Promise<void>((resolve) => {
+      finishOld = resolve;
+    });
+
+    const old = queue.enqueue("reuse", async (_signal, ctx) => {
+      await oldGate;
+      if (!queue.isCurrentGeneration("reuse", ctx.generation)) {
+        return;
+      }
+      emits.push("old");
+    });
+    const oldGen = queue.generationOf("reuse");
+
+    queue.clear("reuse");
+    const fresh = queue.enqueue("reuse", async (_signal, ctx) => {
+      emits.push(`new:${ctx.generation}`);
+    });
+    const newGen = queue.generationOf("reuse");
+    expect(newGen).toBeDefined();
+    expect(newGen).not.toBe(oldGen);
+
+    await expect(fresh).resolves.toBe("completed");
+    expect(emits[0]?.startsWith("new:")).toBe(true);
+
+    finishOld();
+    await expect(old).resolves.toBe("cancelled");
+    expect(emits).toHaveLength(1);
+    // Fresh generation must still be idle-deletable without corruption.
+    await vi.waitFor(() => expect(queue.activeSessionCount).toBe(0));
+  });
+
+  it("unique session ID churn leaves no map residue", async () => {
+    const queue = new SessionSerialQueue();
+    for (let i = 0; i < 2000; i += 1) {
+      const id = `unique-${i}`;
+      await queue.enqueue(id, async () => undefined);
+      queue.clear(id);
+    }
+    expect(queue.activeSessionCount).toBe(0);
+  });
+
+  it("stress: enqueue/clear/reuse loop leaves no map growth and does not stall", async () => {
+    const queue = new SessionSerialQueue();
+    const sessionId = "soak-reuse";
+
+    for (let i = 0; i < 50; i += 1) {
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const pending = queue.enqueue(sessionId, async (_signal, ctx) => {
+        await gate;
+        if (!queue.isCurrentGeneration(sessionId, ctx.generation)) return;
+      });
+      queue.enqueue(sessionId, async () => {
+        throw new Error("stale-queued");
+      });
+      queue.clear(sessionId);
+      release();
+      await expect(pending).resolves.toBe("cancelled");
+
+      const next = queue.enqueue(sessionId, async () => undefined);
+      await expect(next).resolves.toBe("completed");
+    }
+
+    await vi.waitFor(() => expect(queue.hasPending(sessionId)).toBe(false));
+    expect(queue.activeSessionCount).toBe(0);
+  });
+
+  it("errors do not stall the next generation", async () => {
+    const queue = new SessionSerialQueue();
+    const order: string[] = [];
+
+    void queue.enqueue("s1", async () => {
+      order.push("boom");
+      throw new Error("gen0 fail");
+    });
+    await vi.waitFor(() => expect(order).toEqual(["boom"]));
+    queue.clear("s1");
+
+    await queue.enqueue("s1", async () => {
+      order.push("gen1");
+    });
+    expect(order).toEqual(["boom", "gen1"]);
+    expect(queue.hasPending("s1")).toBe(false);
+  });
+
+  it("passes generation context as the second enqueue argument", async () => {
+    const queue = new SessionSerialQueue();
+    let seen: number | undefined;
+    await queue.enqueue("s1", async (signal, ctx) => {
+      expect(signal).toBe(ctx.signal);
+      seen = ctx.generation;
+    });
+    expect(typeof seen).toBe("number");
   });
 });

@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-07-28
+
+### Fixed
+
+- **`SessionSerialQueue`** — generation-safe clear/reuse so stale handlers cannot mutate a later session generation; no per-session tombstone maps left at idle.
+- **`session_end`** — invalidate/abort the live queue immediately on message arrival, then process end on a fresh generation.
+- **Outbound guards** — generation-aware execution context blocks speak/send after clear or reuse.
+
 ## [0.2.12] - 2026-07-25
 
 ### Fixed

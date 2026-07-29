@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-07-29
+
+### Changed
+
+- Bump `@node-webrtc-rust/{helpers,sdk,signaling}` to **0.6.21** (VoiceAgentSessionHost waits for voice-control DataChannel open before starting VoiceAgent).
+
 ## [0.2.14] - 2026-07-28
 
 ### Fixed

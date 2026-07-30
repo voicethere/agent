@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-07-30
+
+### Changed
+
+- Bump `@node-webrtc-rust/{helpers,sdk,signaling}` to **0.6.24**.
+- Sync Sherpa STT/TTS catalogs used by live-test model selection scripts.
+
 ## [0.2.15] - 2026-07-29
 
 ### Changed

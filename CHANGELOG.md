@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-07-31
+
+### Changed
+
+- **Deps** — `@node-webrtc-rust/{helpers,sdk,signaling}` **0.7.0** (Opus SDP omits `maxaveragebitrate` unless env set; encode default 400 kbps).
+
 ## [0.2.16] - 2026-07-30
 
 ### Changed

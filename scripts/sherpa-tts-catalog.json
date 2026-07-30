@@ -1,24 +1,235 @@
 {
   "releaseBase": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models",
+  "releaseTagUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models",
+  "huggingfaceAuthor": "csukuangfj",
+  "notes": "Browse models at releaseTagUrl. Download each bundle as ${releaseBase}/<bundle>.tar.bz2 (the bare \u2026/download/tts-models path is not a page and returns 404).",
   "defaultModelId": "en",
   "models": [
     {
       "id": "en",
+      "label": "English (Amy, Piper medium)",
+      "bundle": "vits-piper-en_US-amy-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-amy-low",
       "label": "English (Amy, Piper low)",
       "bundle": "vits-piper-en_US-amy-low",
       "language": "en",
       "kind": "vits",
-      "speakerId": "0",
-      "approxMb": "~40"
+      "approxMb": "~40",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-lessac",
+      "label": "English (Lessac, Piper medium)",
+      "bundle": "vits-piper-en_US-lessac-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-lessac-high",
+      "label": "English (Lessac, Piper high)",
+      "bundle": "vits-piper-en_US-lessac-high",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~110",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-lessac-low",
+      "label": "English (Lessac, Piper low)",
+      "bundle": "vits-piper-en_US-lessac-low",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~40",
+      "speakerId": "0"
     },
     {
       "id": "en-glados",
-      "label": "English (GLaDOS, single speaker)",
+      "label": "English (GLaDOS)",
       "bundle": "vits-piper-en_US-glados",
       "language": "en",
       "kind": "vits",
-      "speakerId": "0",
-      "approxMb": "~64"
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-glados-high",
+      "label": "English (GLaDOS high)",
+      "bundle": "vits-piper-en_US-glados-high",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~110",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-ryan",
+      "label": "English (Ryan, Piper medium)",
+      "bundle": "vits-piper-en_US-ryan-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-ryan-high",
+      "label": "English (Ryan, Piper high)",
+      "bundle": "vits-piper-en_US-ryan-high",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~110",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-ryan-low",
+      "label": "English (Ryan, Piper low)",
+      "bundle": "vits-piper-en_US-ryan-low",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~40",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-joe",
+      "label": "English (Joe, Piper medium)",
+      "bundle": "vits-piper-en_US-joe-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-bryce",
+      "label": "English (Bryce, Piper medium)",
+      "bundle": "vits-piper-en_US-bryce-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-john",
+      "label": "English (John, Piper medium)",
+      "bundle": "vits-piper-en_US-john-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-kristin",
+      "label": "English (Kristin, Piper medium)",
+      "bundle": "vits-piper-en_US-kristin-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-norman",
+      "label": "English (Norman, Piper medium)",
+      "bundle": "vits-piper-en_US-norman-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-danny-low",
+      "label": "English (Danny, Piper low)",
+      "bundle": "vits-piper-en_US-danny-low",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~40",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-kathleen-low",
+      "label": "English (Kathleen, Piper low)",
+      "bundle": "vits-piper-en_US-kathleen-low",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~40",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-ljspeech",
+      "label": "English (LJSpeech, Piper medium)",
+      "bundle": "vits-piper-en_US-ljspeech-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-ljspeech-high",
+      "label": "English (LJSpeech, Piper high)",
+      "bundle": "vits-piper-en_US-ljspeech-high",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~110",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-arctic",
+      "label": "English (Arctic multi-speaker, Piper medium)",
+      "bundle": "vits-piper-en_US-arctic-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "note": "Multi-speaker Arctic; speakerId selects speaker (default 0).",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-hfc-female",
+      "label": "English (HFC female, Piper medium)",
+      "bundle": "vits-piper-en_US-hfc_female-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-hfc-male",
+      "label": "English (HFC male, Piper medium)",
+      "bundle": "vits-piper-en_US-hfc_male-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-gb-alan",
+      "label": "English GB (Alan, Piper medium)",
+      "bundle": "vits-piper-en_GB-alan-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-gb-cori",
+      "label": "English GB (Cori, Piper medium)",
+      "bundle": "vits-piper-en_GB-cori-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "en-gb-jenny",
+      "label": "English GB (Jenny, Piper medium)",
+      "bundle": "vits-piper-en_GB-jenny_dioco-medium",
+      "language": "en",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
     },
     {
       "id": "es",
@@ -26,8 +237,8 @@
       "bundle": "vits-piper-es-glados-medium",
       "language": "es",
       "kind": "vits",
-      "speakerId": "0",
-      "approxMb": "~64"
+      "approxMb": "~64",
+      "speakerId": "0"
     },
     {
       "id": "de",
@@ -35,8 +246,89 @@
       "bundle": "vits-piper-de_DE-thorsten-medium",
       "language": "de",
       "kind": "vits",
-      "speakerId": "0",
-      "approxMb": "~64"
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "de-thorsten-high",
+      "label": "German (Thorsten high)",
+      "bundle": "vits-piper-de_DE-thorsten-high",
+      "language": "de",
+      "kind": "vits",
+      "approxMb": "~110",
+      "speakerId": "0"
+    },
+    {
+      "id": "de-glados",
+      "label": "German (GLaDOS medium)",
+      "bundle": "vits-piper-de_DE-glados-medium",
+      "language": "de",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "fr",
+      "label": "French (Siwis, Piper medium)",
+      "bundle": "vits-piper-fr_FR-siwis-medium",
+      "language": "fr",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "it",
+      "label": "Italian (Paola, Piper medium)",
+      "bundle": "vits-piper-it_IT-paola-medium",
+      "language": "it",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "pt",
+      "label": "Portuguese BR (Faber, Piper medium)",
+      "bundle": "vits-piper-pt_BR-faber-medium",
+      "language": "pt",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "nl",
+      "label": "Dutch (Pim, Piper medium)",
+      "bundle": "vits-piper-nl_NL-pim-medium",
+      "language": "nl",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "pl",
+      "label": "Polish (Gosia, Piper medium)",
+      "bundle": "vits-piper-pl_PL-gosia-medium",
+      "language": "pl",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "ru",
+      "label": "Russian (Irina, Piper medium)",
+      "bundle": "vits-piper-ru_RU-irina-medium",
+      "language": "ru",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
+    },
+    {
+      "id": "hi",
+      "label": "Hindi (Priyamvada, Piper medium)",
+      "bundle": "vits-piper-hi_IN-priyamvada-medium",
+      "language": "hi",
+      "kind": "vits",
+      "approxMb": "~64",
+      "speakerId": "0"
     },
     {
       "id": "zh",
@@ -44,8 +336,8 @@
       "bundle": "vits-melo-tts-zh_en",
       "language": "zh",
       "kind": "vits",
-      "speakerId": "0",
-      "approxMb": "~163"
+      "approxMb": "~163",
+      "speakerId": "0"
     }
   ]
 }

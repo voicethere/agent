@@ -1,5 +1,7 @@
 {
   "releaseBase": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models",
+  "releaseTagUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models",
+  "notes": "Browse models at releaseTagUrl. Download each bundle as ${releaseBase}/<bundle>.tar.bz2 (the bare \u2026/download/asr-models path is not a page and returns 404).",
   "defaultModelId": "en",
   "models": [
     {
@@ -8,7 +10,8 @@
       "bundle": "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
       "language": "en",
       "kind": "transducer",
-      "approxMb": "~119"
+      "approxMb": "~119",
+      "note": "Kroko Zipformer \u2014 better accuracy than the 2023 LibriSpeech baseline; ~119 MB compressed."
     },
     {
       "id": "en-legacy",
@@ -16,7 +19,16 @@
       "bundle": "sherpa-onnx-streaming-zipformer-en-2023-06-26",
       "language": "en",
       "kind": "transducer",
-      "approxMb": "~296"
+      "approxMb": "~296",
+      "note": "Older LibriSpeech Zipformer; use en (Kroko) unless you need this exact bundle."
+    },
+    {
+      "id": "en-small",
+      "label": "English (20M, small)",
+      "bundle": "sherpa-onnx-streaming-zipformer-en-20M-2023-02-17",
+      "language": "en",
+      "kind": "transducer",
+      "approxMb": "~70"
     },
     {
       "id": "es",
@@ -51,12 +63,21 @@
       "approxMb": "~126"
     },
     {
+      "id": "zh-en",
+      "label": "Chinese + English (bilingual)",
+      "bundle": "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
+      "language": "zh",
+      "kind": "transducer",
+      "approxMb": "~200"
+    },
+    {
       "id": "ja",
       "label": "Japanese",
       "bundle": "sherpa-onnx-streaming-zipformer-ar_en_id_ja_ru_th_vi_zh-2025-02-10",
       "language": "ja",
       "kind": "transducer",
-      "approxMb": "~247"
+      "approxMb": "~247",
+      "note": "Multilingual streaming Zipformer (also covers ar, ru, vi, id, th, en, zh)."
     },
     {
       "id": "ar",
@@ -64,7 +85,40 @@
       "bundle": "sherpa-onnx-streaming-zipformer-ar_en_id_ja_ru_th_vi_zh-2025-02-10",
       "language": "ar",
       "kind": "transducer",
+      "approxMb": "~247",
+      "note": "Same multilingual bundle as Japanese \u2014 set SHERPA_STT_LANGUAGE to the language you speak."
+    },
+    {
+      "id": "id",
+      "label": "Indonesian",
+      "bundle": "sherpa-onnx-streaming-zipformer-ar_en_id_ja_ru_th_vi_zh-2025-02-10",
+      "language": "id",
+      "kind": "transducer",
       "approxMb": "~247"
+    },
+    {
+      "id": "th",
+      "label": "Thai",
+      "bundle": "sherpa-onnx-streaming-zipformer-ar_en_id_ja_ru_th_vi_zh-2025-02-10",
+      "language": "th",
+      "kind": "transducer",
+      "approxMb": "~247"
+    },
+    {
+      "id": "vi",
+      "label": "Vietnamese",
+      "bundle": "sherpa-onnx-streaming-zipformer-ar_en_id_ja_ru_th_vi_zh-2025-02-10",
+      "language": "vi",
+      "kind": "transducer",
+      "approxMb": "~247"
+    },
+    {
+      "id": "ko",
+      "label": "Korean",
+      "bundle": "sherpa-onnx-streaming-zipformer-korean-2024-06-16",
+      "language": "ko",
+      "kind": "transducer",
+      "approxMb": "~150"
     },
     {
       "id": "ru",
@@ -75,12 +129,31 @@
       "approxMb": "~23"
     },
     {
+      "id": "fr-legacy",
+      "label": "French (2023 baseline)",
+      "bundle": "sherpa-onnx-streaming-zipformer-fr-2023-04-14",
+      "language": "fr",
+      "kind": "transducer",
+      "approxMb": "~250",
+      "note": "Older French Zipformer; prefer fr (Kroko) unless you need this bundle."
+    },
+    {
+      "id": "en-2023-02",
+      "label": "English (2023-02 LibriSpeech)",
+      "bundle": "sherpa-onnx-streaming-zipformer-en-2023-02-21",
+      "language": "en",
+      "kind": "transducer",
+      "approxMb": "~290",
+      "note": "Early LibriSpeech Zipformer; prefer en (Kroko) for accuracy."
+    },
+    {
       "id": "bn",
       "label": "Bengali (South Asia)",
       "bundle": "sherpa-onnx-streaming-zipformer-bn-vosk-2026-02-09",
       "language": "bn",
       "kind": "transducer",
-      "approxMb": "~83"
+      "approxMb": "~83",
+      "note": "Closest official South Asian streaming model; not Hindi-specific."
     }
   ]
 }

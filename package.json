@@ -27,6 +27,12 @@
       "import": "./dist/templates/index.js",
       "require": "./dist/templates/index.js",
       "default": "./dist/templates/index.js"
+    },
+    "./templates/redis-sync/world-layout": {
+      "types": "./templates/redis-sync/world-layout.ts",
+      "import": "./templates/redis-sync/world-layout.ts",
+      "require": "./templates/redis-sync/world-layout.ts",
+      "default": "./templates/redis-sync/world-layout.ts"
     }
   },
   "bin": "./dist/cli.js",

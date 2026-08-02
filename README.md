@@ -2,6 +2,7 @@
 
 VoiceThere **customer agent SDK** — TypeScript types and runtime helpers for sandboxed child bundles running inside the **VoiceThere agent runner** (session worker).
 
+**Website:** [voicethere.io](https://voicethere.io)  
 **npm:** `@voicethere/agent`  
 **Repo:** [`voicethere/agent`](https://github.com/voicethere/agent)
 

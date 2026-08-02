@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-02
+
+### Added
+
+- **`@voicethere/agent/templates`** — registry API (`listTemplates`, `getTemplate`, `resolveTemplateEntryPath`, `loadTemplateSources`, `loadTemplateBundle`, `hasSeedBundle`).
+- Product seed-on-create templates with prebuilt `dist/templates/<id>/agent.js`: `echo`, `echo-dc`, `voice-starter`, `game-sync`.
+- E2E template sources: `echo-smoke`, `crash`, `game-sync-smoke`, `redis-sync` (+ `./templates/redis-sync/world-layout` export).
+
 ## [0.2.17] - 2026-07-31
 
 ### Changed

@@ -1,66 +1,79 @@
 # Agent templates
 
-## `echo.ts`
+`@voicethere/agent` is the single source of truth for starter templates. Import the registry from `@voicethere/agent/templates`:
+
+```typescript
+import {
+  listTemplates,
+  getTemplate,
+  resolveTemplateEntryPath,
+  loadTemplateSources,
+  loadTemplateBundle,
+  hasSeedBundle,
+} from "@voicethere/agent/templates";
+```
+
+## Product vs e2e
+
+| Kind | Dashboard create | Prebuilt seed bundle | Typical consumer |
+| --- | --- | --- | --- |
+| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `game-sync`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
+| **e2e** | No | No — build from sources at test time | `voicethere/e2e` smokes |
+
+Product templates always set `seedOnCreate: true`. CI fails if a product template is missing its prebuilt bundle after `npm run build`.
+
+## Sources vs prebuilt
+
+- **Sources** live under `templates/` in the published package (editable TypeScript).
+- **Prebuilt** bundles are derived artifacts at `dist/templates/<id>/agent.js` for product templates only.
+- `loadTemplateSources(id)` returns `{ path, content }[]` — the canonical tree for a future web editor.
+- `loadTemplateBundle(id)` returns prebuilt bytes for platform seed/deploy (runner-ready `agent.js`).
+
+Build a template locally:
+
+```bash
+npx @voicethere/agent build --entry templates/echo.ts --outfile dist/agent.js
+```
+
+Prebuild all product seed bundles (also runs in `npm run build`):
+
+```bash
+npm run build:templates
+```
+
+## Product templates
+
+### `echo.ts` (`echo`)
 
 Full echo debug agent for the VoiceThere dashboard — speaks **"you said: …"** on voice finals and text chat, relays speech events over DataChannel, and echoes chat replies on DC.
 
-**Build:**
+### `echo-dc.ts` (`echo-dc`)
 
-```bash
-npm install @voicethere/agent
-npx @voicethere/agent build --entry templates/echo.ts
-```
+Data-channel-only echo — relays speech events and chat text over DC without TTS.
 
-Platform auto-seeds the built bundle when a project is created with the **Echo (voice + chat)** template.
+### `agent.ts` (`voice-starter`)
 
-## `echo-dc.ts`
+Full starter bundle covering every speech event from `@node-webrtc-rust/sdk/voice`. Customize `onUserSpeechFinal` for your LLM/tools.
 
-Data-channel-only echo — relays speech events and chat text over DC without TTS. Use when debugging the dashboard chat panel without agent playback.
+### `game-sync.ts` (`game-sync`)
 
-## `agent.ts`
+Authoritative multi-object sync sample for real-time games/simulations (register, simulate, binary world snapshots).
 
-Full starter bundle covering every speech event from `@node-webrtc-rust/sdk/voice`:
+## E2e templates
 
-| Group       | Events                                                                                       |
-| ----------- | -------------------------------------------------------------------------------------------- |
-| User VAD    | `user_speaking_start`, `user_speaking_end`, `vad_triggered`                                  |
-| STT stream  | `stt_stream_start`, `stt_stream_end`, `user_stt_start`, `user_stt_end`, `user_stt_not_found` |
-| Transcripts | `user_speech_partial`, `user_speech_final`                                                   |
-| Agent TTS   | `agent_speaking_start`, `agent_speaking_end`, `barge_in`                                     |
-| Failures    | `error`                                                                                      |
+These mirror former `e2e/fixtures/*` sources. E2E resolves entries from the package, builds into ephemeral workdirs, and uploads `dist/agent.js`.
 
-**Customize:** replace `onUserSpeechFinal` body with your LLM/tools; extend `PeerState` or swap `handleSpeechEvent` for your architecture.
+| Id | Source | Purpose |
+| --- | --- | --- |
+| `echo-smoke` | `echo-smoke.ts` | voice-smoke, agent-smoke, cli-smoke |
+| `crash` | `crash.ts` | session-errors-smoke, crash-policy smokes |
+| `game-sync-smoke` | `game-sync-smoke.ts` | deploy-smoke, shared-child, idle smokes |
+| `redis-sync` | `redis-sync/agent.ts` + `world-layout.ts` | redis-sync-smoke (project Redis world buffer) |
 
-**Build:**
+**Note:** Product `echo` is not the same as e2e `echo-smoke` — keep both ids.
 
-```bash
-npm install @voicethere/agent
-npx @voicethere/agent build
-# optional: --entry agent.ts --outfile dist/agent.js
-```
-
-**Verify sandbox (no WebRTC):**
+## Verify sandbox (no WebRTC)
 
 ```bash
 npx @voicethere/agent verify
-```
-
-**Voice E2E:** host with the VoiceThere agent runner (platform or internal deployment) — set `AGENT_BUNDLE_PATH` to your built `dist/agent.js`.
-
-## `game-sync.ts`
-
-Authoritative multi-object sync sample for real-time games/simulations:
-
-- register tracked objects via control DC (`{ type: "register" }`)
-- receive `register_ack` + `object_registered` ownership notifications
-- run server-authoritative simulation (position + velocity) at 60Hz
-- resolve wall bounce + object-object collisions on the server
-- broadcast world-state snapshots to clients over binary sync channel (9-float records)
-- ignore client binary writes by default (safe base for adding intent/input messages later)
-- reuse freed slots on leave to keep world state compact
-
-Build:
-
-```bash
-npx @voicethere/agent build --entry templates/game-sync.ts
 ```

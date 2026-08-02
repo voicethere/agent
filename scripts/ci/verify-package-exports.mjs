@@ -30,7 +30,7 @@ for (const [subpath, spec] of Object.entries(pkg.exports ?? {})) {
 
 const requireFromPkg = createRequire(join(root, "package.json"));
 
-for (const subpath of ["", "/verify"]) {
+for (const subpath of ["", "/verify", "/templates"]) {
   const resolved = requireFromPkg.resolve(`${pkg.name}${subpath}`);
   if (!resolved.endsWith(".js")) {
     throw new Error(
@@ -41,6 +41,31 @@ for (const subpath of ["", "/verify"]) {
   if (subpath === "/verify") {
     if (typeof mod.runAgentVerify !== "function") {
       throw new Error("@voicethere/agent/verify must export runAgentVerify");
+    }
+  } else if (subpath === "/templates") {
+    for (const exportName of [
+      "listTemplates",
+      "getTemplate",
+      "resolveTemplateEntryPath",
+      "loadTemplateSources",
+      "loadTemplateBundle",
+      "hasSeedBundle",
+    ]) {
+      if (typeof mod[exportName] !== "function") {
+        throw new Error(
+          `@voicethere/agent/templates must export ${exportName}`,
+        );
+      }
+    }
+    const productIds = mod
+      .listTemplates({ kind: "product" })
+      .map((template) => template.id);
+    for (const id of productIds) {
+      if (!mod.hasSeedBundle(id)) {
+        throw new Error(
+          `Missing prebuilt seed bundle for product template "${id}" — run npm run build`,
+        );
+      }
     }
   } else if (typeof mod !== "object" || mod == null) {
     throw new Error("@voicethere/agent root export must be an object");

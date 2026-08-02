@@ -21,6 +21,18 @@
       "import": "./dist/verify/run-verify.js",
       "require": "./dist/verify/run-verify.js",
       "default": "./dist/verify/run-verify.js"
+    },
+    "./templates": {
+      "types": "./dist/templates/index.d.ts",
+      "import": "./dist/templates/index.js",
+      "require": "./dist/templates/index.js",
+      "default": "./dist/templates/index.js"
+    },
+    "./templates/redis-sync/world-layout": {
+      "types": "./templates/redis-sync/world-layout.ts",
+      "import": "./templates/redis-sync/world-layout.ts",
+      "require": "./templates/redis-sync/world-layout.ts",
+      "default": "./templates/redis-sync/world-layout.ts"
     }
   },
   "bin": "./dist/cli.js",
@@ -32,8 +44,9 @@
   ],
   "scripts": {
     "build:lib": "tsc -p tsconfig.json && mkdir -p dist/sandbox && cp src/sandbox/loader-entry.js dist/sandbox/",
+    "build:templates": "node dist/templates/build-seed-bundles-cli.js",
     "build:example": "node dist/cli.js build --entry examples/agent.ts --outfile dist/agent.js",
-    "build": "npm run build:lib && npm run build:example",
+    "build": "npm run build:lib && npm run build:templates && npm run build:example",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:ci": "npm run typecheck && npm run build && npm run test && node scripts/ci/verify-package-exports.mjs",

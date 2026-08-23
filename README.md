@@ -8,10 +8,10 @@ VoiceThere **customer agent SDK** — TypeScript types and runtime helpers for s
 
 ## Role
 
-| Layer     | Package                                                     | Runs in                              |
-| --------- | ----------------------------------------------------------- | ------------------------------------ |
-| Parent    | VoiceThere agent runner                                     | Trusted Node + WebRTC + speech stack |
-| **Child** | **`@voicethere/agent`**                                     | Sandboxed customer `agent.js` bundle |
+| Layer     | Package                 | Runs in                              |
+| --------- | ----------------------- | ------------------------------------ |
+| Parent    | VoiceThere agent runner | Trusted Node + WebRTC + speech stack |
+| **Child** | **`@voicethere/agent`** | Sandboxed customer `agent.js` bundle |
 
 The child receives speech lifecycle events over IPC (same shapes as `@node-webrtc-rust/sdk/voice`) and calls `speak()` to request TTS from the parent.
 
@@ -42,12 +42,12 @@ npx @voicethere/agent verify-start --no-build --bundle ./dist/agent.js
 
 `verify-start` launches the bundle in the sandboxed child with restricted Node flags (`--permission` + fs-read allowlist), sends `session_start`, and requires `session_start_ack`.
 
-| Command | When to use |
-| ------- | ----------- |
-| `npx @voicethere/agent verify` | **Default** — build `agent.ts` → `dist/agent.js`, then run all static checks |
-| `npx @voicethere/agent verify --no-build` | Re-run checks on an existing bundle |
-| `npx @voicethere/agent verify --no-build --bundle ./dist/agent.js` | Verify a specific bundle path |
-| `npx @voicethere/agent verify-start --no-build --bundle ./dist/agent.js` | Verify sandbox startup + restricted Node flags on a specific bundle |
+| Command                                                                  | When to use                                                                  |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `npx @voicethere/agent verify`                                           | **Default** — build `agent.ts` → `dist/agent.js`, then run all static checks |
+| `npx @voicethere/agent verify --no-build`                                | Re-run checks on an existing bundle                                          |
+| `npx @voicethere/agent verify --no-build --bundle ./dist/agent.js`       | Verify a specific bundle path                                                |
+| `npx @voicethere/agent verify-start --no-build --bundle ./dist/agent.js` | Verify sandbox startup + restricted Node flags on a specific bundle          |
 
 Optional flags: `--entry` / `-e`, `--outfile` / `-o` (same as `build`).
 
@@ -147,45 +147,46 @@ import {
   defineAgent,
   speak,
   type SpeechEvent,
-} from '@voicethere/agent'
-import { SPEECH_EVENT_TYPE } from '@node-webrtc-rust/sdk/voice'
+} from "@voicethere/agent";
+import { SPEECH_EVENT_TYPE } from "@node-webrtc-rust/sdk/voice";
 
 defineAgent({
   async onAgentStart({ env }) {
     // When project Redis is enabled, VoiceThere injects AGENT_REDIS_URL.
     // Depend on `ioredis` in your agent package and connect here (once per child).
-    const redisUrl = env.AGENT_REDIS_URL // or process.env.AGENT_REDIS_URL
+    const redisUrl = env.AGENT_REDIS_URL; // or process.env.AGENT_REDIS_URL
     if (redisUrl) {
       // const Redis = (await import('ioredis')).default
       // globalThis.redis = new Redis(redisUrl)
     }
   },
   onSessionStart({ sessionId }) {
-    speak(sessionId, 'Hello!')
+    speak(sessionId, "Hello!");
   },
   onUserSpeechFinal({ sessionId, text }) {
-    speak(sessionId, `You said: ${text}`)
+    speak(sessionId, `You said: ${text}`);
   },
   onSpeechEvent({ sessionId }, speech: SpeechEvent) {
     if (speech.type === SPEECH_EVENT_TYPE.bargeIn) {
-      agentLog('info', `User interrupted on ${sessionId}`)
+      agentLog("info", `User interrupted on ${sessionId}`);
     }
   },
-})
+});
 ```
 
 ### Shared Redis (project-scoped)
 
 On plans that include project Redis, the runner injects **`AGENT_REDIS_URL`** into the child environment and grants scoped `--allow-net` for that host. Add **`ioredis`** as a dependency of your agent, bundle it with the CLI, and open the client in **`onAgentStart`** so it is ready before any `onSessionStart` / session IPC.
 
-| Export                                          | Purpose                                                                               |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `defineAgent`                                   | Register `onAgentStart`, `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onSessionEnd` |
-| `SpeechEvent`, `SpeechEventType`                | Re-exported **types** from `@node-webrtc-rust/sdk/voice`                              |
-| `SPEECH_EVENT_TYPE`                             | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child) |
-| `speak`                                         | Request parent TTS                                                                    |
-| `agentLog`                                      | Forward structured logs to parent                                                     |
-| `ParentToChildMessage` / `ChildToParentMessage` | IPC contract shared with the VoiceThere agent runner                                   |
+| Export                                                                    | Purpose                                                                                         |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `defineAgent`                                                             | Register `onAgentStart`, `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onSessionEnd` |
+| `SpeechEvent`, `SpeechEventType`                                          | Re-exported **types** from `@node-webrtc-rust/sdk/voice`                                        |
+| `SPEECH_EVENT_TYPE`                                                       | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)           |
+| `speak`                                                                   | Request parent TTS                                                                              |
+| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording` | Request parent conversation recording control                                                   |
+| `agentLog`                                                                | Forward structured logs to parent                                                               |
+| `ParentToChildMessage` / `ChildToParentMessage`                           | IPC contract shared with the VoiceThere agent runner                                            |
 
 ### Runner runtime subpath (minimal shared sandbox API)
 
@@ -278,12 +279,12 @@ Customer code runs in a **forked child process**, separate from the trusted agen
 
 ### Layer 1 — Process isolation
 
-| Mechanism | What it means for your bundle |
-| --------- | ----------------------------- |
-| **Separate process** | Crash or `process.exit` in your bundle does not take down the parent voice stack |
-| **IPC only for media** | WebRTC, mic, STT, and TTS go through the parent — use `defineAgent`, `speak`, and speech events |
+| Mechanism                  | What it means for your bundle                                                                                                            |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Separate process**       | Crash or `process.exit` in your bundle does not take down the parent voice stack                                                         |
+| **IPC only for media**     | WebRTC, mic, STT, and TTS go through the parent — use `defineAgent`, `speak`, and speech events                                          |
 | **Stripped `process.env`** | Child receives only `NODE_ENV`, internal loader path, and allowlisted keys (`SESSION_ID`, `PROJECT_ID`, `BUILD_ID`) — not parent secrets |
-| **Console redirection** | `console.log` / `warn` / `error` → IPC logs |
+| **Console redirection**    | `console.log` / `warn` / `error` → IPC logs                                                                                              |
 
 ### Layer 2 — Node `--permission` (runtime-enforced)
 
@@ -291,24 +292,24 @@ The parent starts the child with Node’s [Permission Model](https://nodejs.org/
 
 **Granted today** (via `execArgv` on `fork()`):
 
-| Flag | Effect |
-| ---- | ------ |
-| `--permission` | Enables restriction mode |
-| `--allow-fs-read=<loaderDir>` | Read files under the child loader directory |
-| `--allow-fs-read=<bundleParentDir>` | Read files under the **directory containing your `agent.js`** (see below) |
-| `--allow-net` | Outbound network (HTTPS/fetch, TCP) for customer LLM and tool APIs (Node **26+**) |
-| `--allow-net=<host>` | Reserved for project Redis host entries when Node supports host-scoped net ACLs |
+| Flag                                | Effect                                                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------- |
+| `--permission`                      | Enables restriction mode                                                          |
+| `--allow-fs-read=<loaderDir>`       | Read files under the child loader directory                                       |
+| `--allow-fs-read=<bundleParentDir>` | Read files under the **directory containing your `agent.js`** (see below)         |
+| `--allow-net`                       | Outbound network (HTTPS/fetch, TCP) for customer LLM and tool APIs (Node **26+**) |
+| `--allow-net=<host>`                | Reserved for project Redis host entries when Node supports host-scoped net ACLs   |
 
 **Not granted → blocked at runtime:**
 
-| Missing flag | What fails |
-| ------------ | ---------- |
-| No `--allow-child-process` | `child_process`, `exec`, `spawn`, `fork` |
-| No `--allow-fs-write` | Any file write (`writeFile`, logs to disk, etc.) |
+| Missing flag                     | What fails                                                   |
+| -------------------------------- | ------------------------------------------------------------ |
+| No `--allow-child-process`       | `child_process`, `exec`, `spawn`, `fork`                     |
+| No `--allow-fs-write`            | Any file write (`writeFile`, logs to disk, etc.)             |
 | No extra `--allow-fs-read` paths | Reading `/etc/passwd`, parent files, etc. outside bundle dir |
-| No `--allow-addons` | Native `.node` addons (`bcrypt`, `sharp`, …) |
-| No `--allow-worker-threads` | `worker_threads` |
-| No `--allow-wasi` | WASI modules |
+| No `--allow-addons`              | Native `.node` addons (`bcrypt`, `sharp`, …)                 |
+| No `--allow-worker-threads`      | `worker_threads`                                             |
+| No `--allow-wasi`                | WASI modules                                                 |
 
 This is **not** an import allowlist — Node gates **capability classes**, not package names. Using `node:fs` inside the allowed read tree can work; using it on `/etc/passwd` does not.
 
@@ -326,23 +327,23 @@ This is **not** an import allowlist — Node gates **capability classes**, not p
   node_modules/     ← JS-only deps may resolve; native addons still blocked
 ```
 
-| Artifact in bundle dir | Works? |
-| ---------------------- | ------ |
-| Single bundled `agent.js` (recommended) | Yes |
-| Extra pure `.js` / `.json` siblings | Usually yes (same allowed tree) |
+| Artifact in bundle dir                            | Works?                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------ |
+| Single bundled `agent.js` (recommended)           | Yes                                                          |
+| Extra pure `.js` / `.json` siblings               | Usually yes (same allowed tree)                              |
 | `node_modules/` with **JavaScript-only** packages | Often yes (Node resolves imports by reading under that tree) |
-| **Native** npm packages (`.node` binaries) | **No** — requires `--allow-addons` (not enabled) |
-| Packages that **spawn subprocesses** | **No** — no `--allow-child-process` |
+| **Native** npm packages (`.node` binaries)        | **No** — requires `--allow-addons` (not enabled)             |
+| Packages that **spawn subprocesses**              | **No** — no `--allow-child-process`                          |
 
 Prefer **one esbuild bundle** so production behavior matches `npm run verify:local`.
 
 ### Layer 3 — Platform policy
 
-| Capability | Behavior |
-| ---------- | -------- |
+| Capability                                      | Behavior                                                                                                                                             |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Outbound network** (`fetch`, `http`, `https`) | **Public internet:** allowed — typical for LLM/tool calls from your agent code. **Internal platform / private network:** blocked on hosted sessions. |
-| **`process.exit`** | Not blocked — kills your agent leg; parent may play crash TTS |
-| **Direct WebRTC / mic / STT / TTS** | Parent only — use `speak()` and speech event handlers |
+| **`process.exit`**                              | Not blocked — kills your agent leg; parent may play crash TTS                                                                                        |
+| **Direct WebRTC / mic / STT / TTS**             | Parent only — use `speak()` and speech event handlers                                                                                                |
 
 ### What you should use in agent code
 
@@ -373,9 +374,9 @@ For iterative work: `npx @voicethere/agent build` then `npx @voicethere/agent ve
 
 ## Build outputs
 
-| Path            | Purpose                                                     |
-| --------------- | ----------------------------------------------------------- |
-| `dist/index.js` | Published npm library entry                                 |
+| Path            | Purpose                                                        |
+| --------------- | -------------------------------------------------------------- |
+| `dist/index.js` | Published npm library entry                                    |
 | `dist/agent.js` | Example bundle (`examples/agent.ts`) for local runner / verify |
 
 ## Scripts

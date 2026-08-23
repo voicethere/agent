@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { SpeechEvent } from "@node-webrtc-rust/sdk/voice";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -6,6 +8,9 @@ import type {
   AgentLogMessage,
   DataChannelKind,
   ParentToChildMessage,
+  RecordingControlAckMessage,
+  RecordingControlAction,
+  RecordingControlResult,
 } from "./protocol.js";
 import { SessionSerialQueue } from "./session-serial-queue.js";
 
@@ -18,6 +23,8 @@ const DEFAULT_SESSION_START_INIT_DELAY_MS = 500;
 export interface SessionContext {
   sessionId: string;
   env: Record<string, string>;
+  /** `true` when the runner advertises conversation recording for this project. */
+  recordingAvailable: boolean;
 }
 
 export interface SpeechContext {
@@ -97,6 +104,16 @@ export interface AgentErrorContext {
   customerContext?: Record<string, unknown>;
 }
 
+function isRecordingControlAckMessage(
+  value: unknown,
+): value is RecordingControlAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return (
+    msg.type === "recording_control_ack" && typeof msg.requestId === "string"
+  );
+}
+
 function isParentMessage(value: unknown): value is ParentToChildMessage {
   if (!value || typeof value !== "object") return false;
   const msg = value as { type?: string };
@@ -106,7 +123,8 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "session_end" ||
     msg.type === "data_channel_message" ||
     msg.type === "data_channel_binary" ||
-    msg.type === "idle_timeout"
+    msg.type === "idle_timeout" ||
+    msg.type === "recording_control_ack"
   );
 }
 
@@ -121,6 +139,49 @@ function parseDataChannelPayload(raw: string): unknown {
 const peerEnvBySessionId = new Map<string, Record<string, string>>();
 /** Sessions that received `session_end`; `speak()` becomes a no-op when no live gen. */
 const endedSessionIds = new Set<string>();
+
+const RECORDING_CONTROL_ACK_TIMEOUT_MS = 5000;
+
+type PendingRecordingAck = {
+  sessionId: string;
+  resolve: (result: RecordingControlResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const pendingRecordingAcks = new Map<string, PendingRecordingAck>();
+
+function handleRecordingControlAck(message: RecordingControlAckMessage): void {
+  const pending = pendingRecordingAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingRecordingAcks.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    reason: message.reason,
+    requestId: message.requestId,
+  });
+}
+
+function clearPendingRecordingAcksForSession(
+  sessionId: string,
+  reason: string,
+): void {
+  for (const [requestId, pending] of pendingRecordingAcks) {
+    if (pending.sessionId !== sessionId) continue;
+    clearTimeout(pending.timer);
+    pendingRecordingAcks.delete(requestId);
+    pending.resolve({ ok: false, reason, requestId });
+  }
+}
+
+function isVoicethereAgentChild(): boolean {
+  return (
+    typeof process.send === "function" &&
+    process.connected !== false &&
+    typeof process.env.__CHILD_BUNDLE_PATH__ === "string" &&
+    process.env.__CHILD_BUNDLE_PATH__.trim().length > 0
+  );
+}
 
 export type SessionExecutionStore = {
   sessionId: string;
@@ -271,6 +332,7 @@ async function handleParentMessage(
       await (handlers.onClientJoin ?? handlers.onSessionStart)?.({
         sessionId: message.sessionId,
         env: message.env,
+        recordingAvailable: message.recordingAvailable ?? false,
       });
       sendParentMessage({
         type: "session_start_ack",
@@ -312,6 +374,7 @@ async function handleParentMessage(
       });
       break;
     case "session_end":
+      clearPendingRecordingAcksForSession(message.sessionId, "session_ended");
       peerEnvBySessionId.delete(message.sessionId);
       await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
         sessionId: message.sessionId,
@@ -340,6 +403,10 @@ export function defineAgent(handlers: AgentHandlers): void {
   const agentStartReady = runAgentStartHook(handlers);
 
   process.on("message", (message: unknown) => {
+    if (isRecordingControlAckMessage(message)) {
+      handleRecordingControlAck(message);
+      return;
+    }
     if (!isParentMessage(message)) return;
 
     // Invalidate immediately on arrival — do not wait behind queued work that
@@ -347,6 +414,7 @@ export function defineAgent(handlers: AgentHandlers): void {
     // the leave hook only.
     if (message.type === "session_end") {
       endedSessionIds.add(message.sessionId);
+      clearPendingRecordingAcksForSession(message.sessionId, "session_ended");
       inboundBySession.clear(message.sessionId);
     }
     // session_start must not chain onto a dying session_end generation — clear
@@ -531,11 +599,79 @@ export function resetAgentIpcStateForTests(): void {
   endedSessionIds.clear();
   peerEnvBySessionId.clear();
   inboundQueueAuthority = null;
+  for (const [requestId, pending] of pendingRecordingAcks) {
+    clearTimeout(pending.timer);
+    pendingRecordingAcks.delete(requestId);
+  }
 }
 
 /** Ask the runner parent to synthesize speech for the session. */
 export function speak(sessionId: string, text: string): void {
   sendParentMessage({ type: "speak", sessionId, text });
+}
+
+/** True when {@link SessionStartMessage.recordingAvailable} was set for the session. */
+export function isRecordingAvailable(ctx: SessionContext): boolean {
+  return ctx.recordingAvailable;
+}
+
+async function sendRecordingControl(
+  sessionId: string,
+  action: RecordingControlAction,
+): Promise<RecordingControlResult> {
+  const requestId = randomUUID();
+
+  if (!allowOutboundForSession(sessionId)) {
+    return { ok: false, reason: "session_ended", requestId };
+  }
+
+  if (!isVoicethereAgentChild()) {
+    return { ok: true, reason: "local_mock", requestId };
+  }
+
+  return new Promise<RecordingControlResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingRecordingAcks.delete(requestId);
+      resolve({ ok: false, reason: "timeout", requestId });
+    }, RECORDING_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingRecordingAcks.set(requestId, { sessionId, resolve, timer });
+
+    sendParentMessage({
+      type: "recording_control",
+      sessionId,
+      action,
+      requestId,
+    });
+  });
+}
+
+/** Ask the runner parent to start conversation recording for the session. */
+export function startRecording(
+  sessionId: string,
+): Promise<RecordingControlResult> {
+  return sendRecordingControl(sessionId, "start");
+}
+
+/** Ask the runner parent to pause an in-progress recording for the session. */
+export function pauseRecording(
+  sessionId: string,
+): Promise<RecordingControlResult> {
+  return sendRecordingControl(sessionId, "pause");
+}
+
+/** Ask the runner parent to resume a paused recording for the session. */
+export function resumeRecording(
+  sessionId: string,
+): Promise<RecordingControlResult> {
+  return sendRecordingControl(sessionId, "resume");
+}
+
+/** Ask the runner parent to stop conversation recording for the session. */
+export function stopRecording(
+  sessionId: string,
+): Promise<RecordingControlResult> {
+  return sendRecordingControl(sessionId, "stop");
 }
 
 /** Send a JSON payload to the browser peer via the runner parent. */

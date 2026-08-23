@@ -4,10 +4,14 @@ import {
   agentLog,
   defineAgent,
   disconnectClient,
+  pauseRecording,
   resetAgentIpcStateForTests,
+  resumeRecording,
   sendBinaryToClient,
   sendToClient,
   speak,
+  startRecording,
+  stopRecording,
   SESSION_START_INIT_DELAY_MS_ENV,
   SESSION_START_INIT_DELAY_ENABLED_ENV,
 } from "../src/runtime.js";
@@ -198,6 +202,7 @@ describe("defineAgent", () => {
           PROJECT_ID: "proj",
           BUILD_ID: "build-1",
         },
+        recordingAvailable: false,
       });
       expect(capture.send).toHaveBeenCalledWith({
         type: "session_start_ack",
@@ -235,6 +240,7 @@ describe("defineAgent", () => {
       expect(onSessionStart).toHaveBeenCalledWith({
         sessionId: "peer-delay-default",
         env: { SESSION_ID: "peer-delay-default" },
+        recordingAvailable: false,
       });
     } finally {
       if (originalEnabled === undefined) {
@@ -280,6 +286,7 @@ describe("defineAgent", () => {
       expect(onSessionStart).toHaveBeenCalledWith({
         sessionId: "peer-delay-custom",
         env: { SESSION_ID: "peer-delay-custom" },
+        recordingAvailable: false,
       });
     } finally {
       if (originalEnabled === undefined) {
@@ -318,6 +325,7 @@ describe("defineAgent", () => {
         expect(onSessionStart).toHaveBeenCalledWith({
           sessionId: "peer-delay-disabled",
           env: { SESSION_ID: "peer-delay-disabled" },
+          recordingAvailable: false,
         });
       });
     } finally {
@@ -886,6 +894,228 @@ describe("speak", () => {
 
     speak("peer-1", "too late");
     expect(capture.send).not.toHaveBeenCalled();
+    capture.restore();
+  });
+});
+
+describe("recording control", () => {
+  const childBundleEnv = process.env.__CHILD_BUNDLE_PATH__;
+
+  beforeEach(() => {
+    resetAgentIpcStateForTests();
+    delete process.env.__CHILD_BUNDLE_PATH__;
+  });
+
+  afterEach(() => {
+    if (childBundleEnv === undefined) {
+      delete process.env.__CHILD_BUNDLE_PATH__;
+    } else {
+      process.env.__CHILD_BUNDLE_PATH__ = childBundleEnv;
+    }
+  });
+
+  it("resolves local_mock when not a forked agent child", async () => {
+    const result = await startRecording("peer-1");
+    expect(result).toMatchObject({ ok: true, reason: "local_mock" });
+  });
+
+  it("sends recording_control IPC and awaits matching ack", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+    });
+    await vi.waitFor(() =>
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session_start_ack" }),
+      ),
+    );
+    capture.send.mockClear();
+
+    const ackPromise = startRecording("peer-1");
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const sent = capture.send.mock.calls[0]?.[0] as {
+      type: string;
+      sessionId: string;
+      action: string;
+      requestId: string;
+    };
+    expect(sent).toEqual(
+      expect.objectContaining({
+        type: "recording_control",
+        sessionId: "peer-1",
+        action: "start",
+      }),
+    );
+
+    capture.emit({
+      type: "recording_control_ack",
+      sessionId: "peer-1",
+      action: "start",
+      requestId: sent.requestId,
+      ok: true,
+      reason: "applied",
+    });
+
+    await expect(ackPromise).resolves.toEqual({
+      ok: true,
+      reason: "applied",
+      requestId: sent.requestId,
+    });
+    capture.restore();
+  });
+
+  it("sends recording_control IPC to parent for all actions", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+    });
+    await vi.waitFor(() =>
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session_start_ack" }),
+      ),
+    );
+    capture.send.mockClear();
+
+    const startPromise = startRecording("peer-1");
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const startCall = capture.send.mock.calls[0]?.[0] as {
+      action: string;
+      requestId: string;
+    };
+    capture.emit({
+      type: "recording_control_ack",
+      sessionId: "peer-1",
+      action: "start",
+      requestId: startCall.requestId,
+      ok: true,
+      reason: "applied",
+    });
+    await startPromise;
+
+    capture.send.mockClear();
+    const pausePromise = pauseRecording("peer-1");
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const pauseCall = capture.send.mock.calls[0]?.[0] as { requestId: string };
+    capture.emit({
+      type: "recording_control_ack",
+      sessionId: "peer-1",
+      action: "pause",
+      requestId: pauseCall.requestId,
+      ok: true,
+      reason: "applied",
+    });
+    await pausePromise;
+
+    capture.send.mockClear();
+    const resumePromise = resumeRecording("peer-1");
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const resumeCall = capture.send.mock.calls[0]?.[0] as { requestId: string };
+    capture.emit({
+      type: "recording_control_ack",
+      sessionId: "peer-1",
+      action: "resume",
+      requestId: resumeCall.requestId,
+      ok: true,
+      reason: "applied",
+    });
+    await resumePromise;
+
+    capture.send.mockClear();
+    const stopPromise = stopRecording("peer-1");
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const stopCall = capture.send.mock.calls[0]?.[0] as { requestId: string };
+    capture.emit({
+      type: "recording_control_ack",
+      sessionId: "peer-1",
+      action: "stop",
+      requestId: stopCall.requestId,
+      ok: true,
+      reason: "applied",
+    });
+    await stopPromise;
+    capture.restore();
+  });
+
+  it("does not send recording_control after session_end for the same session", async () => {
+    const capture = installProcessMessageCapture();
+    const onSessionEnd = vi.fn();
+    defineAgent({
+      onSessionStart: async ({ sessionId }) => {
+        await startRecording(sessionId);
+      },
+      onSessionEnd,
+    });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1", PEER_ID: "p1" },
+      recordingAvailable: true,
+    });
+    await vi.waitFor(() => expect(capture.send).not.toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(onSessionEnd).toHaveBeenCalledTimes(0),
+    );
+
+    capture.emit({ type: "session_end", sessionId: "peer-1" });
+    await vi.waitFor(() => expect(onSessionEnd).toHaveBeenCalled());
+
+    const result = await stopRecording("peer-1");
+    expect(capture.send).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: false, reason: "session_ended" });
+    capture.restore();
+  });
+});
+
+describe("session_start recordingAvailable", () => {
+  it("passes recordingAvailable to onSessionStart", async () => {
+    const capture = installProcessMessageCapture();
+    const onSessionStart = vi.fn();
+    defineAgent({ onSessionStart });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+      recordingAvailable: true,
+    });
+
+    await vi.waitFor(() => expect(onSessionStart).toHaveBeenCalled());
+    expect(onSessionStart).toHaveBeenCalledWith({
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+      recordingAvailable: true,
+    });
+    capture.restore();
+  });
+
+  it("defaults recordingAvailable to false when omitted", async () => {
+    const capture = installProcessMessageCapture();
+    const onSessionStart = vi.fn();
+    defineAgent({ onSessionStart });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+    });
+
+    await vi.waitFor(() => expect(onSessionStart).toHaveBeenCalled());
+    expect(onSessionStart).toHaveBeenCalledWith({
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+      recordingAvailable: false,
+    });
     capture.restore();
   });
 });

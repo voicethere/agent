@@ -29,11 +29,12 @@ export type ParentToChildMessage =
 /**
  * Messages the customer child may send back to the runner parent.
  *
- * Prefer {@link speak}, {@link sendToClient}, {@link sendBinaryToClient}, and {@link agentLog} helpers over raw `process.send`.
+ * Prefer {@link speak}, {@link startRecording}, {@link sendToClient}, {@link sendBinaryToClient}, and {@link agentLog} helpers over raw `process.send`.
  */
 export type ChildToParentMessage =
   | SessionStartAckMessage
   | SpeakMessage
+  | RecordingControlMessage
   | AgentLogMessage
   | AgentErrorMessage
   | SendToClientMessage
@@ -133,6 +134,19 @@ export interface SpeakMessage {
   sessionId: string;
   /** UTF-8 text passed to the parent TTS vendor. */
   text: string;
+}
+
+/**
+ * Ask the parent to start, pause, resume, or stop conversation recording for a session.
+ *
+ * Recording runs in the runner parent — use {@link startRecording}, {@link pauseRecording},
+ * {@link resumeRecording}, and {@link stopRecording} instead of raw `process.send`.
+ */
+export interface RecordingControlMessage {
+  type: "recording_control";
+  /** Target peer/session id (must match a prior {@link SessionStartMessage}). */
+  sessionId: string;
+  action: "start" | "pause" | "resume" | "stop";
 }
 
 /** Log severity forwarded to the runner parent process. */

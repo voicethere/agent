@@ -41,6 +41,11 @@ describe("protocol", () => {
       sessionId: "peer-1",
       text: "Hello",
     };
+    const recording: ChildToParentMessage = {
+      type: "recording_control",
+      sessionId: "peer-1",
+      action: "start",
+    };
     const binary: ChildToParentMessage = {
       type: "send_binary_to_client",
       sessionId: "peer-1",
@@ -58,6 +63,7 @@ describe("protocol", () => {
       message: "boom",
     };
     expect(speak.type).toBe("speak");
+    expect(recording.action).toBe("start");
     expect(binary.channel).toBe("sync");
     expect(log.level).toBe("info");
     expect(error.type).toBe("agent_error");

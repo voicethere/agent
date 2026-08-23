@@ -538,6 +538,42 @@ export function speak(sessionId: string, text: string): void {
   sendParentMessage({ type: "speak", sessionId, text });
 }
 
+/** Ask the runner parent to start conversation recording for the session. */
+export function startRecording(sessionId: string): void {
+  sendParentMessage({
+    type: "recording_control",
+    sessionId,
+    action: "start",
+  });
+}
+
+/** Ask the runner parent to pause an in-progress recording for the session. */
+export function pauseRecording(sessionId: string): void {
+  sendParentMessage({
+    type: "recording_control",
+    sessionId,
+    action: "pause",
+  });
+}
+
+/** Ask the runner parent to resume a paused recording for the session. */
+export function resumeRecording(sessionId: string): void {
+  sendParentMessage({
+    type: "recording_control",
+    sessionId,
+    action: "resume",
+  });
+}
+
+/** Ask the runner parent to stop conversation recording for the session. */
+export function stopRecording(sessionId: string): void {
+  sendParentMessage({
+    type: "recording_control",
+    sessionId,
+    action: "stop",
+  });
+}
+
 /** Send a JSON payload to the browser peer via the runner parent. */
 export function sendToClient(sessionId: string, payload: unknown): void {
   sendParentMessage({ type: "send_to_client", sessionId, payload });

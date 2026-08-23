@@ -4,10 +4,14 @@ import {
   agentLog,
   defineAgent,
   disconnectClient,
+  pauseRecording,
   resetAgentIpcStateForTests,
+  resumeRecording,
   sendBinaryToClient,
   sendToClient,
   speak,
+  startRecording,
+  stopRecording,
   SESSION_START_INIT_DELAY_MS_ENV,
   SESSION_START_INIT_DELAY_ENABLED_ENV,
 } from "../src/runtime.js";
@@ -885,6 +889,73 @@ describe("speak", () => {
     capture.send.mockClear();
 
     speak("peer-1", "too late");
+    expect(capture.send).not.toHaveBeenCalled();
+    capture.restore();
+  });
+});
+
+describe("recording control", () => {
+  let sendMock: ReturnType<typeof installProcessSendMock>;
+
+  beforeEach(() => {
+    resetAgentIpcStateForTests();
+  });
+
+  afterEach(() => {
+    sendMock?.restore();
+  });
+
+  it("sends recording_control IPC to parent", () => {
+    sendMock = installProcessSendMock();
+    startRecording("peer-1");
+    pauseRecording("peer-1");
+    resumeRecording("peer-1");
+    stopRecording("peer-1");
+    expect(sendMock.send).toHaveBeenNthCalledWith(1, {
+      type: "recording_control",
+      sessionId: "peer-1",
+      action: "start",
+    });
+    expect(sendMock.send).toHaveBeenNthCalledWith(2, {
+      type: "recording_control",
+      sessionId: "peer-1",
+      action: "pause",
+    });
+    expect(sendMock.send).toHaveBeenNthCalledWith(3, {
+      type: "recording_control",
+      sessionId: "peer-1",
+      action: "resume",
+    });
+    expect(sendMock.send).toHaveBeenNthCalledWith(4, {
+      type: "recording_control",
+      sessionId: "peer-1",
+      action: "stop",
+    });
+  });
+
+  it("does not send recording_control after session_end for the same session", async () => {
+    const capture = installProcessMessageCapture();
+    const onSessionEnd = vi.fn();
+    defineAgent({
+      onSessionStart: async ({ sessionId }) => {
+        startRecording(sessionId);
+      },
+      onSessionEnd,
+    });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1", PEER_ID: "p1" },
+    });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    capture.send.mockClear();
+
+    capture.emit({ type: "session_end", sessionId: "peer-1" });
+    await vi.waitFor(() => expect(onSessionEnd).toHaveBeenCalled());
+    capture.send.mockClear();
+
+    stopRecording("peer-1");
     expect(capture.send).not.toHaveBeenCalled();
     capture.restore();
   });

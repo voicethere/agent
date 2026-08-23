@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-23
+
+### Added
+
+- **`RecordingControlMessage`** — IPC type and helpers (`startRecording`, `pauseRecording`, `resumeRecording`, `stopRecording`) for conversation recording control from the agent child.
+
 ## [0.3.0] - 2026-08-02
 
 ### Added

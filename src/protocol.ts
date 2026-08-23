@@ -24,7 +24,8 @@ export type ParentToChildMessage =
   | SessionEndMessage
   | DataChannelMessageMessage
   | DataChannelBinaryMessage
-  | IdleTimeoutMessage;
+  | IdleTimeoutMessage
+  | RecordingControlAckMessage;
 
 /**
  * Messages the customer child may send back to the runner parent.
@@ -60,6 +61,11 @@ export interface SessionStartMessage {
    * Keys are a subset of {@link ALLOWED_CHILD_ENV_KEYS}.
    */
   env: Record<string, string>;
+  /**
+   * When `true`, the runner has conversation recording enabled for this project.
+   * Absent on older runners — treat as `false`.
+   */
+  recordingAvailable?: boolean;
 }
 
 /**
@@ -142,12 +148,40 @@ export interface SpeakMessage {
  * Recording runs in the runner parent — use {@link startRecording}, {@link pauseRecording},
  * {@link resumeRecording}, and {@link stopRecording} instead of raw `process.send`.
  */
+export type RecordingControlAction = "start" | "pause" | "resume" | "stop";
+
 export interface RecordingControlMessage {
   type: "recording_control";
   /** Target peer/session id (must match a prior {@link SessionStartMessage}). */
   sessionId: string;
-  action: "start" | "pause" | "resume" | "stop";
+  action: RecordingControlAction;
+  /** Correlates with {@link RecordingControlAckMessage.requestId}. */
+  requestId: string;
 }
+
+/** Runner acknowledgement for a {@link RecordingControlMessage}. */
+export interface RecordingControlAckMessage {
+  type: "recording_control_ack";
+  sessionId: string;
+  action: RecordingControlAction;
+  requestId: string;
+  ok: boolean;
+  reason?:
+    | "applied"
+    | "disabled"
+    | "unsupported"
+    | "stopped"
+    | "local_mock"
+    | "timeout"
+    | string;
+}
+
+/** Result returned by {@link startRecording} and related helpers. */
+export type RecordingControlResult = {
+  ok: boolean;
+  reason?: string;
+  requestId: string;
+};
 
 /** Log severity forwarded to the runner parent process. */
 export type AgentLogLevel = "debug" | "info" | "warn" | "error";

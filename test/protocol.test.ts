@@ -17,13 +17,28 @@ describe("protocol", () => {
     ]);
   });
 
-  it("accepts parent session_start shape", () => {
+  it("accepts parent session_start shape with recordingAvailable", () => {
     const message: ParentToChildMessage = {
       type: "session_start",
       sessionId: "peer-1",
       env: { SESSION_ID: "peer-1", PROJECT_ID: "p", BUILD_ID: "b" },
+      recordingAvailable: true,
     };
     expect(message.type).toBe("session_start");
+    expect(message.recordingAvailable).toBe(true);
+  });
+
+  it("accepts parent recording_control_ack shape", () => {
+    const message: ParentToChildMessage = {
+      type: "recording_control_ack",
+      sessionId: "peer-1",
+      action: "start",
+      requestId: "req-1",
+      ok: true,
+      reason: "applied",
+    };
+    expect(message.ok).toBe(true);
+    expect(message.reason).toBe("applied");
   });
 
   it("accepts speech_event with SDK event payload", () => {
@@ -45,6 +60,7 @@ describe("protocol", () => {
       type: "recording_control",
       sessionId: "peer-1",
       action: "start",
+      requestId: "req-abc",
     };
     const binary: ChildToParentMessage = {
       type: "send_binary_to_client",

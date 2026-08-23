@@ -10,7 +10,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Added
 
-- **`RecordingControlMessage`** — IPC type and helpers (`startRecording`, `pauseRecording`, `resumeRecording`, `stopRecording`) for conversation recording control from the agent child.
+- **`recordingAvailable` on `session_start`** — runner advertises when conversation recording is enabled for the project; exposed on {@link SessionContext} (defaults to `false` on older runners).
+- **`RecordingControlMessage.requestId`** and **`recording_control_ack`** parent reply — `startRecording`, `pauseRecording`, `resumeRecording`, and `stopRecording` now return `Promise<RecordingControlResult>` and await runner acknowledgement.
+- **`local_mock` fast path** — when the agent is not a forked IPC child (`process.send` absent or disconnected), recording helpers resolve immediately with `{ ok: true, reason: "local_mock" }` so local verify runs never block on a parent ACK.
+- **`isRecordingAvailable(ctx)`** helper for consent gating before `startRecording`.
 
 ## [0.3.0] - 2026-08-02
 

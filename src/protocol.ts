@@ -25,7 +25,8 @@ export type ParentToChildMessage =
   | DataChannelMessageMessage
   | DataChannelBinaryMessage
   | IdleTimeoutMessage
-  | RecordingControlAckMessage;
+  | RecordingControlAckMessage
+  | WebhookMessage;
 
 /**
  * Messages the customer child may send back to the runner parent.
@@ -237,6 +238,28 @@ export interface SendBinaryToClientMessage {
 }
 
 /**
+ * Inbound HTTP webhook forwarded from the edge — process-wide, not tied to a session.
+ *
+ * Delivered to {@link AgentHandlers.onWebhook} on every child in the runner process
+ * (not session-queued). {@link WebhookMessage.body} is the exact inbound bytes — verify
+ * HMAC/signatures on `body` before `JSON.parse` in customer code.
+ */
+export interface WebhookMessage {
+  type: "webhook";
+  /** Edge-generated id for idempotency. */
+  eventId: string;
+  projectId: string;
+  method: string;
+  path: string;
+  /** All inbound request headers (string values). */
+  headers: Record<string, string>;
+  /** Exact inbound body bytes — do not parse in the SDK before the customer handler. */
+  body: Buffer;
+  contentType: string | null;
+  receivedAt: string;
+}
+
+/**
  * Idle timeout fired — run {@link AgentHandlers.onIdleTimeout} before disconnect.
  */
 export interface IdleTimeoutMessage {
@@ -271,8 +294,9 @@ export interface DisconnectClientMessage {
  * The runner may add more project-specific keys over time; customer bundles must
  * not read `process.env` for session fields — only the `env` object on session start.
  *
- * Process-wide secrets such as `AGENT_REDIS_URL` (when project Redis is enabled) are
- * still available on `process.env` inside `onAgentStart`.
+ * Process-wide secrets such as `AGENT_REDIS_URL` (when project Redis is enabled) and
+ * `AGENT_WEBHOOK_SIGNING_SECRET` (for inbound webhook HMAC verification) are still
+ * available on `process.env` inside `onAgentStart` / `onWebhook`.
  * Keys prefixed with `AGENT_` may also be forwarded into the child environment.
  */
 export const ALLOWED_CHILD_ENV_KEYS = [

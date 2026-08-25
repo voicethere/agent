@@ -30,6 +30,8 @@ describe("agent template registry", () => {
         "game-sync-smoke",
         "redis-sync",
         "voice-starter",
+        "webhooks",
+        "webhooks-redis",
       ].sort(),
     );
   });
@@ -39,7 +41,7 @@ describe("agent template registry", () => {
     expect(product.every((template) => template.kind === "product")).toBe(
       true,
     );
-    expect(product).toHaveLength(4);
+    expect(product).toHaveLength(6);
 
     const e2e = listTemplates({ kind: "e2e" });
     expect(e2e.every((template) => template.kind === "e2e")).toBe(true);
@@ -89,7 +91,14 @@ describe("seed template bundles", () => {
 
   it("marks only product templates as seedOnCreate", () => {
     expect(seedIds.sort()).toEqual(
-      ["echo", "echo-dc", "game-sync", "voice-starter"].sort(),
+      [
+        "echo",
+        "echo-dc",
+        "game-sync",
+        "voice-starter",
+        "webhooks",
+        "webhooks-redis",
+      ].sort(),
     );
   });
 

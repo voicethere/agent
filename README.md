@@ -178,9 +178,11 @@ defineAgent({
 
 On plans that include project Redis, the runner injects **`AGENT_REDIS_URL`** into the child environment and grants scoped `--allow-net` for that host. Add **`ioredis`** as a dependency of your agent, bundle it with the CLI, and open the client in **`onAgentStart`** so it is ready before any `onSessionStart` / session IPC.
 
+For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in project settings. The runner forwards the exact request bytes on process-wide **`onWebhook`** IPC (not session-queued). Verify HMAC on `ctx.body` before `JSON.parse` — VoiceThere does not verify signatures in the SDK. See [`templates/webhooks.ts`](./templates/webhooks.ts).
+
 | Export                                                                    | Purpose                                                                                         |
 | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `defineAgent`                                                             | Register `onAgentStart`, `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onSessionEnd` |
+| `defineAgent`                                                             | Register `onAgentStart`, `onWebhook`, `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onSessionEnd` |
 | `SpeechEvent`, `SpeechEventType`                                          | Re-exported **types** from `@node-webrtc-rust/sdk/voice`                                        |
 | `SPEECH_EVENT_TYPE`                                                       | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)           |
 | `speak`                                                                   | Request parent TTS                                                                              |

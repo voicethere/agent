@@ -829,6 +829,90 @@ describe("defineAgent", () => {
       });
     });
   });
+
+  it("dispatches onWebhook with identical body bytes and forwarded headers", async () => {
+    const onWebhook = vi.fn();
+    const body = Buffer.from('{"type":"ping","text":"hello"}');
+    capture = installProcessMessageCapture();
+    defineAgent({ onWebhook });
+
+    capture.emit({
+      type: "webhook",
+      eventId: "evt-1",
+      projectId: "proj-1",
+      method: "POST",
+      path: "/hooks/custom",
+      headers: {
+        "x-agent-webhook-signature": "abc123",
+        "content-type": "application/json",
+      },
+      body,
+      contentType: "application/json",
+      receivedAt: "2026-08-25T12:00:00.000Z",
+    });
+
+    await vi.waitFor(() => {
+      expect(onWebhook).toHaveBeenCalledWith({
+        eventId: "evt-1",
+        projectId: "proj-1",
+        method: "POST",
+        path: "/hooks/custom",
+        headers: {
+          "x-agent-webhook-signature": "abc123",
+          "content-type": "application/json",
+        },
+        body,
+        contentType: "application/json",
+        receivedAt: "2026-08-25T12:00:00.000Z",
+      });
+      expect(onWebhook.mock.calls[0]?.[0]?.body.equals(body)).toBe(true);
+    });
+  });
+
+  it("decodes serialized Buffer body for onWebhook", async () => {
+    const onWebhook = vi.fn();
+    const body = Buffer.from([0x7b, 0x22, 0x61, 0x22, 0x3a, 0x31, 0x7d]);
+    capture = installProcessMessageCapture();
+    defineAgent({ onWebhook });
+
+    capture.emit({
+      type: "webhook",
+      eventId: "evt-buffer",
+      projectId: "proj-1",
+      method: "POST",
+      path: "/",
+      headers: {},
+      body: { type: "Buffer", data: [...body] },
+      contentType: null,
+      receivedAt: "2026-08-25T12:00:00.000Z",
+    });
+
+    await vi.waitFor(() => {
+      expect(onWebhook.mock.calls[0]?.[0]?.body.equals(body)).toBe(true);
+    });
+  });
+
+  it("is no-op when onWebhook is not defined", async () => {
+    const onSessionStart = vi.fn();
+    capture = installProcessMessageCapture();
+    defineAgent({ onSessionStart });
+
+    capture.emit({
+      type: "webhook",
+      eventId: "evt-noop",
+      projectId: "proj-1",
+      method: "POST",
+      path: "/",
+      headers: {},
+      body: Buffer.from("{}"),
+      contentType: null,
+      receivedAt: "2026-08-25T12:00:00.000Z",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(onSessionStart).not.toHaveBeenCalled();
+    expect(capture.send).not.toHaveBeenCalled();
+  });
 });
 
 describe("disconnectClient", () => {

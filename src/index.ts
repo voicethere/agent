@@ -29,6 +29,7 @@ export {
   type SendBinaryToClientMessage,
   type SpeakMessage,
   type SpeechEventMessage,
+  type WebhookMessage,
 } from "./protocol.js";
 
 export {
@@ -53,4 +54,5 @@ export {
   type SessionContext,
   type SpeechContext,
   type SpeechEventContext,
+  type WebhookContext,
 } from "./runtime.js";

@@ -50,6 +50,24 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     sourceFiles: ["game-sync.ts"],
   },
   {
+    id: "webhooks",
+    entry: "webhooks.ts",
+    kind: "product",
+    seedOnCreate: true,
+    description:
+      "Inbound webhook handler — HMAC verify on raw body, then DataChannel + speak fan-out.",
+    sourceFiles: ["webhooks.ts"],
+  },
+  {
+    id: "webhooks-redis",
+    entry: "webhooks-redis.ts",
+    kind: "product",
+    seedOnCreate: true,
+    description:
+      "Webhook handler with Redis atomic shared counter plus DataChannel fan-out.",
+    sourceFiles: ["webhooks-redis.ts"],
+  },
+  {
     id: "echo-smoke",
     entry: "echo-smoke.ts",
     kind: "e2e",

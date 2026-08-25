@@ -11,6 +11,7 @@ import type {
   RecordingControlAckMessage,
   RecordingControlAction,
   RecordingControlResult,
+  WebhookMessage,
 } from "./protocol.js";
 import { SessionSerialQueue } from "./session-serial-queue.js";
 
@@ -51,6 +52,19 @@ export interface AgentStartContext {
   env: Record<string, string>;
 }
 
+/** Context for process-wide inbound webhook IPC (`type: "webhook"`). */
+export interface WebhookContext {
+  eventId: string;
+  projectId: string;
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  /** Exact inbound bytes — verify HMAC on this, then `JSON.parse`. */
+  body: Buffer;
+  contentType: string | null;
+  receivedAt: string;
+}
+
 export interface AgentHandlers {
   /**
    * Runs once when the child registers handlers — before any session IPC is handled.
@@ -58,6 +72,12 @@ export interface AgentHandlers {
    * Errors are logged and reported; session IPC is still accepted afterward so the child does not hang.
    */
   onAgentStart?: (ctx: AgentStartContext) => void | Promise<void>;
+  /**
+   * Process-wide inbound HTTP webhook from the edge (not session-queued).
+   * VoiceThere does not verify signatures — use `AGENT_WEBHOOK_SIGNING_SECRET` in
+   * `process.env` and verify HMAC on {@link WebhookContext.body} before parsing JSON.
+   */
+  onWebhook?: (ctx: WebhookContext) => void | Promise<void>;
   /** Alias for {@link AgentHandlers.onSessionStart}. */
   onClientJoin?: (ctx: SessionContext) => void | Promise<void>;
   onSessionStart?: (ctx: SessionContext) => void | Promise<void>;
@@ -114,6 +134,46 @@ function isRecordingControlAckMessage(
   );
 }
 
+function isWebhookMessage(value: unknown): value is WebhookMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; eventId?: unknown; projectId?: unknown };
+  return (
+    msg.type === "webhook" &&
+    typeof msg.eventId === "string" &&
+    typeof msg.projectId === "string"
+  );
+}
+
+function coerceInboundBinary(value: unknown): Buffer | null {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  if (ArrayBuffer.isView(value)) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (typeof value === "object") {
+    const maybeBufferLike = value as { type?: unknown; data?: unknown };
+    if (maybeBufferLike.type === "Buffer" && Array.isArray(maybeBufferLike.data)) {
+      return Buffer.from(maybeBufferLike.data);
+    }
+  }
+  return null;
+}
+
+function normalizeWebhookHeaders(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw === "string") {
+      out[key] = raw;
+    }
+  }
+  return out;
+}
+
 function isParentMessage(value: unknown): value is ParentToChildMessage {
   if (!value || typeof value !== "object") return false;
   const msg = value as { type?: string };
@@ -124,8 +184,18 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "data_channel_message" ||
     msg.type === "data_channel_binary" ||
     msg.type === "idle_timeout" ||
-    msg.type === "recording_control_ack"
+    msg.type === "recording_control_ack" ||
+    msg.type === "webhook"
   );
+}
+
+/** Parent IPC tied to a `sessionId` (excludes process-wide `webhook`). */
+type SessionScopedParentMessage = Exclude<ParentToChildMessage, WebhookMessage>;
+
+function isSessionScopedParentMessage(
+  value: unknown,
+): value is SessionScopedParentMessage {
+  return isParentMessage(value) && !isWebhookMessage(value);
 }
 
 function parseDataChannelPayload(raw: string): unknown {
@@ -315,8 +385,59 @@ function resolveSessionStartInitDelayMs(): number {
   );
 }
 
+async function handleWebhookMessage(
+  message: WebhookMessage,
+  handlers: AgentHandlers,
+): Promise<void> {
+  if (!handlers.onWebhook) return;
+
+  const body = coerceInboundBinary(message.body);
+  if (!body) {
+    agentLog("warn", "webhook ipc dropped: body is not binary");
+    return;
+  }
+
+  const ctx: WebhookContext = {
+    eventId: message.eventId,
+    projectId: message.projectId,
+    method: typeof message.method === "string" ? message.method : "POST",
+    path: typeof message.path === "string" ? message.path : "",
+    headers: normalizeWebhookHeaders(message.headers),
+    body,
+    contentType:
+      typeof message.contentType === "string" ? message.contentType : null,
+    receivedAt:
+      typeof message.receivedAt === "string" ? message.receivedAt : "",
+  };
+
+  try {
+    const started = Date.now();
+    await handlers.onWebhook(ctx);
+    sendParentMessage({
+      type: "webhook_handled",
+      projectId: message.projectId,
+      eventId: message.eventId,
+      durationMs: Date.now() - started,
+    });
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    await runErrorHook(handlers, {
+      sessionId: "",
+      projectId: message.projectId,
+      env: process.env as Record<string, string>,
+      error: err,
+    });
+    sendParentMessage({
+      type: "agent_error",
+      sessionId: "",
+      message: err.message,
+      stack: err.stack,
+    });
+  }
+}
+
 async function handleParentMessage(
-  message: ParentToChildMessage,
+  message: SessionScopedParentMessage,
   handlers: AgentHandlers,
 ): Promise<void> {
   switch (message.type) {
@@ -407,7 +528,11 @@ export function defineAgent(handlers: AgentHandlers): void {
       handleRecordingControlAck(message);
       return;
     }
-    if (!isParentMessage(message)) return;
+    if (isWebhookMessage(message)) {
+      void agentStartReady.then(() => handleWebhookMessage(message, handlers));
+      return;
+    }
+    if (!isSessionScopedParentMessage(message)) return;
 
     // Invalidate immediately on arrival — do not wait behind queued work that
     // must be cancelled. session_end then enqueues on a fresh generation for

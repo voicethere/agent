@@ -94,4 +94,21 @@ describe("protocol", () => {
     };
     expect(message.data.length).toBe(2);
   });
+
+  it("accepts parent webhook shape with raw body bytes", () => {
+    const body = Buffer.from('{"event":"test"}');
+    const message: ParentToChildMessage = {
+      type: "webhook",
+      eventId: "evt-abc",
+      projectId: "proj-1",
+      method: "POST",
+      path: "/custom",
+      headers: { "x-test": "1" },
+      body,
+      contentType: "application/json",
+      receivedAt: "2026-08-25T00:00:00.000Z",
+    };
+    expect(message.type).toBe("webhook");
+    expect(message.body.equals(body)).toBe(true);
+  });
 });

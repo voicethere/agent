@@ -17,7 +17,7 @@ import {
 
 | Kind | Dashboard create | Prebuilt seed bundle | Typical consumer |
 | --- | --- | --- | --- |
-| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `game-sync`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
+| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `game-sync`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
 | **e2e** | No | No — build from sources at test time | `voicethere/e2e` smokes |
 
 Product templates always set `seedOnCreate: true`. CI fails if a product template is missing its prebuilt bundle after `npm run build`.
@@ -58,6 +58,14 @@ Full starter bundle covering every speech event from `@node-webrtc-rust/sdk/voic
 ### `game-sync.ts` (`game-sync`)
 
 Authoritative multi-object sync sample for real-time games/simulations (register, simulate, binary world snapshots).
+
+### `webhooks.ts` (`webhooks`)
+
+Inbound HTTP webhook sample — verifies `x-agent-webhook-signature` HMAC on the **raw body** with `AGENT_WEBHOOK_SIGNING_SECRET`, then `JSON.parse` and fans out to connected sessions via DataChannel + `speak`.
+
+### `webhooks-redis.ts` (`webhooks-redis`)
+
+Same HMAC verify path plus an atomic Redis counter (`AGENT_REDIS_URL`) before DataChannel fan-out. Fan-out to sessions does not require Redis; Redis is for shared cross-pod state.
 
 ## E2e templates
 

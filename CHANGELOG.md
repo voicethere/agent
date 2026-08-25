@@ -6,6 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-25
+
+### Added
+
+- **`onWebhook`** — process-wide inbound HTTP webhook handler (`WebhookMessage` / `WebhookContext`). The runtime delivers the **raw body** as a `Buffer` plus inbound headers so you can verify HMAC (or any signature) **before** `JSON.parse`.
+- **`webhooks` template** — verifies `x-agent-webhook-signature` (hex HMAC-SHA256 of the raw body) using `AGENT_WEBHOOK_SIGNING_SECRET`, then broadcasts `webhook_event` to connected sessions.
+- **`webhooks-redis` template** — same verification, with project Redis for cross-pod session fan-out.
+- **`webhook_handled` IPC** — child reports handler duration after `onWebhook` completes (parent metrics).
+
 ## [0.4.0] - 2026-08-23
 
 ### Added

@@ -42,7 +42,8 @@ export type ChildToParentMessage =
   | SendToClientMessage
   | SendBinaryToClientMessage
   | IdleTimeoutDoneMessage
-  | DisconnectClientMessage;
+  | DisconnectClientMessage
+  | WebhookHandledMessage;
 
 /** Which WebRTC data channel carried a binary IPC payload. */
 export type DataChannelKind = "control" | "sync";
@@ -257,6 +258,14 @@ export interface WebhookMessage {
   body: Buffer;
   contentType: string | null;
   receivedAt: string;
+}
+
+/** Child reports onWebhook completion latency (process-wide, not session-scoped). */
+export interface WebhookHandledMessage {
+  type: "webhook_handled";
+  projectId: string;
+  eventId: string;
+  durationMs: number;
 }
 
 /**

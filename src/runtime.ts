@@ -411,7 +411,14 @@ async function handleWebhookMessage(
   };
 
   try {
+    const started = Date.now();
     await handlers.onWebhook(ctx);
+    sendParentMessage({
+      type: "webhook_handled",
+      projectId: message.projectId,
+      eventId: message.eventId,
+      durationMs: Date.now() - started,
+    });
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     await runErrorHook(handlers, {

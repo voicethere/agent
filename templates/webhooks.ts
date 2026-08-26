@@ -22,14 +22,25 @@ const WEBHOOK_SIGNATURE_HEADER = "x-agent-webhook-signature";
 
 const connectedSessions = new Set<string>();
 
+function getHeaderCaseInsensitive(
+  headers: Record<string, string>,
+  name: string,
+): string | undefined {
+  const want = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === want) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 function verifyWebhookSignature(
   body: Buffer,
   headers: Record<string, string>,
   secret: string,
 ): boolean {
-  const received =
-    headers[WEBHOOK_SIGNATURE_HEADER] ??
-    headers[WEBHOOK_SIGNATURE_HEADER.toUpperCase()];
+  const received = getHeaderCaseInsensitive(headers, WEBHOOK_SIGNATURE_HEADER);
   if (!received?.trim()) {
     return false;
   }
@@ -83,7 +94,8 @@ defineAgent({
         ? record.text.trim()
         : `webhook:${messageType}`;
 
-    const sessionIds = [...connectedSessions];
+    const sessionIds =
+      ctx.sessionIds.length > 0 ? ctx.sessionIds : [...connectedSessions];
     if (sessionIds.length === 0) {
       agentLog(
         "info",

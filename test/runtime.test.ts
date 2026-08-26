@@ -864,8 +864,37 @@ describe("defineAgent", () => {
         body,
         contentType: "application/json",
         receivedAt: "2026-08-25T12:00:00.000Z",
+        sessionIds: [],
       });
       expect(onWebhook.mock.calls[0]?.[0]?.body.equals(body)).toBe(true);
+    });
+  });
+
+  it("forwards sessionIds from webhook IPC to onWebhook context", async () => {
+    const onWebhook = vi.fn();
+    const body = Buffer.from("{}");
+    capture = installProcessMessageCapture();
+    defineAgent({ onWebhook });
+
+    capture.emit({
+      type: "webhook",
+      eventId: "evt-sessions",
+      projectId: "proj-1",
+      method: "POST",
+      path: "/hooks",
+      headers: {},
+      body,
+      contentType: null,
+      receivedAt: "2026-08-26T00:00:00.000Z",
+      sessionIds: ["sess-a", "sess-b"],
+    });
+
+    await vi.waitFor(() => {
+      expect(onWebhook).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionIds: ["sess-a", "sess-b"],
+        }),
+      );
     });
   });
 

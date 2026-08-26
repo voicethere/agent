@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-26
+
+### Added
+
+- **`sessionIds` on webhook IPC** — optional `WebhookMessage.sessionIds` and `WebhookContext.sessionIds` so the runner can pass live orchestrator session ids (parent is source of truth). `webhooks` / `webhooks-redis` templates prefer `ctx.sessionIds` over in-child `connectedSessions`.
+
+### Fixed
+
+- **Webhook template HMAC** — signature header lookup is case-insensitive (`X-Agent-Webhook-Signature` and variants).
+
 ## [0.5.1] - 2026-08-26
 
 ### Fixed

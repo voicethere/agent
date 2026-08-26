@@ -258,6 +258,12 @@ export interface WebhookMessage {
   body: Buffer;
   contentType: string | null;
   receivedAt: string;
+  /**
+   * Orchestrator session ids registered on this child when the runner forwarded
+   * the webhook. Prefer over in-child `connectedSessions` when present (runner
+   * is source of truth for live sessions). Absent on older runners.
+   */
+  sessionIds?: string[];
 }
 
 /** Child reports onWebhook completion latency (process-wide, not session-scoped). */

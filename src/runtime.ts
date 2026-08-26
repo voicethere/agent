@@ -63,6 +63,8 @@ export interface WebhookContext {
   body: Buffer;
   contentType: string | null;
   receivedAt: string;
+  /** Live session ids on this child (from runner); empty when omitted on older runners. */
+  sessionIds: string[];
 }
 
 export interface AgentHandlers {
@@ -408,6 +410,11 @@ async function handleWebhookMessage(
       typeof message.contentType === "string" ? message.contentType : null,
     receivedAt:
       typeof message.receivedAt === "string" ? message.receivedAt : "",
+    sessionIds: Array.isArray(message.sessionIds)
+      ? message.sessionIds.filter(
+          (id): id is string => typeof id === "string" && id.length > 0,
+        )
+      : [],
   };
 
   try {

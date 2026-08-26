@@ -56,9 +56,7 @@ export async function runAgentVerify(
   const quiet = options.quiet;
   const entry = options.entry ?? "agent.ts";
   const outfile = options.outfile ?? "dist/agent.js";
-  const bundlePath =
-    options.bundlePath ??
-    parseBundleArg([], process.env, cwd);
+  const bundlePath = options.bundlePath ?? parseBundleArg([], process.env, cwd);
 
   logLine(quiet, "[@voicethere/agent verify]");
 
@@ -87,8 +85,7 @@ export async function runAgentVerify(
       });
       logLine(quiet, `✓ Built ${outfile} from ${entry}`);
     } catch (error) {
-      const detail =
-        error instanceof Error ? error.message : String(error);
+      const detail = error instanceof Error ? error.message : String(error);
       return failCheck(checks, "Build bundle", detail);
     }
   } else {
@@ -135,7 +132,7 @@ export async function runAgentVerify(
     return failCheck(
       checks,
       "Bundle callbacks",
-      "Expected at least one handler: onSpeechEvent, onUserSpeechFinal, onDataChannelMessage, or onDataChannelBinary",
+      "Expected at least one handler: onSpeechEvent, onUserSpeechFinal, onDataChannelMessage, onDataChannelBinary, onWebhook, or onSessionStart",
     );
   }
   checks.push({

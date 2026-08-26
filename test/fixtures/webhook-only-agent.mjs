@@ -1,0 +1,3 @@
+defineAgent({
+  onWebhook() {},
+});

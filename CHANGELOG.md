@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-26
+
+### Fixed
+
+- **`verify`** — accept `onWebhook` and `onSessionStart` as sufficient handlers so webhook-only and session-start-only agents pass local verify (no dummy DataChannel handler required).
+
 ## [0.5.0] - 2026-08-25
 
 ### Added

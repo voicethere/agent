@@ -85,7 +85,10 @@ defineAgent({
 
     const sessionIds = [...connectedSessions];
     if (sessionIds.length === 0) {
-      agentLog("info", `webhook verified with no live sessions eventId=${ctx.eventId}`);
+      agentLog(
+        "info",
+        `webhook verified with no live sessions eventId=${ctx.eventId}`,
+      );
       return;
     }
 

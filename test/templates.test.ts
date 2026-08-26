@@ -13,6 +13,10 @@ import {
   loadTemplateSources,
   resolveTemplateEntryPath,
 } from "../src/templates/index.js";
+import {
+  isAllowlistedEnvProbeKey,
+  resolveEnvProbeValue,
+} from "../templates/game-sync-smoke.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
@@ -20,7 +24,11 @@ const root = join(__dirname, "..");
 describe("agent template registry", () => {
   it("lists all registered templates", () => {
     expect(listTemplates()).toHaveLength(AGENT_TEMPLATES.length);
-    expect(listTemplates().map((template) => template.id).sort()).toEqual(
+    expect(
+      listTemplates()
+        .map((template) => template.id)
+        .sort(),
+    ).toEqual(
       [
         "crash",
         "echo",
@@ -38,9 +46,7 @@ describe("agent template registry", () => {
 
   it("filters templates by kind", () => {
     const product = listTemplates({ kind: "product" });
-    expect(product.every((template) => template.kind === "product")).toBe(
-      true,
-    );
+    expect(product.every((template) => template.kind === "product")).toBe(true);
     expect(product).toHaveLength(6);
 
     const e2e = listTemplates({ kind: "e2e" });
@@ -80,9 +86,9 @@ describe("agent template registry", () => {
     expect(sources.map((source) => source.path).sort()).toEqual(
       ["agent.ts", "world-layout.ts"].sort(),
     );
-    expect(sources.find((source) => source.path === "world-layout.ts")?.content).toContain(
-      "REDIS_WORLD_KEY",
-    );
+    expect(
+      sources.find((source) => source.path === "world-layout.ts")?.content,
+    ).toContain("REDIS_WORLD_KEY");
   });
 });
 
@@ -118,5 +124,42 @@ describe("seed template bundles", () => {
       /does not publish a seed bundle/,
     );
     expect(hasSeedBundle("echo-smoke")).toBe(false);
+  });
+});
+
+describe("game-sync-smoke env_probe", () => {
+  it("loads env_probe handler and allowlist in template sources", () => {
+    const sources = loadTemplateSources("game-sync-smoke");
+    const content = sources.map((source) => source.content).join("\n");
+    expect(content).toContain("env_probe");
+    expect(content).toContain("env_probe_ack");
+    expect(content).toContain("AGENT_E2E_ENV_PROBE_KEY_PATTERN");
+  });
+});
+
+describe("game-sync-smoke env_probe helpers", () => {
+  it("allowlists AGENT_E2E_* keys only", () => {
+    expect(isAllowlistedEnvProbeKey("AGENT_E2E_SMOKE")).toBe(true);
+    expect(isAllowlistedEnvProbeKey("AGENT_E2E_SECRET")).toBe(true);
+    expect(isAllowlistedEnvProbeKey("AGENT_OPENAI_API_KEY")).toBe(false);
+    expect(isAllowlistedEnvProbeKey("AGENT_WEBHOOK_SIGNING_SECRET")).toBe(
+      false,
+    );
+    expect(isAllowlistedEnvProbeKey("AGENT_E2E_lowercase")).toBe(false);
+  });
+
+  it("resolveEnvProbeValue returns process.env for allowlisted keys", () => {
+    const previous = process.env.AGENT_E2E_SMOKE;
+    process.env.AGENT_E2E_SMOKE = "probe-value";
+    try {
+      expect(resolveEnvProbeValue("AGENT_E2E_SMOKE")).toBe("probe-value");
+      expect(resolveEnvProbeValue("AGENT_OPENAI_API_KEY")).toBe(null);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AGENT_E2E_SMOKE;
+      } else {
+        process.env.AGENT_E2E_SMOKE = previous;
+      }
+    }
   });
 });

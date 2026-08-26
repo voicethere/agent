@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-08-26
+
+### Added
+
+- **`game-sync-smoke` `env_probe`** — data-channel message `{ type: "env_probe", key }` returns `{ type: "env_probe_ack", key, value }` for allowlisted `AGENT_E2E_*` keys only (reads `process.env`; rejects webhook/OpenAI and other secrets).
+
 ## [0.5.2] - 2026-08-26
 
 ### Added

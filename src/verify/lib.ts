@@ -10,6 +10,8 @@ export const VERIFY_CALLBACK_KEYS = [
   "onUserSpeechFinal",
   "onDataChannelMessage",
   "onDataChannelBinary",
+  "onWebhook",
+  "onSessionStart",
 ] as const;
 export type VerifyCallbackKey = (typeof VERIFY_CALLBACK_KEYS)[number];
 
@@ -68,7 +70,9 @@ export function waitForSessionStartAck(
     const started = Date.now();
     const timer = setInterval(() => {
       const ack = messages.find(
-        (m): m is Extract<ChildToParentMessage, { type: "session_start_ack" }> =>
+        (
+          m,
+        ): m is Extract<ChildToParentMessage, { type: "session_start_ack" }> =>
           m.type === "session_start_ack" && m.sessionId === sessionId,
       );
       if (ack) {

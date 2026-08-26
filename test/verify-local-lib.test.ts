@@ -96,9 +96,9 @@ describe("waitForSessionStartAck", () => {
   });
 
   it("rejects on timeout when no ack arrives", async () => {
-    await expect(waitForSessionStartAck([], VERIFY_SESSION_ID, 150)).rejects.toThrow(
-      /Timed out/,
-    );
+    await expect(
+      waitForSessionStartAck([], VERIFY_SESSION_ID, 150),
+    ).rejects.toThrow(/Timed out/);
   });
 });
 
@@ -116,9 +116,21 @@ describe("detectVerifyCallbacks", () => {
     ]);
   });
 
-  it("returns empty list when none of the verification callbacks are present", () => {
+  it("detects onSessionStart as a valid verification callback", () => {
     const source = "defineAgent({ onSessionStart: () => {} });";
-    expect(detectVerifyCallbacks(source)).toEqual([]);
+    expect(detectVerifyCallbacks(source)).toEqual(["onSessionStart"]);
+  });
+
+  it("detects onWebhook as a valid verification callback", () => {
+    const source = "defineAgent({ onWebhook(ctx) {} });";
+    expect(detectVerifyCallbacks(source)).toEqual(["onWebhook"]);
+  });
+
+  it("returns empty list when none of the verification callbacks are present", () => {
+    expect(detectVerifyCallbacks("defineAgent({});")).toEqual([]);
+    expect(
+      detectVerifyCallbacks("defineAgent({ onSessionEnd: () => {} });"),
+    ).toEqual([]);
     expect(VERIFY_CALLBACK_KEYS.length).toBeGreaterThan(0);
   });
 });
@@ -126,7 +138,9 @@ describe("detectVerifyCallbacks", () => {
 describe("hasDefineAgentRegistration", () => {
   it("detects defineAgent call in bundle source", () => {
     expect(
-      hasDefineAgentRegistration("import { defineAgent } from '@voicethere/agent'; defineAgent({ onSpeechEvent() {} });"),
+      hasDefineAgentRegistration(
+        "import { defineAgent } from '@voicethere/agent'; defineAgent({ onSpeechEvent() {} });",
+      ),
     ).toBe(true);
   });
 

@@ -8,6 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Fixed
 
+- **ioredis sandbox CI flake** — mini-redis mock now parses complete RESP commands (pipelined HELLO+PING no longer desyncs ioredis). Probe child is killed on timeout so `afterEach` cannot hang on `server.close()`.
 - **`voice-showcase` weather** — country-only replies (e.g. “Thailand”) no longer overwrite a stored city/ZIP, so the agent does not loop on “Which country is that in?”. Spoken ZIP digits plus a trailing country name parse in one utterance.
 
 ## [0.5.4] - 2026-08-28

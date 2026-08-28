@@ -15,10 +15,10 @@ import {
 
 ## Product vs e2e
 
-| Kind | Dashboard create | Prebuilt seed bundle | Typical consumer |
-| --- | --- | --- | --- |
-| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `game-sync`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
-| **e2e** | No | No — build from sources at test time | `voicethere/e2e` smokes |
+| Kind        | Dashboard create                                                                                      | Prebuilt seed bundle                 | Typical consumer        |
+| ----------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
+| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `game-sync`, `voice-showcase`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
+| **e2e**     | No                                                                                                    | No — build from sources at test time | `voicethere/e2e` smokes |
 
 Product templates always set `seedOnCreate: true`. CI fails if a product template is missing its prebuilt bundle after `npm run build`.
 
@@ -57,7 +57,13 @@ Full starter bundle covering every speech event from `@node-webrtc-rust/sdk/voic
 
 ### `game-sync.ts` (`game-sync`)
 
-Authoritative multi-object sync sample for real-time games/simulations (register, simulate, binary world snapshots).
+Authoritative multi-object sync sample for real-time games/simulations (register, simulate, binary world snapshots). Live objects are capped at **25** per world; clients can send `{ type: "unregister" }` (or `{ type: "remove", objectId?: number }`) to release owned objects. Protocol helpers live in `game-sync-protocol.ts`.
+
+### `voice-showcase/` (`voice-showcase`)
+
+Conversational voice demo for landing and dashboard previews — greets the user, asks for a name, then offers a menu: weather (Open-Meteo, no API key), count 1–10, short recipes, and rotating fun facts. Typed chat and voice finals share the same handler. Sends structured `menu` payloads plus `chat_reply` for the chat log.
+
+Sources: `voice-showcase/agent.ts` (defineAgent wiring), `conversation.ts` (pure state machine), `weather.ts`, `recipes.ts`, `fun-facts.ts`.
 
 ### `webhooks.ts` (`webhooks`)
 
@@ -71,12 +77,12 @@ Same HMAC verify path plus an atomic Redis counter (`AGENT_REDIS_URL`) before Da
 
 These mirror former `e2e/fixtures/*` sources. E2E resolves entries from the package, builds into ephemeral workdirs, and uploads `dist/agent.js`.
 
-| Id | Source | Purpose |
-| --- | --- | --- |
-| `echo-smoke` | `echo-smoke.ts` | voice-smoke, agent-smoke, cli-smoke |
-| `crash` | `crash.ts` | session-errors-smoke, crash-policy smokes |
-| `game-sync-smoke` | `game-sync-smoke.ts` | deploy-smoke, shared-child, idle smokes |
-| `redis-sync` | `redis-sync/agent.ts` + `world-layout.ts` | redis-sync-smoke (project Redis world buffer) |
+| Id                | Source                                    | Purpose                                       |
+| ----------------- | ----------------------------------------- | --------------------------------------------- |
+| `echo-smoke`      | `echo-smoke.ts`                           | voice-smoke, agent-smoke, cli-smoke           |
+| `crash`           | `crash.ts`                                | session-errors-smoke, crash-policy smokes     |
+| `game-sync-smoke` | `game-sync-smoke.ts`                      | deploy-smoke, shared-child, idle smokes       |
+| `redis-sync`      | `redis-sync/agent.ts` + `world-layout.ts` | redis-sync-smoke (project Redis world buffer) |
 
 **Note:** Product `echo` is not the same as e2e `echo-smoke` — keep both ids.
 

@@ -17,6 +17,7 @@ import {
   geocodeLocation,
   lookupWeather,
   parseLocationUtterance,
+  spokenDigitsToPostal,
   wmoCodeToPhrase,
   type FetchFn,
 } from "../templates/voice-showcase/weather.js";
@@ -131,6 +132,42 @@ describe("voice-showcase conversation", () => {
       city: "Berlin",
       country: "Germany",
     });
+  });
+
+  it("parseLocationUtterance treats a country name as country, not city", () => {
+    expect(parseLocationUtterance("Thailand")).toEqual({
+      country: "Thailand",
+    });
+  });
+
+  it("parseLocationUtterance extracts spoken ZIP plus trailing country", () => {
+    expect(
+      spokenDigitsToPostal("welcome down there eight four three two zero"),
+    ).toBe("84320");
+    expect(
+      parseLocationUtterance(
+        "Welcome down there eight four three two zero Thailand",
+      ),
+    ).toEqual({
+      city: "84320",
+      country: "Thailand",
+    });
+  });
+
+  it("weather country follow-up keeps stored ZIP and looks up", () => {
+    let state = transitionAfterName(createInitialState(), "Lee", false).state;
+    state = handleUtterance(state, "weather").state;
+    const zipOnly = handleUtterance(state, "84320");
+    expect(zipOnly.speakLines[0]).toContain("Which country");
+    expect(zipOnly.state.weatherCity).toBe("84320");
+    expect(zipOnly.pendingWeather).toBeUndefined();
+
+    const country = handleUtterance(zipOnly.state, "Thailand");
+    expect(country.pendingWeather).toEqual({
+      city: "84320",
+      country: "Thailand",
+    });
+    expect(country.speakLines).toEqual([]);
   });
 
   it("weather lookup success and failure with mock fetch", async () => {

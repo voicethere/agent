@@ -59,6 +59,8 @@ Full starter bundle covering every speech event from `@node-webrtc-rust/sdk/voic
 
 Authoritative multi-object sync sample for real-time games/simulations (register, simulate, binary world snapshots). Live objects are capped at **25** per world; clients can send `{ type: "unregister" }` (or `{ type: "remove", objectId?: number }`) to release owned objects. Protocol helpers live in `game-sync-protocol.ts`.
 
+When `AGENT_REDIS_URL` is set (project Redis), the world blob is stored at `game-sync:world` and shared across runner workers — Lua atomic allocate/release enforces the global cap; one worker holds a sim lock per tick. Without Redis, the template falls back to per-worker in-memory state (local live-test stack).
+
 ### `voice-showcase/` (`voice-showcase`)
 
 Conversational voice demo for landing and dashboard previews — greets the user, asks for a name, then offers a menu: weather (Open-Meteo, no API key), count 1–10, short recipes, and rotating fun facts. Typed chat and voice finals share the same handler. Sends structured `menu` payloads plus `chat_reply` for the chat log.

@@ -47,7 +47,22 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     seedOnCreate: true,
     description:
       "Authoritative multi-object sync sample for real-time games and simulations.",
-    sourceFiles: ["game-sync.ts"],
+    sourceFiles: ["game-sync.ts", "game-sync-protocol.ts"],
+  },
+  {
+    id: "voice-showcase",
+    entry: "voice-showcase/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    description:
+      "Conversational voice showcase — greeting, name, menu (weather, count, recipe, fun fact).",
+    sourceFiles: [
+      "voice-showcase/agent.ts",
+      "voice-showcase/conversation.ts",
+      "voice-showcase/weather.ts",
+      "voice-showcase/recipes.ts",
+      "voice-showcase/fun-facts.ts",
+    ],
   },
   {
     id: "webhooks",

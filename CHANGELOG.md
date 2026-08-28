@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- **`voice-showcase` product template** — conversational demo (greeting, name, menu: weather via Open-Meteo, count 1–10, recipes, fun facts). Pure `conversation.ts` state machine for unit tests; `seedOnCreate` prebuilt bundle at `dist/templates/voice-showcase/agent.js`.
+- **`game-sync` world cap** — max **25** live objects; `register_nack` with `reason: "world_full"`. `{ type: "unregister" }` / `{ type: "remove" }` control messages with ack/nack. Protocol parsers extracted to `game-sync-protocol.ts`.
+
 ## [0.5.3] - 2026-08-26
 
 ### Added

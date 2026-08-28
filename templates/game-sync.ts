@@ -2,9 +2,13 @@
  * Multiplayer object-sync template with ownership checks.
  *
  * World layout:
- * - one global Float32Array
+ * - one global Float32Array (fixed MAX_LIVE_OBJECTS slots when Redis is enabled)
  * - each tracked object uses exactly 9 floats:
  *   [objectId, posX, posY, posZ, posW, dirX, dirY, dirZ, dirW]
+ *
+ * With project Redis (`AGENT_REDIS_URL`), the world blob is shared across runner
+ * workers (key `game-sync:world`). One worker holds a sim lock per tick, runs
+ * physics, and writes the blob; every worker GET+broadcasts to local sessions.
  *
  * Control messages:
  * - `{ type: "register" }` -> allocates (or reuses) one 9-float slot
@@ -25,6 +29,7 @@
  * Build:
  *   npx @voicethere/agent build --entry templates/game-sync.ts
  */
+import Redis from "ioredis";
 import {
   agentLog,
   defineAgent,
@@ -41,25 +46,45 @@ import {
   UNREGISTER_NACK_REASON_NOT_FOUND,
   UNREGISTER_NACK_REASON_NOT_OWNER,
 } from "./game-sync-protocol.js";
+import {
+  LUA_ALLOCATE_OBJECT,
+  LUA_RELEASE_OBJECT,
+  REDIS_EVAL_KEYS,
+} from "./game-sync-redis.js";
+import {
+  BOARD_HEIGHT,
+  BOARD_WIDTH,
+  OBJECT_RADIUS,
+  simulateWorldStep,
+} from "./game-sync-sim.js";
+import {
+  collectActiveObjectIds,
+  countLiveObjects,
+  createEmptyWorldBuffer,
+  findFirstEmptySlot,
+  markSlotFree,
+  normalizeWorldBuffer,
+  objectIdToSlot,
+  OBJECT_SLOT_BYTE_LENGTH,
+  REDIS_SIM_LOCK_KEY,
+  REDIS_WORLD_KEY,
+  slotToObjectId,
+  writeObjectSlot,
+} from "./game-sync-world-layout.js";
 
-const OBJECT_STRIDE = 9;
 const BROADCAST_HZ = 60;
 const BROADCAST_INTERVAL_MS = Math.floor(1000 / BROADCAST_HZ);
-const BOARD_WIDTH = 1280;
-const BOARD_HEIGHT = 720;
-const OBJECT_RADIUS = 25;
+const SIM_LOCK_TTL_MS = BROADCAST_INTERVAL_MS * 2;
 const MIN_SPEED = 90;
 const MAX_SPEED = 180;
-const COLLISION_RESTITUTION = 1.0;
 
 const connectedSessions = new Set<string>();
-const objectOwners = new Map<number, string>(); // objectId -> sessionId
-const sessionObjects = new Map<string, Set<number>>(); // sessionId -> owned objectIds
-// Slots we can recycle. Keeping a free-list avoids unbounded array growth when
-// clients churn (join/leave repeatedly).
+const objectOwners = new Map<number, string>();
+const sessionObjects = new Map<string, Set<number>>();
 const freeSlots: number[] = [];
 
-let worldState = new Float32Array(0);
+let worldState = createEmptyWorldBuffer();
+let redis: Redis | null = null;
 let broadcastTimer: NodeJS.Timeout | null = null;
 
 interface TrackedObjectInfo {
@@ -75,39 +100,21 @@ function randomVelocity(): number {
   return (Math.random() < 0.5 ? -1 : 1) * rand(MIN_SPEED, MAX_SPEED);
 }
 
-function slotToObjectId(slot: number): number {
-  // Object ids are 1-based so 0 can represent "unused".
-  return slot + 1;
-}
-
-function objectIdToSlot(objectId: number): number {
-  // Inverse of slotToObjectId().
-  return objectId - 1;
-}
-
-function markSlotFree(slot: number): void {
-  // Zero the entire record. Slot is still allocated in array length terms,
-  // but logically available for reuse.
-  const start = slot * OBJECT_STRIDE;
-  for (let i = 0; i < OBJECT_STRIDE; i += 1) {
-    worldState[start + i] = 0;
-  }
-}
-
-function allocateSlot(): number {
-  // Prefer recycling old slots before growing worldState.
-  const reused = freeSlots.shift();
-  if (reused !== undefined) return reused;
-
-  // Grow by exactly one object record (9 floats).
-  const next = new Float32Array(worldState.length + OBJECT_STRIDE);
-  next.set(worldState);
-  worldState = next;
-  return worldState.length / OBJECT_STRIDE - 1;
+function randomInitialTail(): Buffer {
+  const floats = new Float32Array([
+    rand(OBJECT_RADIUS, BOARD_WIDTH - OBJECT_RADIUS),
+    rand(OBJECT_RADIUS, BOARD_HEIGHT - OBJECT_RADIUS),
+    0,
+    1,
+    randomVelocity(),
+    randomVelocity(),
+    0,
+    0,
+  ]);
+  return Buffer.from(floats.buffer, floats.byteOffset, floats.byteLength);
 }
 
 function attachObjectToSession(sessionId: string, objectId: number): void {
-  // Tracks ownership in both directions so validation and cleanup are O(1).
   let owned = sessionObjects.get(sessionId);
   if (!owned) {
     owned = new Set<number>();
@@ -117,8 +124,7 @@ function attachObjectToSession(sessionId: string, objectId: number): void {
   objectOwners.set(objectId, sessionId);
 }
 
-function releaseObject(objectId: number): void {
-  // Remove reverse-ownership references first.
+function detachObjectFromSession(objectId: number): void {
   const owner = objectOwners.get(objectId);
   if (owner) {
     const owned = sessionObjects.get(owner);
@@ -127,19 +133,102 @@ function releaseObject(objectId: number): void {
       sessionObjects.delete(owner);
     }
   }
-
   objectOwners.delete(objectId);
+}
 
+function allocateSlotInMemory(): number | null {
+  if (countLiveObjects(worldState) >= MAX_LIVE_OBJECTS) {
+    return null;
+  }
+
+  const reused = freeSlots.shift();
+  if (reused !== undefined) {
+    return reused;
+  }
+
+  return findFirstEmptySlot(worldState);
+}
+
+function releaseObjectInMemory(objectId: number): void {
   const slot = objectIdToSlot(objectId);
-  if (slot < 0) return;
-  if (slot >= worldState.length / OBJECT_STRIDE) return;
+  if (slot < 0 || slot >= MAX_LIVE_OBJECTS) return;
 
-  // Free slot contents and push slot into free-list for future register() calls.
-  markSlotFree(slot);
+  markSlotFree(worldState, slot);
   if (!freeSlots.includes(slot)) {
     freeSlots.push(slot);
     freeSlots.sort((a, b) => a - b);
   }
+}
+
+function registerObjectInMemory(sessionId: string): number | null {
+  const slot = allocateSlotInMemory();
+  if (slot === null) {
+    return null;
+  }
+
+  const objectId = slotToObjectId(slot);
+  writeObjectSlot(
+    worldState,
+    slot,
+    objectId,
+    rand(OBJECT_RADIUS, BOARD_WIDTH - OBJECT_RADIUS),
+    rand(OBJECT_RADIUS, BOARD_HEIGHT - OBJECT_RADIUS),
+    0,
+    1,
+    randomVelocity(),
+    randomVelocity(),
+    0,
+    0,
+  );
+  attachObjectToSession(sessionId, objectId);
+  return objectId;
+}
+
+async function registerObjectInRedis(
+  sessionId: string,
+): Promise<number | null> {
+  if (!redis) {
+    return registerObjectInMemory(sessionId);
+  }
+
+  const result = await redis.eval(
+    LUA_ALLOCATE_OBJECT,
+    1,
+    REDIS_EVAL_KEYS.worldKey,
+    REDIS_EVAL_KEYS.worldByteLength,
+    REDIS_EVAL_KEYS.slotByteLength,
+    REDIS_EVAL_KEYS.maxSlots,
+    randomInitialTail(),
+    REDIS_EVAL_KEYS.headers,
+  );
+
+  const objectId = Number(result);
+  if (!Number.isFinite(objectId) || objectId < 1) {
+    return null;
+  }
+
+  attachObjectToSession(sessionId, objectId);
+  return objectId;
+}
+
+async function releaseObjectInRedis(objectId: number): Promise<boolean> {
+  detachObjectFromSession(objectId);
+  if (!redis) {
+    releaseObjectInMemory(objectId);
+    return true;
+  }
+
+  const released = await redis.eval(
+    LUA_RELEASE_OBJECT,
+    1,
+    REDIS_EVAL_KEYS.worldKey,
+    REDIS_EVAL_KEYS.worldByteLength,
+    REDIS_EVAL_KEYS.slotByteLength,
+    REDIS_EVAL_KEYS.maxSlots,
+    String(objectId),
+    REDIS_EVAL_KEYS.headers,
+  );
+  return Number(released) === 1;
 }
 
 function highestOwnedObjectId(sessionId: string): number | null {
@@ -148,10 +237,10 @@ function highestOwnedObjectId(sessionId: string): number | null {
   return Math.max(...owned);
 }
 
-function unregisterObject(
+async function unregisterObject(
   sessionId: string,
   objectId?: number,
-): { ok: true; objectId: number } | { ok: false; reason: string } {
+): Promise<{ ok: true; objectId: number } | { ok: false; reason: string }> {
   const owned = sessionObjects.get(sessionId);
   if (!owned || owned.size === 0) {
     return { ok: false, reason: UNREGISTER_NACK_REASON_NOT_FOUND };
@@ -174,26 +263,8 @@ function unregisterObject(
   }
 
   notifyObjectReleased(targetId, sessionId);
-  releaseObject(targetId);
+  await releaseObjectInRedis(targetId);
   return { ok: true, objectId: targetId };
-}
-
-function registerObject(sessionId: string): number {
-  // Allocate (or reuse) one slot and stamp object id plus initial state.
-  const slot = allocateSlot();
-  const objectId = slotToObjectId(slot);
-  const start = slot * OBJECT_STRIDE;
-  worldState[start] = objectId;
-  worldState[start + 1] = rand(OBJECT_RADIUS, BOARD_WIDTH - OBJECT_RADIUS);
-  worldState[start + 2] = rand(OBJECT_RADIUS, BOARD_HEIGHT - OBJECT_RADIUS);
-  worldState[start + 3] = 0;
-  worldState[start + 4] = 1;
-  worldState[start + 5] = randomVelocity();
-  worldState[start + 6] = randomVelocity();
-  worldState[start + 7] = 0;
-  worldState[start + 8] = 0;
-  attachObjectToSession(sessionId, objectId);
-  return objectId;
 }
 
 function trackedObjectsSnapshot(): TrackedObjectInfo[] {
@@ -230,125 +301,57 @@ function notifyObjectReleased(objectId: number, ownerSessionId: string): void {
   }
 }
 
-function broadcastWorldState(): void {
+function copyWorldBuffer(world: Float32Array): Buffer {
+  return Buffer.from(world.buffer, world.byteOffset, world.byteLength);
+}
+
+function broadcastWorldBuffer(world: Float32Array): void {
   if (connectedSessions.size === 0) return;
-  // Copy to a detached buffer so downstream sends cannot observe mutations
-  // from subsequent writes in the same event loop tick.
-  const payload = Buffer.from(worldState.buffer.slice(0));
+  const payload = copyWorldBuffer(world);
   for (const sessionId of connectedSessions) {
     sendBinaryToClient(sessionId, payload, "sync");
   }
 }
 
-function simulateWorldStep(dtSec: number): void {
-  const activeObjectIds = [...objectOwners.keys()];
-  for (const objectId of activeObjectIds) {
-    const slot = objectIdToSlot(objectId);
-    const start = slot * OBJECT_STRIDE;
-    if (start < 0 || start + OBJECT_STRIDE > worldState.length) continue;
+async function loadWorldFromRedis(): Promise<Float32Array> {
+  if (!redis) {
+    return new Float32Array(worldState);
+  }
+  const raw = await redis.getBuffer(REDIS_WORLD_KEY);
+  return normalizeWorldBuffer(raw);
+}
 
-    let x = worldState[start + 1] ?? 0;
-    let y = worldState[start + 2] ?? 0;
-    let vx = worldState[start + 5] ?? 0;
-    let vy = worldState[start + 6] ?? 0;
+async function saveWorldToRedis(world: Float32Array): Promise<void> {
+  if (!redis) return;
+  await redis.setBuffer(REDIS_WORLD_KEY, copyWorldBuffer(world));
+}
 
-    x += vx * dtSec;
-    y += vy * dtSec;
-
-    if (x < OBJECT_RADIUS || x > BOARD_WIDTH - OBJECT_RADIUS) {
-      vx *= -1;
-      x = Math.max(OBJECT_RADIUS, Math.min(BOARD_WIDTH - OBJECT_RADIUS, x));
-    }
-    if (y < OBJECT_RADIUS || y > BOARD_HEIGHT - OBJECT_RADIUS) {
-      vy *= -1;
-      y = Math.max(OBJECT_RADIUS, Math.min(BOARD_HEIGHT - OBJECT_RADIUS, y));
-    }
-
-    worldState[start + 1] = x;
-    worldState[start + 2] = y;
-    worldState[start + 5] = vx;
-    worldState[start + 6] = vy;
+async function runSimulationTick(): Promise<void> {
+  if (!redis) {
+    const activeObjectIds = [...objectOwners.keys()];
+    simulateWorldStep(worldState, 1 / BROADCAST_HZ, activeObjectIds);
+    broadcastWorldBuffer(worldState);
+    return;
   }
 
-  for (let i = 0; i < activeObjectIds.length; i += 1) {
-    const aId = activeObjectIds[i];
-    const aSlot = objectIdToSlot(aId);
-    const aStart = aSlot * OBJECT_STRIDE;
-    if (aStart < 0 || aStart + OBJECT_STRIDE > worldState.length) continue;
-    for (let j = i + 1; j < activeObjectIds.length; j += 1) {
-      const bId = activeObjectIds[j];
-      const bSlot = objectIdToSlot(bId);
-      const bStart = bSlot * OBJECT_STRIDE;
-      if (bStart < 0 || bStart + OBJECT_STRIDE > worldState.length) continue;
-
-      let ax = worldState[aStart + 1] ?? 0;
-      let ay = worldState[aStart + 2] ?? 0;
-      let avx = worldState[aStart + 5] ?? 0;
-      let avy = worldState[aStart + 6] ?? 0;
-      let bx = worldState[bStart + 1] ?? 0;
-      let by = worldState[bStart + 2] ?? 0;
-      let bvx = worldState[bStart + 5] ?? 0;
-      let bvy = worldState[bStart + 6] ?? 0;
-
-      let dx = bx - ax;
-      let dy = by - ay;
-      let distSq = dx * dx + dy * dy;
-      const minDist = OBJECT_RADIUS * 2;
-      const minDistSq = minDist * minDist;
-      if (!(distSq > 0 && distSq < minDistSq)) continue;
-
-      let dist = Math.sqrt(distSq);
-      if (dist === 0) {
-        // Deterministic fallback axis when centers overlap exactly.
-        dx = 1;
-        dy = 0;
-        dist = 1;
-        distSq = 1;
-      }
-      const nx = dx / dist;
-      const ny = dy / dist;
-
-      // Positional correction prevents objects from remaining overlapped.
-      const overlap = minDist - dist;
-      const half = overlap * 0.5;
-      ax -= nx * half;
-      ay -= ny * half;
-      bx += nx * half;
-      by += ny * half;
-
-      const rvx = bvx - avx;
-      const rvy = bvy - avy;
-      const velAlongNormal = rvx * nx + rvy * ny;
-      if (velAlongNormal < 0) {
-        const impulse = (-(1 + COLLISION_RESTITUTION) * velAlongNormal) / 2;
-        avx -= impulse * nx;
-        avy -= impulse * ny;
-        bvx += impulse * nx;
-        bvy += impulse * ny;
-      }
-
-      worldState[aStart + 1] = Math.max(
-        OBJECT_RADIUS,
-        Math.min(BOARD_WIDTH - OBJECT_RADIUS, ax),
-      );
-      worldState[aStart + 2] = Math.max(
-        OBJECT_RADIUS,
-        Math.min(BOARD_HEIGHT - OBJECT_RADIUS, ay),
-      );
-      worldState[aStart + 5] = avx;
-      worldState[aStart + 6] = avy;
-      worldState[bStart + 1] = Math.max(
-        OBJECT_RADIUS,
-        Math.min(BOARD_WIDTH - OBJECT_RADIUS, bx),
-      );
-      worldState[bStart + 2] = Math.max(
-        OBJECT_RADIUS,
-        Math.min(BOARD_HEIGHT - OBJECT_RADIUS, by),
-      );
-      worldState[bStart + 5] = bvx;
-      worldState[bStart + 6] = bvy;
-    }
+  const lockAcquired = await redis.set(
+    REDIS_SIM_LOCK_KEY,
+    "1",
+    "PX",
+    SIM_LOCK_TTL_MS,
+    "NX",
+  );
+  if (lockAcquired === "OK") {
+    const world = await loadWorldFromRedis();
+    const activeObjectIds = collectActiveObjectIds(world);
+    simulateWorldStep(world, 1 / BROADCAST_HZ, activeObjectIds);
+    await saveWorldToRedis(world);
+    worldState = world;
   }
+
+  const world = await loadWorldFromRedis();
+  worldState = world;
+  broadcastWorldBuffer(world);
 }
 
 function startBroadcastLoopIfNeeded(): void {
@@ -363,8 +366,10 @@ function startBroadcastLoopIfNeeded(): void {
       }
       return;
     }
-    simulateWorldStep(1 / BROADCAST_HZ);
-    broadcastWorldState();
+    void runSimulationTick().catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      agentLog("error", `world tick failed: ${detail}`);
+    });
   }, BROADCAST_INTERVAL_MS);
 
   agentLog("info", `world loop started (${BROADCAST_HZ}Hz)`);
@@ -378,12 +383,40 @@ function stopBroadcastLoopIfNeeded(): void {
   agentLog("info", "world loop stopped");
 }
 
+async function ensureRedisWorldInitialized(): Promise<void> {
+  if (!redis) return;
+  const existing = await redis.getBuffer(REDIS_WORLD_KEY);
+  if (!existing || existing.byteLength === 0) {
+    const empty = createEmptyWorldBuffer();
+    await redis.setBuffer(REDIS_WORLD_KEY, copyWorldBuffer(empty));
+  }
+}
+
 defineAgent({
+  async onAgentStart({ env }) {
+    const redisUrl = env.AGENT_REDIS_URL ?? process.env.AGENT_REDIS_URL;
+    if (!redisUrl?.trim()) {
+      agentLog(
+        "warn",
+        "AGENT_REDIS_URL unset — game-sync uses per-worker in-memory world only",
+      );
+      worldState = createEmptyWorldBuffer();
+      return;
+    }
+
+    redis = new Redis(redisUrl, {
+      maxRetriesPerRequest: 3,
+      lazyConnect: true,
+    });
+    await redis.connect();
+    worldState = createEmptyWorldBuffer();
+    await ensureRedisWorldInitialized();
+    agentLog("info", "game-sync agent connected to project Redis world buffer");
+  },
+
   onClientJoin({ sessionId }) {
     connectedSessions.add(sessionId);
     startBroadcastLoopIfNeeded();
-    // New client receives the current ownership map so it can assign stable
-    // colors per owner and immediately render known tracked objects.
     sendToClient(sessionId, {
       type: "world_snapshot",
       objects: trackedObjectsSnapshot(),
@@ -391,14 +424,14 @@ defineAgent({
     agentLog("info", `join ${sessionId} connected=${connectedSessions.size}`);
   },
 
-  onClientLeave({ sessionId }) {
+  async onClientLeave({ sessionId }) {
     connectedSessions.delete(sessionId);
 
     const owned = sessionObjects.get(sessionId);
     if (owned) {
       for (const objectId of [...owned]) {
         notifyObjectReleased(objectId, sessionId);
-        releaseObject(objectId);
+        await releaseObjectInRedis(objectId);
       }
       sessionObjects.delete(sessionId);
     }
@@ -406,15 +439,16 @@ defineAgent({
     stopBroadcastLoopIfNeeded();
     agentLog(
       "info",
-      `leave ${sessionId} connected=${connectedSessions.size} worldFloats=${worldState.length} freeSlots=${freeSlots.length}`,
+      `leave ${sessionId} connected=${connectedSessions.size} live=${countLiveObjects(worldState)}`,
     );
   },
 
-  onDataChannelMessage(ctx) {
-    // Register is a control-plane message over JSON data channel.
-    // Binary channel is reserved for high-frequency state deltas.
+  async onDataChannelMessage(ctx) {
     if (parseRegisterCommand(ctx.message)) {
-      if (objectOwners.size >= MAX_LIVE_OBJECTS) {
+      const objectId = redis
+        ? await registerObjectInRedis(ctx.sessionId)
+        : registerObjectInMemory(ctx.sessionId);
+      if (objectId === null) {
         sendToClient(ctx.sessionId, {
           type: "register_nack",
           reason: REGISTER_NACK_REASON_WORLD_FULL,
@@ -422,11 +456,10 @@ defineAgent({
         });
         agentLog(
           "info",
-          `register_nack world_full session=${ctx.sessionId} live=${objectOwners.size}`,
+          `register_nack world_full session=${ctx.sessionId} redis=${Boolean(redis)}`,
         );
         return;
       }
-      const objectId = registerObject(ctx.sessionId);
       sendToClient(ctx.sessionId, { type: "register_ack", objectId });
       notifyObjectRegistered(objectId, ctx.sessionId);
       agentLog(
@@ -438,7 +471,7 @@ defineAgent({
 
     const unregister = parseUnregisterCommand(ctx.message);
     if (unregister) {
-      const result = unregisterObject(ctx.sessionId, unregister.objectId);
+      const result = await unregisterObject(ctx.sessionId, unregister.objectId);
       if (!result.ok) {
         sendToClient(ctx.sessionId, {
           type: "unregister_nack",
@@ -461,7 +494,6 @@ defineAgent({
       return;
     }
 
-    // Optional chat mode for debugging/coordinating live test sessions.
     const chat = parseChatCommand(ctx.message);
     if (!chat) return;
     for (const sessionId of connectedSessions) {
@@ -474,8 +506,17 @@ defineAgent({
   },
 
   onDataChannelBinary(ctx) {
-    // Server-authoritative simulation: ignore client binary state writes.
-    // Keeping the hook makes intent-based controls easy to add later.
     void ctx;
   },
 });
+
+// Re-export layout helpers for unit tests.
+export {
+  countLiveObjects,
+  findFirstEmptySlot,
+  markSlotFree,
+  readSlotObjectId,
+  slotToObjectId,
+  writeObjectSlot,
+} from "./game-sync-world-layout.js";
+export { simulateWorldStep } from "./game-sync-sim.js";

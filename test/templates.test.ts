@@ -91,6 +91,22 @@ describe("agent template registry", () => {
       sources.find((source) => source.path === "world-layout.ts")?.content,
     ).toContain("REDIS_WORLD_KEY");
   });
+
+  it("loads game-sync multi-file sources with Redis world buffer", () => {
+    const sources = loadTemplateSources("game-sync");
+    expect(sources.map((source) => source.path).sort()).toEqual(
+      [
+        "game-sync-protocol.ts",
+        "game-sync-redis.ts",
+        "game-sync-sim.ts",
+        "game-sync-world-layout.ts",
+        "game-sync.ts",
+      ].sort(),
+    );
+    const content = sources.map((source) => source.content).join("\n");
+    expect(content).toContain("AGENT_REDIS_URL");
+    expect(content).toContain("game-sync:world");
+  });
 });
 
 describe("seed template bundles", () => {

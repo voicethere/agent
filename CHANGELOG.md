@@ -10,6 +10,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 - **`voice-showcase` product template** — conversational demo (greeting, name, menu: weather via Open-Meteo, count 1–10, recipes, fun facts). Pure `conversation.ts` state machine for unit tests; `seedOnCreate` prebuilt bundle at `dist/templates/voice-showcase/agent.js`.
 - **`game-sync` world cap** — max **25** live objects; `register_nack` with `reason: "world_full"`. `{ type: "unregister" }` / `{ type: "remove" }` control messages with ack/nack. Protocol parsers extracted to `game-sync-protocol.ts`.
+- **`game-sync` Redis world sync** — when `AGENT_REDIS_URL` is set, the world buffer (`game-sync:world`) is shared across runner workers with Lua atomic allocate/release and a sim lock; cap and unregister behavior unchanged. Falls back to in-memory world when Redis is unset.
 
 ## [0.5.3] - 2026-08-26
 

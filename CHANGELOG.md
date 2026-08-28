@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- **`voice-showcase` weather** — country-only replies (e.g. “Thailand”) no longer overwrite a stored city/ZIP, so the agent does not loop on “Which country is that in?”. Spoken ZIP digits plus a trailing country name parse in one utterance.
+
 ## [0.5.4] - 2026-08-28
 
 ### Added

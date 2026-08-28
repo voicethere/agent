@@ -8,6 +8,7 @@ import { pickFunFact } from "./fun-facts.js";
 import {
   formatWeatherSpeech,
   lookupWeather,
+  matchCountryName,
   parseLocationUtterance,
   type FetchFn,
   type WeatherResult,
@@ -400,8 +401,19 @@ export function handleUtterance(
 
     case "weatherAwaitingLocation": {
       const parsed = parseLocationUtterance(text);
-      const city = parsed?.city ?? state.weatherCity;
-      const country = parsed?.country ?? state.weatherCountry;
+      let city = parsed?.city || state.weatherCity;
+      let country = parsed?.country || state.weatherCountry;
+
+      // Country-only follow-up: "Thailand" must not overwrite a stored ZIP as city.
+      if (state.weatherCity && !country) {
+        const followUp =
+          matchCountryName(text) ??
+          (parsed?.city ? matchCountryName(parsed.city) : null);
+        if (followUp) {
+          city = state.weatherCity;
+          country = followUp;
+        }
+      }
 
       if (!city) {
         const ask = speakAndChat(
@@ -414,7 +426,7 @@ export function handleUtterance(
         };
       }
 
-      if (!country && !parsed?.country && !state.weatherCountry) {
+      if (!country) {
         return {
           state: {
             ...state,
@@ -428,12 +440,11 @@ export function handleUtterance(
         };
       }
 
-      const resolvedCountry = country ?? state.weatherCountry;
       return {
-        state: { ...state, weatherCity: city, weatherCountry: resolvedCountry },
+        state: { ...state, weatherCity: city, weatherCountry: country },
         speakLines: [],
         messages: [],
-        pendingWeather: { city, country: resolvedCountry },
+        pendingWeather: { city, country },
       };
     }
 

@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-08-28
+
 ### Added
 
 - **`voice-showcase` product template** — conversational demo (greeting, name, menu: weather via Open-Meteo, count 1–10, recipes, fun facts). Pure `conversation.ts` state machine for unit tests; `seedOnCreate` prebuilt bundle at `dist/templates/voice-showcase/agent.js`.

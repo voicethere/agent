@@ -9,7 +9,11 @@
         color-scheme: dark;
         background: #05070e;
         color: #e5e7eb;
-        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          sans-serif;
       }
       body {
         margin: 0;
@@ -44,7 +48,7 @@
       }
       .actions {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 0.7rem;
         margin-top: 0.7rem;
       }
@@ -65,14 +69,16 @@
       }
       #log {
         white-space: pre-wrap;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         font-size: 0.8rem;
         max-height: 180px;
         overflow: auto;
       }
       #chat-log {
         white-space: pre-wrap;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         font-size: 0.82rem;
         max-height: 180px;
         overflow: auto;
@@ -103,7 +109,10 @@
   </head>
   <body>
     <h1>Game sync live test</h1>
-    <p>Tests <code>templates/game-sync.ts</code> register + binary world sync flow.</p>
+    <p>
+      Tests <code>templates/game-sync.ts</code> register + binary world sync
+      flow.
+    </p>
 
     <section class="panel">
       <div class="row">
@@ -128,6 +137,7 @@
         <button id="connect-btn">Connect</button>
         <button id="disconnect-btn" disabled>Disconnect</button>
         <button id="add-object-btn" disabled>Add new object</button>
+        <button id="remove-object-btn" disabled>Remove object</button>
       </div>
       <div id="status"></div>
       <div class="meta">
@@ -143,7 +153,10 @@
       <h3>Chat</h3>
       <div id="chat-log"></div>
       <div class="chat-row">
-        <input id="chat-input" placeholder="Write message to all connected clients..." />
+        <input
+          id="chat-input"
+          placeholder="Write message to all connected clients..."
+        />
         <button id="chat-send-btn" disabled>Send</button>
       </div>
     </section>
@@ -161,6 +174,7 @@
       import { connectDataSession } from "https://esm.sh/@voicethere/client@0.6.1/browser";
 
       const STRIDE = 9;
+      const MAX_LIVE_OBJECTS = 25;
       const FPS = 60;
       const TICK_MS = Math.floor(1000 / FPS);
       const OBJECT_RADIUS = 25;
@@ -172,6 +186,7 @@
       const connectBtn = document.getElementById("connect-btn");
       const disconnectBtn = document.getElementById("disconnect-btn");
       const addObjectBtn = document.getElementById("add-object-btn");
+      const removeObjectBtn = document.getElementById("remove-object-btn");
       const chatSendBtn = document.getElementById("chat-send-btn");
       const statusEl = document.getElementById("status");
       const logEl = document.getElementById("log");
@@ -296,10 +311,16 @@
         metaPeer.textContent = `Peer: ${session?.peerId ?? "-"}`;
         metaOwned.textContent = `Owned objects: ${ownedObjectIds.size}`;
         metaTotal.textContent = `Tracked objects: ${ownerByObjectId.size}`;
+        const atCap = ownerByObjectId.size >= MAX_LIVE_OBJECTS;
+        addObjectBtn.disabled = !session || atCap;
+        removeObjectBtn.disabled = !session || ownedObjectIds.size === 0;
       }
 
       function updateSyncRateMeta() {
-        const elapsedSec = connectedAtMs > 0 ? Math.max(1e-6, (Date.now() - connectedAtMs) / 1000) : 0;
+        const elapsedSec =
+          connectedAtMs > 0
+            ? Math.max(1e-6, (Date.now() - connectedAtMs) / 1000)
+            : 0;
         const avgPerSec = elapsedSec > 0 ? serverSyncTotal / elapsedSec : 0;
         metaSyncRate.textContent = `Server sync avg/s: ${avgPerSec.toFixed(1)} (last ${serverSyncWindow})`;
       }
@@ -342,13 +363,22 @@
           ctx.fill();
 
           ctx.fillStyle = "#e2e8f0";
-          ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-          ctx.fillText(`#${objectId} ${owner.slice(0, 7)}`, obj.x + 14, obj.y + 4);
+          ctx.font =
+            "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+          ctx.fillText(
+            `#${objectId} ${owner.slice(0, 7)}`,
+            obj.x + 14,
+            obj.y + 4,
+          );
         }
       }
 
       function isDcBinaryEvent(scope, event) {
-        return scope === "dc" && typeof event === "string" && event.toLowerCase().includes("binary");
+        return (
+          scope === "dc" &&
+          typeof event === "string" &&
+          event.toLowerCase().includes("binary")
+        );
       }
 
       function parseWorldSync(data) {
@@ -372,13 +402,39 @@
 
       function handleControlMessage(payload) {
         log(`control ${JSON.stringify(payload)}`);
-        if (payload.type === "register_ack" && typeof payload.objectId === "number") {
+        if (
+          payload.type === "register_ack" &&
+          typeof payload.objectId === "number"
+        ) {
           const objectId = payload.objectId;
           ownerByObjectId.set(objectId, session.peerId);
           ownedObjectIds.add(objectId);
           ensureObject(objectId);
           refreshMeta();
           log(`register_ack object=${objectId}`);
+          return;
+        }
+
+        if (payload.type === "register_nack") {
+          log(
+            `register_nack reason=${payload.reason ?? "unknown"} max=${payload.maxObjects ?? "-"}`,
+          );
+          refreshMeta();
+          return;
+        }
+
+        if (
+          payload.type === "unregister_ack" &&
+          typeof payload.objectId === "number"
+        ) {
+          removeObject(payload.objectId);
+          refreshMeta();
+          log(`unregister_ack object=${payload.objectId}`);
+          return;
+        }
+
+        if (payload.type === "unregister_nack") {
+          log(`unregister_nack reason=${payload.reason ?? "unknown"}`);
           return;
         }
 
@@ -392,7 +448,8 @@
             if (!item || typeof item !== "object") continue;
             const objectId = Number(item.objectId);
             const ownerSessionId = String(item.ownerSessionId ?? "");
-            if (!Number.isFinite(objectId) || objectId <= 0 || !ownerSessionId) continue;
+            if (!Number.isFinite(objectId) || objectId <= 0 || !ownerSessionId)
+              continue;
             ownerByObjectId.set(objectId, ownerSessionId);
             if (ownerSessionId === session.peerId) ownedObjectIds.add(objectId);
             ensureObject(objectId);
@@ -410,7 +467,9 @@
           ownerByObjectId.set(payload.objectId, payload.ownerSessionId);
           ensureObject(payload.objectId);
           refreshMeta();
-          log(`object_registered object=${payload.objectId} owner=${payload.ownerSessionId}`);
+          log(
+            `object_registered object=${payload.objectId} owner=${payload.ownerSessionId}`,
+          );
           return;
         }
 
@@ -452,7 +511,8 @@
             session.sendToAgent({ type: "register" });
             log(`register request sent (attempt ${attempt})`);
           } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message =
+              error instanceof Error ? error.message : String(error);
             if (
               message.includes("voice-control data channel is not open") &&
               attempt < maxAttempts
@@ -509,6 +569,7 @@
         connectBtn.disabled = false;
         disconnectBtn.disabled = true;
         addObjectBtn.disabled = true;
+        removeObjectBtn.disabled = true;
         chatSendBtn.disabled = true;
         ownerByObjectId.clear();
         ownedObjectIds.clear();
@@ -533,8 +594,14 @@
             ice_servers: [],
             expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
           };
-          if (!credentials.signaling_url || !credentials.room_id || !credentials.session_id) {
-            throw new Error("Signaling URL, session ID and room ID are required");
+          if (
+            !credentials.signaling_url ||
+            !credentials.room_id ||
+            !credentials.session_id
+          ) {
+            throw new Error(
+              "Signaling URL, session ID and room ID are required",
+            );
           }
 
           await bootstrapRoom(credentials);
@@ -546,19 +613,27 @@
             onDebugEvent: {
               debug: (scope, event, detail) => {
                 if (isDcBinaryEvent(scope, event)) return;
-                log(`debug ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`);
+                log(
+                  `debug ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`,
+                );
               },
               info: (scope, event, detail) => {
                 if (isDcBinaryEvent(scope, event)) return;
-                log(`info ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`);
+                log(
+                  `info ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`,
+                );
               },
               warn: (scope, event, detail) => {
                 if (isDcBinaryEvent(scope, event)) return;
-                log(`warn ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`);
+                log(
+                  `warn ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`,
+                );
               },
               error: (scope, event, detail) => {
                 if (isDcBinaryEvent(scope, event)) return;
-                log(`error ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`);
+                log(
+                  `error ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`,
+                );
               },
             },
           });
@@ -567,7 +642,8 @@
           setStatus(`Connected (${session.peerId})`);
           connectBtn.disabled = true;
           disconnectBtn.disabled = false;
-          addObjectBtn.disabled = false;
+          addObjectBtn.disabled = ownerByObjectId.size >= MAX_LIVE_OBJECTS;
+          removeObjectBtn.disabled = ownedObjectIds.size === 0;
           chatSendBtn.disabled = false;
           refreshMeta();
           startTickLoop();
@@ -576,7 +652,8 @@
           // Each client starts with one owned object.
           requestRegisterWithRetry();
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           setStatus(message, true);
           log(`connect failed: ${message}`);
           cleanupConnection();
@@ -594,7 +671,20 @@
 
       addObjectBtn.addEventListener("click", () => {
         if (!session) return;
+        if (ownerByObjectId.size >= MAX_LIVE_OBJECTS) return;
         requestRegisterWithRetry();
+      });
+
+      removeObjectBtn.addEventListener("click", () => {
+        if (!session) return;
+        try {
+          session.sendToAgent({ type: "unregister" });
+          log("unregister request sent");
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          log(`unregister request failed: ${message}`);
+        }
       });
 
       function sendChat() {
@@ -606,7 +696,8 @@
           chatLog(`me: ${text}`);
           chatInputEl.value = "";
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           chatLog(`send failed: ${message}`);
         }
       }

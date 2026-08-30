@@ -10,6 +10,7 @@ import {
   createEmptyWorldBuffer,
   findFirstEmptySlot,
   markSlotFree,
+  preserveEmptySlots,
   readSlotObjectId,
   slotToObjectId,
   writeObjectSlot,
@@ -50,6 +51,21 @@ describe("game-sync world layout", () => {
     registerInMemory(world, 3);
     expect(countLiveObjects(world)).toBe(MAX_LIVE_OBJECTS);
     expect(readSlotObjectId(world, 3)).toBe(slotToObjectId(3));
+  });
+
+  it("preserveEmptySlots keeps Lua-released slots empty after sim (Redis tick race)", () => {
+    const authoritative = createEmptyWorldBuffer();
+    const objectId = registerInMemory(authoritative, 2);
+    expect(objectId).toBe(slotToObjectId(2));
+    expect(countLiveObjects(authoritative)).toBe(1);
+
+    const simulated = new Float32Array(authoritative);
+    markSlotFree(authoritative, 2);
+    expect(countLiveObjects(authoritative)).toBe(0);
+
+    preserveEmptySlots(simulated, authoritative);
+    expect(countLiveObjects(simulated)).toBe(0);
+    expect(readSlotObjectId(simulated, 2)).toBe(0);
   });
 });
 

@@ -5,6 +5,7 @@ import {
   parseRegisterCommand,
   parseUnregisterCommand,
   REGISTER_NACK_REASON_WORLD_FULL,
+  resolveRemoveTarget,
   UNREGISTER_NACK_REASON_NOT_FOUND,
 } from "../templates/game-sync-protocol.js";
 
@@ -31,6 +32,42 @@ describe("game-sync-protocol", () => {
     expect(
       parseUnregisterCommand({ type: "remove", objectId: "x" }),
     ).toBeNull();
+  });
+
+  it("parseUnregisterCommand accepts click-to-remove payload with objectId", () => {
+    expect(parseUnregisterCommand({ type: "remove", objectId: 7 })).toEqual({
+      type: "remove",
+      objectId: 7,
+    });
+  });
+
+  it("resolveRemoveTarget uses explicit objectId even without session ownership", () => {
+    expect(resolveRemoveTarget(7, undefined)).toEqual({
+      ok: true,
+      objectId: 7,
+    });
+    expect(resolveRemoveTarget(7, new Set())).toEqual({
+      ok: true,
+      objectId: 7,
+    });
+  });
+
+  it("resolveRemoveTarget falls back to highest owned object", () => {
+    expect(resolveRemoveTarget(undefined, new Set([2, 5, 3]))).toEqual({
+      ok: true,
+      objectId: 5,
+    });
+  });
+
+  it("resolveRemoveTarget returns not_found when objectId omitted and session owns nothing", () => {
+    expect(resolveRemoveTarget(undefined, undefined)).toEqual({
+      ok: false,
+      reason: UNREGISTER_NACK_REASON_NOT_FOUND,
+    });
+    expect(resolveRemoveTarget(undefined, new Set())).toEqual({
+      ok: false,
+      reason: UNREGISTER_NACK_REASON_NOT_FOUND,
+    });
   });
 
   it("exports nack reason constants", () => {

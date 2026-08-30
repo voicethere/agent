@@ -124,6 +124,22 @@ export function writeObjectSlot(
   world[start + 8] = dirW;
 }
 
+/**
+ * After simulating from a Redis load, keep slots empty that were released in-memory
+ * (or via Lua) while the tick was in flight — prevents saveWorldToRedis from
+ * restoring an object Lua just zeroed (sim GET → simulate → SET race).
+ */
+export function preserveEmptySlots(
+  simulated: Float32Array,
+  authoritative: Float32Array,
+): void {
+  for (let slot = 0; slot < MAX_LIVE_OBJECTS; slot += 1) {
+    if (readSlotObjectId(authoritative, slot) === 0) {
+      markSlotFree(simulated, slot);
+    }
+  }
+}
+
 export function collectActiveObjectIds(world: Float32Array): number[] {
   const ids: number[] = [];
   for (let slot = 0; slot < MAX_LIVE_OBJECTS; slot += 1) {

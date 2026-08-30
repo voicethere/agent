@@ -14,17 +14,20 @@
  * - `{ type: "register" }` -> allocates (or reuses) one 9-float slot
  * - server replies `{ type: "register_ack", objectId }`
  * - `{ type: "register_nack", reason: "world_full", maxObjects: 25 }` when cap reached
- * - `{ type: "unregister" }` or `{ type: "remove", objectId?: number }` -> releases owned object(s)
+ * - `{ type: "remove", objectId }` or `{ type: "unregister", objectId?: number }` ->
+ *   zeros that live slot (objectId required for click-to-remove; omit objectId on
+ *   unregister to drop the highest object owned by this session)
  * - `{ type: "unregister_ack", objectId }` or `{ type: "unregister_nack", reason }`
  *
  * Simulation:
  * - server-authoritative movement at 60Hz
  * - wall bounce + object-object elastic collisions on server
  * - clients render server snapshots; client binary writes are ignored
+ * - with project Redis, the sim loop keeps running with zero connected clients so
+ *   objects persist and keep moving after everyone disconnects
  *
  * Broadcast:
- * - 60Hz world-state broadcast starts when at least 1 client is connected
- * - stops when connected client count drops below 1
+ * - 60Hz world-state broadcast while the sim loop runs (no-op send when 0 sessions)
  *
  * Build:
  *   npx @voicethere/agent build --entry templates/game-sync.ts
@@ -42,9 +45,9 @@ import {
   parseChatCommand,
   parseRegisterCommand,
   parseUnregisterCommand,
+  resolveRemoveTarget,
   REGISTER_NACK_REASON_WORLD_FULL,
   UNREGISTER_NACK_REASON_NOT_FOUND,
-  UNREGISTER_NACK_REASON_NOT_OWNER,
 } from "./game-sync-protocol.js";
 import {
   LUA_ALLOCATE_OBJECT,
@@ -66,6 +69,7 @@ import {
   normalizeWorldBuffer,
   objectIdToSlot,
   OBJECT_SLOT_BYTE_LENGTH,
+  preserveEmptySlots,
   REDIS_SIM_LOCK_KEY,
   REDIS_WORLD_KEY,
   slotToObjectId,
@@ -86,6 +90,16 @@ const freeSlots: number[] = [];
 let worldState = createEmptyWorldBuffer();
 let redis: Redis | null = null;
 let broadcastTimer: NodeJS.Timeout | null = null;
+let worldMutationChain: Promise<void> = Promise.resolve();
+
+function withWorldMutation<T>(fn: () => Promise<T>): Promise<T> {
+  const run = worldMutationChain.then(fn);
+  worldMutationChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 interface TrackedObjectInfo {
   objectId: number;
@@ -213,6 +227,7 @@ async function registerObjectInRedis(
 
 async function releaseObjectInRedis(objectId: number): Promise<boolean> {
   detachObjectFromSession(objectId);
+  const slot = objectIdToSlot(objectId);
   if (!redis) {
     releaseObjectInMemory(objectId);
     return true;
@@ -228,13 +243,10 @@ async function releaseObjectInRedis(objectId: number): Promise<boolean> {
     String(objectId),
     REDIS_EVAL_KEYS.headers,
   );
+  if (Number(released) === 1 && slot >= 0 && slot < MAX_LIVE_OBJECTS) {
+    markSlotFree(worldState, slot);
+  }
   return Number(released) === 1;
-}
-
-function highestOwnedObjectId(sessionId: string): number | null {
-  const owned = sessionObjects.get(sessionId);
-  if (!owned || owned.size === 0) return null;
-  return Math.max(...owned);
 }
 
 async function unregisterObject(
@@ -242,29 +254,20 @@ async function unregisterObject(
   objectId?: number,
 ): Promise<{ ok: true; objectId: number } | { ok: false; reason: string }> {
   const owned = sessionObjects.get(sessionId);
-  if (!owned || owned.size === 0) {
+  const target = resolveRemoveTarget(objectId, owned);
+  if (!target.ok) {
+    return target;
+  }
+
+  const previousOwner = objectOwners.get(target.objectId) ?? sessionId;
+  notifyObjectReleased(target.objectId, previousOwner);
+  const released = await withWorldMutation(() =>
+    releaseObjectInRedis(target.objectId),
+  );
+  if (!released) {
     return { ok: false, reason: UNREGISTER_NACK_REASON_NOT_FOUND };
   }
-
-  let targetId = objectId;
-  if (targetId === undefined) {
-    const highest = highestOwnedObjectId(sessionId);
-    if (highest === null) {
-      return { ok: false, reason: UNREGISTER_NACK_REASON_NOT_FOUND };
-    }
-    targetId = highest;
-  }
-
-  if (!owned.has(targetId)) {
-    if (objectId !== undefined) {
-      return { ok: false, reason: UNREGISTER_NACK_REASON_NOT_OWNER };
-    }
-    return { ok: false, reason: UNREGISTER_NACK_REASON_NOT_FOUND };
-  }
-
-  notifyObjectReleased(targetId, sessionId);
-  await releaseObjectInRedis(targetId);
-  return { ok: true, objectId: targetId };
+  return { ok: true, objectId: target.objectId };
 }
 
 function trackedObjectsSnapshot(): TrackedObjectInfo[] {
@@ -328,8 +331,10 @@ async function saveWorldToRedis(world: Float32Array): Promise<void> {
 
 async function runSimulationTick(): Promise<void> {
   if (!redis) {
-    const activeObjectIds = [...objectOwners.keys()];
-    simulateWorldStep(worldState, 1 / BROADCAST_HZ, activeObjectIds);
+    await withWorldMutation(async () => {
+      const activeObjectIds = [...objectOwners.keys()];
+      simulateWorldStep(worldState, 1 / BROADCAST_HZ, activeObjectIds);
+    });
     broadcastWorldBuffer(worldState);
     return;
   }
@@ -342,11 +347,15 @@ async function runSimulationTick(): Promise<void> {
     "NX",
   );
   if (lockAcquired === "OK") {
-    const world = await loadWorldFromRedis();
-    const activeObjectIds = collectActiveObjectIds(world);
-    simulateWorldStep(world, 1 / BROADCAST_HZ, activeObjectIds);
-    await saveWorldToRedis(world);
-    worldState = world;
+    await withWorldMutation(async () => {
+      const authoritative = new Float32Array(worldState);
+      const world = await loadWorldFromRedis();
+      const activeObjectIds = collectActiveObjectIds(world);
+      simulateWorldStep(world, 1 / BROADCAST_HZ, activeObjectIds);
+      preserveEmptySlots(world, authoritative);
+      await saveWorldToRedis(world);
+      worldState = world;
+    });
   }
 
   const world = await loadWorldFromRedis();
@@ -356,10 +365,10 @@ async function runSimulationTick(): Promise<void> {
 
 function startBroadcastLoopIfNeeded(): void {
   if (broadcastTimer) return;
-  if (connectedSessions.size < 1) return;
+  if (!redis && connectedSessions.size < 1) return;
 
   broadcastTimer = setInterval(() => {
-    if (connectedSessions.size < 1) {
+    if (!redis && connectedSessions.size < 1) {
       if (broadcastTimer) {
         clearInterval(broadcastTimer);
         broadcastTimer = null;
@@ -376,6 +385,7 @@ function startBroadcastLoopIfNeeded(): void {
 }
 
 function stopBroadcastLoopIfNeeded(): void {
+  if (redis) return;
   if (connectedSessions.size >= 1) return;
   if (!broadcastTimer) return;
   clearInterval(broadcastTimer);
@@ -411,6 +421,7 @@ defineAgent({
     await redis.connect();
     worldState = createEmptyWorldBuffer();
     await ensureRedisWorldInitialized();
+    startBroadcastLoopIfNeeded();
     agentLog("info", "game-sync agent connected to project Redis world buffer");
   },
 
@@ -426,16 +437,7 @@ defineAgent({
 
   async onClientLeave({ sessionId }) {
     connectedSessions.delete(sessionId);
-
-    const owned = sessionObjects.get(sessionId);
-    if (owned) {
-      for (const objectId of [...owned]) {
-        notifyObjectReleased(objectId, sessionId);
-        await releaseObjectInRedis(objectId);
-      }
-      sessionObjects.delete(sessionId);
-    }
-
+    sessionObjects.delete(sessionId);
     stopBroadcastLoopIfNeeded();
     agentLog(
       "info",
@@ -445,9 +447,11 @@ defineAgent({
 
   async onDataChannelMessage(ctx) {
     if (parseRegisterCommand(ctx.message)) {
-      const objectId = redis
-        ? await registerObjectInRedis(ctx.sessionId)
-        : registerObjectInMemory(ctx.sessionId);
+      const objectId = await withWorldMutation(() =>
+        redis
+          ? registerObjectInRedis(ctx.sessionId)
+          : Promise.resolve(registerObjectInMemory(ctx.sessionId)),
+      );
       if (objectId === null) {
         sendToClient(ctx.sessionId, {
           type: "register_nack",

@@ -7,6 +7,7 @@ import {
 } from "../templates/game-sync-sim.js";
 import {
   countLiveObjects,
+  commitSimulatedWorld,
   createEmptyWorldBuffer,
   findFirstEmptySlot,
   markSlotFree,
@@ -54,18 +55,47 @@ describe("game-sync world layout", () => {
   });
 
   it("preserveEmptySlots keeps Lua-released slots empty after sim (Redis tick race)", () => {
-    const authoritative = createEmptyWorldBuffer();
-    const objectId = registerInMemory(authoritative, 2);
-    expect(objectId).toBe(slotToObjectId(2));
-    expect(countLiveObjects(authoritative)).toBe(1);
+    const latestRedis = createEmptyWorldBuffer();
+    registerInMemory(latestRedis, 2);
+    expect(countLiveObjects(latestRedis)).toBe(1);
 
-    const simulated = new Float32Array(authoritative);
-    markSlotFree(authoritative, 2);
-    expect(countLiveObjects(authoritative)).toBe(0);
+    const simulated = new Float32Array(latestRedis);
+    markSlotFree(latestRedis, 2);
+    expect(countLiveObjects(latestRedis)).toBe(0);
 
-    preserveEmptySlots(simulated, authoritative);
+    preserveEmptySlots(simulated, latestRedis);
     expect(countLiveObjects(simulated)).toBe(0);
     expect(readSlotObjectId(simulated, 2)).toBe(0);
+  });
+
+  it("preserveEmptySlots with empty authoritative zeros every simulated slot", () => {
+    const simulated = createEmptyWorldBuffer();
+    registerInMemory(simulated, 0);
+    registerInMemory(simulated, 4);
+    expect(countLiveObjects(simulated)).toBe(2);
+
+    preserveEmptySlots(simulated, createEmptyWorldBuffer());
+    expect(countLiveObjects(simulated)).toBe(0);
+  });
+
+  it("commitSimulatedWorld keeps Redis-empty slots empty while keeping other sim positions", () => {
+    const latestRedis = createEmptyWorldBuffer();
+    registerInMemory(latestRedis, 0);
+
+    const simulated = createEmptyWorldBuffer();
+    registerInMemory(simulated, 0);
+    registerInMemory(simulated, 2);
+    simulated[1] = 999;
+    simulated[10] = 888;
+
+    markSlotFree(latestRedis, 2);
+
+    commitSimulatedWorld(simulated, latestRedis);
+
+    expect(readSlotObjectId(simulated, 0)).toBe(slotToObjectId(0));
+    expect(simulated[1]).toBe(999);
+    expect(readSlotObjectId(simulated, 2)).toBe(0);
+    expect(simulated[10]).toBe(0);
   });
 });
 

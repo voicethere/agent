@@ -125,9 +125,12 @@ export function writeObjectSlot(
 }
 
 /**
- * After simulating from a Redis load, keep slots empty that were released in-memory
- * (or via Lua) while the tick was in flight — prevents saveWorldToRedis from
- * restoring an object Lua just zeroed (sim GET → simulate → SET race).
+ * After simulating from a Redis load, keep slots empty that a concurrent release
+ * zeroed in Redis while the tick was in flight — prevents saveWorldToRedis from
+ * restoring an object Lua just cleared (sim GET → simulate → SET race).
+ *
+ * `authoritative` must be a fresh Redis GET after simulate (never stale in-memory
+ * worldState — an empty buffer would wipe every live slot).
  */
 export function preserveEmptySlots(
   simulated: Float32Array,
@@ -138,6 +141,14 @@ export function preserveEmptySlots(
       markSlotFree(simulated, slot);
     }
   }
+}
+
+/** Merge a simulated world with the latest Redis snapshot before SET. */
+export function commitSimulatedWorld(
+  simulated: Float32Array,
+  latestRedis: Float32Array,
+): void {
+  preserveEmptySlots(simulated, latestRedis);
 }
 
 export function collectActiveObjectIds(world: Float32Array): number[] {

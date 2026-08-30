@@ -7,8 +7,8 @@
  *   [objectId, posX, posY, posZ, posW, dirX, dirY, dirZ, dirW]
  *
  * With project Redis (`AGENT_REDIS_URL`), the world blob is shared across runner
- * workers (key `game-sync:world`). One worker holds a sim lock per tick, runs
- * physics, and writes the blob; every worker GET+broadcasts to local sessions.
+ * workers (key `game-sync:world`). World writes (allocate/release Lua, sim SET)
+ * serialize on `game-sync:sim-lock`; one holder runs physics per tick.
  *
  * Control messages:
  * - `{ type: "register" }` -> allocates (or reuses) one 9-float slot
@@ -62,6 +62,7 @@ import {
 } from "./game-sync-sim.js";
 import {
   collectActiveObjectIds,
+  commitSimulatedWorld,
   countLiveObjects,
   createEmptyWorldBuffer,
   findFirstEmptySlot,
@@ -69,7 +70,6 @@ import {
   normalizeWorldBuffer,
   objectIdToSlot,
   OBJECT_SLOT_BYTE_LENGTH,
-  preserveEmptySlots,
   REDIS_SIM_LOCK_KEY,
   REDIS_WORLD_KEY,
   slotToObjectId,
@@ -79,6 +79,7 @@ import {
 const BROADCAST_HZ = 60;
 const BROADCAST_INTERVAL_MS = Math.floor(1000 / BROADCAST_HZ);
 const SIM_LOCK_TTL_MS = BROADCAST_INTERVAL_MS * 2;
+const SIM_LOCK_RETRY_MS = 5;
 const MIN_SPEED = 90;
 const MAX_SPEED = 180;
 
@@ -99,6 +100,44 @@ function withWorldMutation<T>(fn: () => Promise<T>): Promise<T> {
     () => undefined,
   );
   return run;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function withRedisSimLock<T>(
+  fn: () => Promise<T>,
+  options?: { retryUntilAcquired?: boolean },
+): Promise<T | null> {
+  if (!redis) {
+    return fn();
+  }
+
+  const retryUntilAcquired = options?.retryUntilAcquired ?? true;
+
+  while (true) {
+    const lockAcquired = await redis.set(
+      REDIS_SIM_LOCK_KEY,
+      "1",
+      "PX",
+      SIM_LOCK_TTL_MS,
+      "NX",
+    );
+    if (lockAcquired === "OK") {
+      try {
+        return await fn();
+      } finally {
+        await redis.del(REDIS_SIM_LOCK_KEY);
+      }
+    }
+    if (!retryUntilAcquired) {
+      return null;
+    }
+    await sleep(SIM_LOCK_RETRY_MS);
+  }
 }
 
 interface TrackedObjectInfo {
@@ -222,12 +261,12 @@ async function registerObjectInRedis(
   }
 
   attachObjectToSession(sessionId, objectId);
+  worldState = await loadWorldFromRedis();
   return objectId;
 }
 
 async function releaseObjectInRedis(objectId: number): Promise<boolean> {
   detachObjectFromSession(objectId);
-  const slot = objectIdToSlot(objectId);
   if (!redis) {
     releaseObjectInMemory(objectId);
     return true;
@@ -243,8 +282,8 @@ async function releaseObjectInRedis(objectId: number): Promise<boolean> {
     String(objectId),
     REDIS_EVAL_KEYS.headers,
   );
-  if (Number(released) === 1 && slot >= 0 && slot < MAX_LIVE_OBJECTS) {
-    markSlotFree(worldState, slot);
+  if (Number(released) === 1) {
+    worldState = await loadWorldFromRedis();
   }
   return Number(released) === 1;
 }
@@ -261,9 +300,15 @@ async function unregisterObject(
 
   const previousOwner = objectOwners.get(target.objectId) ?? sessionId;
   notifyObjectReleased(target.objectId, previousOwner);
-  const released = await withWorldMutation(() =>
-    releaseObjectInRedis(target.objectId),
-  );
+  const released = await withWorldMutation(async () => {
+    if (!redis) {
+      return releaseObjectInRedis(target.objectId);
+    }
+    const result = await withRedisSimLock(() =>
+      releaseObjectInRedis(target.objectId),
+    );
+    return result === true;
+  });
   if (!released) {
     return { ok: false, reason: UNREGISTER_NACK_REASON_NOT_FOUND };
   }
@@ -339,24 +384,20 @@ async function runSimulationTick(): Promise<void> {
     return;
   }
 
-  const lockAcquired = await redis.set(
-    REDIS_SIM_LOCK_KEY,
-    "1",
-    "PX",
-    SIM_LOCK_TTL_MS,
-    "NX",
-  );
-  if (lockAcquired === "OK") {
-    await withWorldMutation(async () => {
-      const authoritative = new Float32Array(worldState);
-      const world = await loadWorldFromRedis();
-      const activeObjectIds = collectActiveObjectIds(world);
-      simulateWorldStep(world, 1 / BROADCAST_HZ, activeObjectIds);
-      preserveEmptySlots(world, authoritative);
-      await saveWorldToRedis(world);
-      worldState = world;
-    });
-  }
+  await withWorldMutation(async () => {
+    await withRedisSimLock(
+      async () => {
+        const world = await loadWorldFromRedis();
+        const activeObjectIds = collectActiveObjectIds(world);
+        simulateWorldStep(world, 1 / BROADCAST_HZ, activeObjectIds);
+        const latestRedis = await loadWorldFromRedis();
+        commitSimulatedWorld(world, latestRedis);
+        await saveWorldToRedis(world);
+        worldState = world;
+      },
+      { retryUntilAcquired: false },
+    );
+  });
 
   const world = await loadWorldFromRedis();
   worldState = world;
@@ -419,8 +460,8 @@ defineAgent({
       lazyConnect: true,
     });
     await redis.connect();
-    worldState = createEmptyWorldBuffer();
     await ensureRedisWorldInitialized();
+    worldState = await loadWorldFromRedis();
     startBroadcastLoopIfNeeded();
     agentLog("info", "game-sync agent connected to project Redis world buffer");
   },
@@ -437,6 +478,11 @@ defineAgent({
 
   async onClientLeave({ sessionId }) {
     connectedSessions.delete(sessionId);
+    for (const [objectId, ownerSessionId] of objectOwners) {
+      if (ownerSessionId === sessionId) {
+        objectOwners.delete(objectId);
+      }
+    }
     sessionObjects.delete(sessionId);
     stopBroadcastLoopIfNeeded();
     agentLog(
@@ -447,11 +493,15 @@ defineAgent({
 
   async onDataChannelMessage(ctx) {
     if (parseRegisterCommand(ctx.message)) {
-      const objectId = await withWorldMutation(() =>
-        redis
-          ? registerObjectInRedis(ctx.sessionId)
-          : Promise.resolve(registerObjectInMemory(ctx.sessionId)),
-      );
+      const objectId = await withWorldMutation(async () => {
+        if (!redis) {
+          return registerObjectInMemory(ctx.sessionId);
+        }
+        const result = await withRedisSimLock(() =>
+          registerObjectInRedis(ctx.sessionId),
+        );
+        return result;
+      });
       if (objectId === null) {
         sendToClient(ctx.sessionId, {
           type: "register_nack",

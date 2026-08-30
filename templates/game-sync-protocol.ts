@@ -19,6 +19,19 @@ export interface UnregisterCommand {
   objectId?: number;
 }
 
+export function resolveRemoveTarget(
+  objectId: number | undefined,
+  ownedObjectIds: ReadonlySet<number> | undefined | null,
+): { ok: true; objectId: number } | { ok: false; reason: string } {
+  if (objectId !== undefined) {
+    return { ok: true, objectId };
+  }
+  if (!ownedObjectIds || ownedObjectIds.size === 0) {
+    return { ok: false, reason: UNREGISTER_NACK_REASON_NOT_FOUND };
+  }
+  return { ok: true, objectId: Math.max(...ownedObjectIds) };
+}
+
 export function parseUnregisterCommand(
   message: unknown,
 ): UnregisterCommand | null {

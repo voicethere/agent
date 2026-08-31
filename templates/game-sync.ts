@@ -61,15 +61,17 @@ import {
   simulateWorldStep,
 } from "./game-sync-sim.js";
 import {
+  clampSimulationDtSec,
   collectActiveObjectIds,
-  commitSimulatedWorld,
   countLiveObjects,
   createEmptyWorldBuffer,
   findFirstEmptySlot,
+  liveWorldSnapshot,
   markSlotFree,
   normalizeWorldBuffer,
   objectIdToSlot,
   OBJECT_SLOT_BYTE_LENGTH,
+  planRedisSimTick,
   REDIS_SIM_LOCK_KEY,
   REDIS_WORLD_KEY,
   slotToObjectId,
@@ -92,6 +94,7 @@ let worldState = createEmptyWorldBuffer();
 let redis: Redis | null = null;
 let broadcastTimer: NodeJS.Timeout | null = null;
 let worldMutationChain: Promise<void> = Promise.resolve();
+let lastTickTimeMs = 0;
 
 function withWorldMutation<T>(fn: () => Promise<T>): Promise<T> {
   const run = worldMutationChain.then(fn);
@@ -138,11 +141,6 @@ async function withRedisSimLock<T>(
     }
     await sleep(SIM_LOCK_RETRY_MS);
   }
-}
-
-interface TrackedObjectInfo {
-  objectId: number;
-  ownerSessionId: string;
 }
 
 function rand(min: number, max: number): number {
@@ -315,13 +313,11 @@ async function unregisterObject(
   return { ok: true, objectId: target.objectId };
 }
 
-function trackedObjectsSnapshot(): TrackedObjectInfo[] {
-  const objects: TrackedObjectInfo[] = [];
-  for (const [objectId, ownerSessionId] of objectOwners) {
-    objects.push({ objectId, ownerSessionId });
+function broadcastWorldSnapshot(): void {
+  const objects = liveWorldSnapshot(worldState, objectOwners);
+  for (const sessionId of connectedSessions) {
+    sendToClient(sessionId, { type: "world_snapshot", objects });
   }
-  objects.sort((a, b) => a.objectId - b.objectId);
-  return objects;
 }
 
 function notifyObjectRegistered(
@@ -375,33 +371,47 @@ async function saveWorldToRedis(world: Float32Array): Promise<void> {
 }
 
 async function runSimulationTick(): Promise<void> {
+  const now = Date.now();
+  const dt = clampSimulationDtSec(
+    lastTickTimeMs === 0 ? 0 : now - lastTickTimeMs,
+    BROADCAST_HZ,
+  );
+  lastTickTimeMs = now;
+
   if (!redis) {
     await withWorldMutation(async () => {
-      const activeObjectIds = [...objectOwners.keys()];
-      simulateWorldStep(worldState, 1 / BROADCAST_HZ, activeObjectIds);
+      simulateWorldStep(worldState, dt, collectActiveObjectIds(worldState));
     });
     broadcastWorldBuffer(worldState);
     return;
   }
 
   await withWorldMutation(async () => {
-    await withRedisSimLock(
+    const lockResult = await withRedisSimLock(
       async () => {
         const world = await loadWorldFromRedis();
         const activeObjectIds = collectActiveObjectIds(world);
-        simulateWorldStep(world, 1 / BROADCAST_HZ, activeObjectIds);
-        const latestRedis = await loadWorldFromRedis();
-        commitSimulatedWorld(world, latestRedis);
+        simulateWorldStep(world, dt, activeObjectIds);
         await saveWorldToRedis(world);
         worldState = world;
+        broadcastWorldBuffer(world);
+        return true;
       },
       { retryUntilAcquired: false },
     );
-  });
 
-  const world = await loadWorldFromRedis();
-  worldState = world;
-  broadcastWorldBuffer(world);
+    if (lockResult === null) {
+      const plan = planRedisSimTick({
+        lockAcquired: false,
+        connectedSessions,
+      });
+      if (plan === "relay") {
+        const world = await loadWorldFromRedis();
+        worldState = world;
+        broadcastWorldBuffer(world);
+      }
+    }
+  });
 }
 
 function startBroadcastLoopIfNeeded(): void {
@@ -466,12 +476,15 @@ defineAgent({
     agentLog("info", "game-sync agent connected to project Redis world buffer");
   },
 
-  onClientJoin({ sessionId }) {
+  async onClientJoin({ sessionId }) {
     connectedSessions.add(sessionId);
     startBroadcastLoopIfNeeded();
+    if (redis) {
+      worldState = await loadWorldFromRedis();
+    }
     sendToClient(sessionId, {
       type: "world_snapshot",
-      objects: trackedObjectsSnapshot(),
+      objects: liveWorldSnapshot(worldState, objectOwners),
     });
     agentLog("info", `join ${sessionId} connected=${connectedSessions.size}`);
   },
@@ -516,6 +529,7 @@ defineAgent({
       }
       sendToClient(ctx.sessionId, { type: "register_ack", objectId });
       notifyObjectRegistered(objectId, ctx.sessionId);
+      broadcastWorldSnapshot();
       agentLog(
         "info",
         `register session=${ctx.sessionId} objectId=${objectId}`,
@@ -541,6 +555,7 @@ defineAgent({
         type: "unregister_ack",
         objectId: result.objectId,
       });
+      broadcastWorldSnapshot();
       agentLog(
         "info",
         `unregister_ack session=${ctx.sessionId} objectId=${result.objectId}`,

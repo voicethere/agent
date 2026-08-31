@@ -162,6 +162,51 @@ export function collectActiveObjectIds(world: Float32Array): number[] {
   return ids;
 }
 
+export interface LiveWorldObjectInfo {
+  objectId: number;
+  ownerSessionId: string;
+}
+
+/** Snapshot occupancy from live world slots; ownerSessionId from map or empty string. */
+export function liveWorldSnapshot(
+  world: Float32Array,
+  owners: ReadonlyMap<number, string>,
+): LiveWorldObjectInfo[] {
+  const ids = collectActiveObjectIds(world);
+  ids.sort((a, b) => a - b);
+  return ids.map((objectId) => ({
+    objectId,
+    ownerSessionId: owners.get(objectId) ?? "",
+  }));
+}
+
+export function planRedisSimTick(options: {
+  lockAcquired: boolean;
+  connectedSessions: ReadonlySet<string>;
+}): "simulate" | "relay" | "noop" {
+  if (options.lockAcquired) {
+    return "simulate";
+  }
+  if (options.connectedSessions.size > 0) {
+    return "relay";
+  }
+  return "noop";
+}
+
+/** Finite positive elapsed seconds, clamped to [1/fallbackHz, 0.05]. */
+export function clampSimulationDtSec(
+  elapsedMs: number,
+  fallbackHz: number,
+): number {
+  const minDt = 1 / fallbackHz;
+  const maxDt = 0.05;
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+    return minDt;
+  }
+  const elapsedSec = elapsedMs / 1000;
+  return Math.min(maxDt, Math.max(minDt, elapsedSec));
+}
+
 /**
  * Decode a Redis / Node Buffer into a fixed-size world Float32Array.
  */

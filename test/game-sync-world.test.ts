@@ -6,11 +6,14 @@ import {
   OBJECT_RADIUS,
 } from "../templates/game-sync-sim.js";
 import {
+  clampSimulationDtSec,
   countLiveObjects,
   commitSimulatedWorld,
   createEmptyWorldBuffer,
   findFirstEmptySlot,
+  liveWorldSnapshot,
   markSlotFree,
+  planRedisSimTick,
   preserveEmptySlots,
   readSlotObjectId,
   slotToObjectId,
@@ -96,6 +99,84 @@ describe("game-sync world layout", () => {
     expect(simulated[1]).toBe(999);
     expect(readSlotObjectId(simulated, 2)).toBe(0);
     expect(simulated[10]).toBe(0);
+  });
+});
+
+describe("liveWorldSnapshot", () => {
+  it("lists live world slots, not owners-only entries", () => {
+    const world = createEmptyWorldBuffer();
+    registerInMemory(world, 0);
+    registerInMemory(world, 4);
+
+    const owners = new Map<number, string>([[slotToObjectId(0), "session-a"]]);
+
+    const snapshot = liveWorldSnapshot(world, owners);
+    expect(snapshot).toEqual([
+      { objectId: slotToObjectId(0), ownerSessionId: "session-a" },
+      { objectId: slotToObjectId(4), ownerSessionId: "" },
+    ]);
+  });
+
+  it("lists Redis-live ids when owners map is empty", () => {
+    const world = createEmptyWorldBuffer();
+    registerInMemory(world, 2);
+    registerInMemory(world, 7);
+
+    const snapshot = liveWorldSnapshot(world, new Map());
+    expect(snapshot.map((o) => o.objectId)).toEqual([
+      slotToObjectId(2),
+      slotToObjectId(7),
+    ]);
+    expect(snapshot.every((o) => o.ownerSessionId === "")).toBe(true);
+  });
+});
+
+describe("planRedisSimTick", () => {
+  it("simulate when lock acquired", () => {
+    expect(
+      planRedisSimTick({
+        lockAcquired: true,
+        connectedSessions: new Set(),
+      }),
+    ).toBe("simulate");
+    expect(
+      planRedisSimTick({
+        lockAcquired: true,
+        connectedSessions: new Set(["a"]),
+      }),
+    ).toBe("simulate");
+  });
+
+  it("relay when lock missed and sessions connected", () => {
+    expect(
+      planRedisSimTick({
+        lockAcquired: false,
+        connectedSessions: new Set(["a"]),
+      }),
+    ).toBe("relay");
+  });
+
+  it("noop when lock missed and zero sessions", () => {
+    expect(
+      planRedisSimTick({
+        lockAcquired: false,
+        connectedSessions: new Set(),
+      }),
+    ).toBe("noop");
+  });
+});
+
+describe("clampSimulationDtSec", () => {
+  it("uses fallback interval when elapsed is missing or non-finite", () => {
+    expect(clampSimulationDtSec(0, 60)).toBe(1 / 60);
+    expect(clampSimulationDtSec(-5, 60)).toBe(1 / 60);
+    expect(clampSimulationDtSec(Number.NaN, 60)).toBe(1 / 60);
+  });
+
+  it("clamps elapsed to min 1/hz and max 0.05s", () => {
+    expect(clampSimulationDtSec(1, 60)).toBe(1 / 60);
+    expect(clampSimulationDtSec(100, 60)).toBe(0.05);
+    expect(clampSimulationDtSec(20, 60)).toBe(0.02);
   });
 });
 

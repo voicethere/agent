@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync } from "node:fs";
+import * as fs from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +11,7 @@ import {
   listTemplates,
   loadTemplateBundle,
   loadTemplateSources,
+  loadTemplateWorkspaceSources,
   resolveTemplateEntryPath,
 } from "../src/templates/index.js";
 import {
@@ -63,7 +64,7 @@ describe("agent template registry", () => {
   it("resolves entry paths for every template", () => {
     for (const template of AGENT_TEMPLATES) {
       const entryPath = resolveTemplateEntryPath(template.id);
-      expect(existsSync(entryPath)).toBe(true);
+      expect(fs.existsSync(entryPath)).toBe(true);
       expect(entryPath).toContain(join("templates", template.entry));
     }
   });
@@ -129,6 +130,22 @@ describe("agent template registry", () => {
   });
 });
 
+describe("loadTemplateWorkspaceSources", () => {
+  it("preserves registry sourceFiles paths for voice-showcase", () => {
+    const sources = loadTemplateWorkspaceSources("voice-showcase");
+    expect(sources.map((source) => source.path)).toContain(
+      "voice-showcase/agent.ts",
+    );
+    expect(sources.map((source) => source.path)).not.toContain("agent.ts");
+  });
+
+  it("returns echo.ts for echo template", () => {
+    const sources = loadTemplateWorkspaceSources("echo");
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.path).toBe("echo.ts");
+  });
+});
+
 describe("seed template bundles", () => {
   const seedIds = listSeedOnCreateTemplates().map((template) => template.id);
 
@@ -150,7 +167,7 @@ describe("seed template bundles", () => {
   it("has prebuilt bundles after build for every seedOnCreate template", () => {
     for (const id of seedIds) {
       const bundlePath = join(root, "dist", "templates", id, "agent.js");
-      expect(existsSync(bundlePath), `missing ${bundlePath}`).toBe(true);
+      expect(fs.existsSync(bundlePath), `missing ${bundlePath}`).toBe(true);
       expect(hasSeedBundle(id)).toBe(true);
       const bundle = loadTemplateBundle(id);
       expect(bundle.byteLength).toBeGreaterThan(500);

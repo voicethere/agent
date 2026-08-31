@@ -30,7 +30,7 @@ for (const [subpath, spec] of Object.entries(pkg.exports ?? {})) {
 
 const requireFromPkg = createRequire(join(root, "package.json"));
 
-for (const subpath of ["", "/verify", "/templates"]) {
+for (const subpath of ["", "/verify", "/templates", "/build"]) {
   const resolved = requireFromPkg.resolve(`${pkg.name}${subpath}`);
   if (!resolved.endsWith(".js")) {
     throw new Error(
@@ -48,6 +48,7 @@ for (const subpath of ["", "/verify", "/templates"]) {
       "getTemplate",
       "resolveTemplateEntryPath",
       "loadTemplateSources",
+      "loadTemplateWorkspaceSources",
       "loadTemplateBundle",
       "hasSeedBundle",
     ]) {
@@ -66,6 +67,10 @@ for (const subpath of ["", "/verify", "/templates"]) {
           `Missing prebuilt seed bundle for product template "${id}" — run npm run build`,
         );
       }
+    }
+  } else if (subpath === "/build") {
+    if (typeof mod.buildAgentBundle !== "function") {
+      throw new Error("@voicethere/agent/build must export buildAgentBundle");
     }
   } else if (typeof mod !== "object" || mod == null) {
     throw new Error("@voicethere/agent root export must be an object");

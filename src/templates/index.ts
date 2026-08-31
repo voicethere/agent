@@ -80,6 +80,21 @@ export function loadTemplateSources(id: string): TemplateSourceFile[] {
   });
 }
 
+/** Like {@link loadTemplateSources}, but paths match registry `sourceFiles` (e.g. `voice-showcase/agent.ts`). */
+export function loadTemplateWorkspaceSources(id: string): TemplateSourceFile[] {
+  const template = getTemplateById(id);
+  return template.sourceFiles.map((sourceFile) => {
+    const absolutePath = join(TEMPLATES_DIR, sourceFile);
+    if (!existsSync(absolutePath)) {
+      throw new Error(`Template source not found for ${id}: ${absolutePath}`);
+    }
+    return {
+      path: sourceFile,
+      content: readFileSync(absolutePath, "utf8"),
+    };
+  });
+}
+
 function seedBundlePath(id: string): string {
   return join(PACKAGE_ROOT, "dist", "templates", id, "agent.js");
 }

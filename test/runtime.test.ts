@@ -1041,6 +1041,7 @@ describe("recording control", () => {
       type: "session_start",
       sessionId: "peer-1",
       env: { SESSION_ID: "peer-1" },
+      recordingAvailable: true,
     });
     await vi.waitFor(() =>
       expect(capture.send).toHaveBeenCalledWith(
@@ -1091,6 +1092,7 @@ describe("recording control", () => {
       type: "session_start",
       sessionId: "peer-1",
       env: { SESSION_ID: "peer-1" },
+      recordingAvailable: true,
     });
     await vi.waitFor(() =>
       expect(capture.send).toHaveBeenCalledWith(
@@ -1159,6 +1161,77 @@ describe("recording control", () => {
     capture.restore();
   });
 
+  it("denies start and resume when recordingAvailable is false after session_start", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+      recordingAvailable: false,
+    });
+    await vi.waitFor(() =>
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session_start_ack" }),
+      ),
+    );
+    capture.send.mockClear();
+
+    const startResult = await startRecording("peer-1");
+    expect(startResult).toMatchObject({ ok: false, reason: "disabled" });
+    expect(capture.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "recording_control", action: "start" }),
+    );
+
+    const resumeResult = await resumeRecording("peer-1");
+    expect(resumeResult).toMatchObject({ ok: false, reason: "disabled" });
+    expect(capture.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "recording_control", action: "resume" }),
+    );
+
+    capture.send.mockClear();
+    const pausePromise = pauseRecording("peer-1");
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const pauseCall = capture.send.mock.calls[0]?.[0] as { requestId: string };
+    capture.emit({
+      type: "recording_control_ack",
+      sessionId: "peer-1",
+      action: "pause",
+      requestId: pauseCall.requestId,
+      ok: true,
+      reason: "applied",
+    });
+    await pausePromise;
+    capture.restore();
+  });
+
+  it("denies start locally when recordingAvailable is false (non-child)", async () => {
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+      recordingAvailable: false,
+    });
+    await vi.waitFor(() =>
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session_start_ack" }),
+      ),
+    );
+    capture.send.mockClear();
+
+    const startResult = await startRecording("peer-1");
+    expect(startResult).toMatchObject({ ok: false, reason: "disabled" });
+    expect(capture.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "recording_control" }),
+    );
+    capture.restore();
+  });
+
   it("does not send recording_control after session_end for the same session", async () => {
     const capture = installProcessMessageCapture();
     const onSessionEnd = vi.fn();
@@ -1176,9 +1249,7 @@ describe("recording control", () => {
       recordingAvailable: true,
     });
     await vi.waitFor(() => expect(capture.send).not.toHaveBeenCalled());
-    await vi.waitFor(() =>
-      expect(onSessionEnd).toHaveBeenCalledTimes(0),
-    );
+    await vi.waitFor(() => expect(onSessionEnd).toHaveBeenCalledTimes(0));
 
     capture.emit({ type: "session_end", sessionId: "peer-1" });
     await vi.waitFor(() => expect(onSessionEnd).toHaveBeenCalled());

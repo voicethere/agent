@@ -15,10 +15,10 @@ import {
 
 ## Product vs e2e
 
-| Kind        | Dashboard create                                                                                      | Prebuilt seed bundle                 | Typical consumer        |
-| ----------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
-| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `game-sync`, `voice-showcase`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
-| **e2e**     | No                                                                                                    | No — build from sources at test time | `voicethere/e2e` smokes |
+| Kind        | Dashboard create                                                                                                           | Prebuilt seed bundle                 | Typical consumer        |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
+| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `game-sync`, `voice-showcase`, `recording-consent`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
+| **e2e**     | No                                                                                                                         | No — build from sources at test time | `voicethere/e2e` smokes |
 
 Product templates always set `seedOnCreate: true`. CI fails if a product template is missing its prebuilt bundle after `npm run build`.
 
@@ -66,6 +66,12 @@ When `AGENT_REDIS_URL` is set (project Redis), the world blob is stored at `game
 Conversational voice demo for landing and dashboard previews — greets the user, asks for a name, then offers a menu: weather (Open-Meteo, no API key), count 1–10, short recipes, and rotating fun facts. Typed chat and voice finals share the same handler. Sends structured `menu` payloads plus `chat_reply` for the chat log.
 
 Sources: `voice-showcase/agent.ts` (defineAgent wiring), `conversation.ts` (pure state machine), `weather.ts`, `recipes.ts`, `fun-facts.ts`.
+
+### `recording-consent/` (`recording-consent`)
+
+Demonstrates conversation recording consent on connect: asks whether recording is OK when the project has recording enabled, pauses capture while collecting name and date of birth, then resumes only if the customer consented. When project recording is off, logs a warning and never calls `startRecording`. Voice finals and typed chat share the same handler.
+
+Sources: `recording-consent/agent.ts` (defineAgent wiring), `conversation.ts` (pure state machine).
 
 ### `webhooks.ts` (`webhooks`)
 

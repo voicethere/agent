@@ -138,7 +138,11 @@ function isRecordingControlAckMessage(
 
 function isWebhookMessage(value: unknown): value is WebhookMessage {
   if (!value || typeof value !== "object") return false;
-  const msg = value as { type?: string; eventId?: unknown; projectId?: unknown };
+  const msg = value as {
+    type?: string;
+    eventId?: unknown;
+    projectId?: unknown;
+  };
   return (
     msg.type === "webhook" &&
     typeof msg.eventId === "string" &&
@@ -158,7 +162,10 @@ function coerceInboundBinary(value: unknown): Buffer | null {
   }
   if (typeof value === "object") {
     const maybeBufferLike = value as { type?: unknown; data?: unknown };
-    if (maybeBufferLike.type === "Buffer" && Array.isArray(maybeBufferLike.data)) {
+    if (
+      maybeBufferLike.type === "Buffer" &&
+      Array.isArray(maybeBufferLike.data)
+    ) {
       return Buffer.from(maybeBufferLike.data);
     }
   }
@@ -209,6 +216,8 @@ function parseDataChannelPayload(raw: string): unknown {
 }
 
 const peerEnvBySessionId = new Map<string, Record<string, string>>();
+/** Cached from `session_start.recordingAvailable` until `session_end`. */
+const recordingAvailableBySessionId = new Map<string, boolean>();
 /** Sessions that received `session_end`; `speak()` becomes a no-op when no live gen. */
 const endedSessionIds = new Set<string>();
 
@@ -451,6 +460,10 @@ async function handleParentMessage(
     case "session_start":
       endedSessionIds.delete(message.sessionId);
       peerEnvBySessionId.set(message.sessionId, message.env);
+      recordingAvailableBySessionId.set(
+        message.sessionId,
+        message.recordingAvailable ?? false,
+      );
       const sessionStartInitDelayMs = resolveSessionStartInitDelayMs();
       if (sessionStartInitDelayMs > 0) {
         await new Promise((resolve) =>
@@ -504,6 +517,7 @@ async function handleParentMessage(
     case "session_end":
       clearPendingRecordingAcksForSession(message.sessionId, "session_ended");
       peerEnvBySessionId.delete(message.sessionId);
+      recordingAvailableBySessionId.delete(message.sessionId);
       await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
         sessionId: message.sessionId,
       });
@@ -730,6 +744,7 @@ function buildIdleEnv(sessionId: string): Record<string, string> {
 export function resetAgentIpcStateForTests(): void {
   endedSessionIds.clear();
   peerEnvBySessionId.clear();
+  recordingAvailableBySessionId.clear();
   inboundQueueAuthority = null;
   for (const [requestId, pending] of pendingRecordingAcks) {
     clearTimeout(pending.timer);
@@ -755,6 +770,19 @@ async function sendRecordingControl(
 
   if (!allowOutboundForSession(sessionId)) {
     return { ok: false, reason: "session_ended", requestId };
+  }
+
+  if (
+    recordingAvailableBySessionId.has(sessionId) &&
+    recordingAvailableBySessionId.get(sessionId) === false &&
+    (action === "start" || action === "resume")
+  ) {
+    agentLog(
+      "warn",
+      "Project conversation recording is disabled; the agent cannot turn recording on",
+      sessionId,
+    );
+    return { ok: false, reason: "disabled", requestId };
   }
 
   if (!isVoicethereAgentChild()) {

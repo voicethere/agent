@@ -63,9 +63,9 @@ When `AGENT_REDIS_URL` is set (project Redis), the world blob is stored at `game
 
 ### `voice-showcase/` (`voice-showcase`)
 
-Conversational voice demo for landing and dashboard previews — greets the user, asks for a name, then offers a menu: weather (Open-Meteo, no API key), count 1–10, short recipes, and rotating fun facts. Typed chat and voice finals share the same handler. Sends structured `menu` payloads plus `chat_reply` for the chat log.
+Conversational voice demo for landing and dashboard previews — greets the user, asks for a name, then offers a menu: weather (Open-Meteo, no API key), count 1–10, short recipes, and rotating fun facts. Typed chat and voice finals share the same handler. Sends structured `menu` payloads plus `chat_reply` for the chat log, then triggers TTS play so the client has the spoken text before audio starts.
 
-Sources: `voice-showcase/agent.ts` (defineAgent wiring), `conversation.ts` (pure state machine), `weather.ts`, `recipes.ts`, `fun-facts.ts`.
+Sources: `voice-showcase/agent.ts` (defineAgent wiring), `conversation.ts` (pure state machine), `delivery.ts` (send-then-play order), `weather.ts`, `recipes.ts`, `fun-facts.ts`.
 
 ### `recording-consent/` (`recording-consent`)
 

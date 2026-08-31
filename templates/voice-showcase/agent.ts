@@ -19,8 +19,13 @@ import {
   handleUtterance,
   resolveWeatherTurn,
   type ConversationState,
-  type OutboundMessage,
+  type ConversationTurnResult,
 } from "./conversation.js";
+import {
+  applyOutboundOps,
+  greetingOps,
+  spokenThenPlayOps,
+} from "./delivery.js";
 
 const sessions = new Map<string, ConversationState>();
 
@@ -42,25 +47,23 @@ function relaySpeechEvent(sessionId: string, event: SpeechEvent): void {
   });
 }
 
-function deliverMessages(sessionId: string, messages: OutboundMessage[]): void {
-  for (const message of messages) {
-    sendToClient(sessionId, message);
-  }
-}
-
-function speakLines(sessionId: string, lines: string[]): void {
-  for (const line of lines) {
-    speak(sessionId, line);
-  }
+function deliverSpokenThenPlay(
+  sessionId: string,
+  result: Pick<ConversationTurnResult, "messages" | "speakLines">,
+): void {
+  applyOutboundOps(
+    sessionId,
+    spokenThenPlayOps(result.messages, result.speakLines),
+    { sendToClient, speak },
+  );
 }
 
 async function applyTurn(
   sessionId: string,
-  result: Awaited<ReturnType<typeof handleUtterance>>,
+  result: ConversationTurnResult,
 ): Promise<void> {
   sessions.set(sessionId, result.state);
-  speakLines(sessionId, result.speakLines);
-  deliverMessages(sessionId, result.messages);
+  deliverSpokenThenPlay(sessionId, result);
 
   if (result.pendingWeather) {
     const weatherResult = await resolveWeatherTurn(
@@ -69,8 +72,7 @@ async function applyTurn(
       result.pendingWeather.country,
     );
     sessions.set(sessionId, weatherResult.state);
-    speakLines(sessionId, weatherResult.speakLines);
-    deliverMessages(sessionId, weatherResult.messages);
+    deliverSpokenThenPlay(sessionId, weatherResult);
   }
 }
 
@@ -83,13 +85,10 @@ async function onUserText(sessionId: string, text: string): Promise<void> {
 defineAgent({
   onSessionStart({ sessionId }) {
     sessions.set(sessionId, createInitialState());
-    sendToClient(sessionId, {
-      type: "agent_event",
-      event: "session_start",
-      sessionId,
+    applyOutboundOps(sessionId, greetingOps(sessionId, GREETING), {
+      sendToClient,
+      speak,
     });
-    speak(sessionId, GREETING);
-    sendToClient(sessionId, { type: "chat_reply", text: GREETING });
     agentLog("info", `voice-showcase session_start ${sessionId}`);
   },
 

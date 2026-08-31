@@ -65,6 +65,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     sourceFiles: [
       "voice-showcase/agent.ts",
       "voice-showcase/conversation.ts",
+      "voice-showcase/delivery.ts",
       "voice-showcase/weather.ts",
       "voice-showcase/recipes.ts",
       "voice-showcase/fun-facts.ts",

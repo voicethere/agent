@@ -95,7 +95,26 @@ export function beginSession(
   };
 }
 
+export function isConsentNo(utterance: string): boolean {
+  const lower = utterance.toLowerCase().trim();
+  if (/\bnot\s+ok(?:ay)?\b/i.test(lower)) return true;
+  const noPhrases = [
+    "no",
+    "nope",
+    "nah",
+    "don't",
+    "do not",
+    "decline",
+    "refuse",
+  ];
+  if (noPhrases.some((p) => lower === p || lower.startsWith(`${p} `))) {
+    return true;
+  }
+  return /\b(no|nope|nah)\b/i.test(utterance) && !/\bknow\b/i.test(utterance);
+}
+
 export function isConsentYes(utterance: string): boolean {
+  if (isConsentNo(utterance)) return false;
   const lower = utterance.toLowerCase().trim();
   const yesPhrases = [
     "yes",
@@ -114,25 +133,6 @@ export function isConsentYes(utterance: string): boolean {
     return true;
   }
   return /\b(yes|yeah|yep|sure|ok|okay)\b/i.test(utterance);
-}
-
-export function isConsentNo(utterance: string): boolean {
-  const lower = utterance.toLowerCase().trim();
-  const noPhrases = [
-    "no",
-    "nope",
-    "nah",
-    "don't",
-    "do not",
-    "not ok",
-    "not okay",
-    "decline",
-    "refuse",
-  ];
-  if (noPhrases.some((p) => lower === p || lower.startsWith(`${p} `))) {
-    return true;
-  }
-  return /\b(no|nope|nah)\b/i.test(utterance) && !/\bknow\b/i.test(utterance);
 }
 
 export function extractName(utterance: string): string | null {
@@ -224,20 +224,6 @@ export function handleUtterance(
 ): ConversationTurnResult {
   switch (state.phase) {
     case "awaitingConsent": {
-      if (isConsentYes(utterance)) {
-        const next: ConversationState = {
-          ...state,
-          phase: "awaitingName",
-          consent: true,
-        };
-        const name = speakAndChat(NAME_PROMPT);
-        return {
-          state: next,
-          speakLines: name.speakLines,
-          messages: name.messages,
-          recordingAction: "pause",
-        };
-      }
       if (isConsentNo(utterance)) {
         const next: ConversationState = {
           ...state,
@@ -250,6 +236,20 @@ export function handleUtterance(
           speakLines: name.speakLines,
           messages: name.messages,
           recordingAction: "stop",
+        };
+      }
+      if (isConsentYes(utterance)) {
+        const next: ConversationState = {
+          ...state,
+          phase: "awaitingName",
+          consent: true,
+        };
+        const name = speakAndChat(NAME_PROMPT);
+        return {
+          state: next,
+          speakLines: name.speakLines,
+          messages: name.messages,
+          recordingAction: "pause",
         };
       }
       const retry = speakAndChat(

@@ -69,6 +69,18 @@ describe("recording-consent conversation", () => {
     expect(done.state.phase).toBe("complete");
   });
 
+  it.each(["not okay", "not ok"])(
+    "treats %s as consent decline with stop recording",
+    (utterance) => {
+      const state = createInitialState(true);
+      const result = handleUtterance(state, utterance);
+      expect(result.state.consent).toBe(false);
+      expect(result.recordingAction).toBe("stop");
+      expect(isConsentNo(utterance)).toBe(true);
+      expect(isConsentYes(utterance)).toBe(false);
+    },
+  );
+
   it("recording unavailable never emits start or resume after PII", () => {
     let state = createInitialState(false);
     state = handleUtterance(state, "Alex").state;
@@ -80,8 +92,12 @@ describe("recording-consent conversation", () => {
   it("parses consent answers", () => {
     expect(isConsentYes("yes")).toBe(true);
     expect(isConsentYes("yeah sure")).toBe(true);
+    expect(isConsentYes("not okay")).toBe(false);
+    expect(isConsentYes("not ok")).toBe(false);
     expect(isConsentNo("no")).toBe(true);
     expect(isConsentNo("nope")).toBe(true);
+    expect(isConsentNo("not okay")).toBe(true);
+    expect(isConsentNo("not ok")).toBe(true);
     expect(isConsentNo("I want to know more")).toBe(false);
   });
 

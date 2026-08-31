@@ -71,6 +71,18 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     ],
   },
   {
+    id: "recording-consent",
+    entry: "recording-consent/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    description:
+      "Recording consent flow — ask consent, pause capture for PII, resume when allowed.",
+    sourceFiles: [
+      "recording-consent/agent.ts",
+      "recording-consent/conversation.ts",
+    ],
+  },
+  {
     id: "webhooks",
     entry: "webhooks.ts",
     kind: "product",

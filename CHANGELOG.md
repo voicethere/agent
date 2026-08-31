@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- **`game-sync` join snapshot** — `world_snapshot` lists live Redis/world slots via `collectActiveObjectIds`, not in-process `objectOwners` only; join hydrates from Redis when enabled.
+- **`game-sync` Redis sim tick** — lock holder runs one GET, simulate with clamped real dt, one SET, and broadcasts that buffer (no second GET or `commitSimulatedWorld` in the tick).
+- **`game-sync` lock-miss relay** — when the sim lock is busy but clients are connected, one GET plus broadcast instead of trailing GET on every tick.
+
 ## [0.5.6] - 2026-08-31
 
 ### Added

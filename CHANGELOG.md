@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-08-31
+
+### Added
+
+- **`recording-consent` product template** — consent on session connect, pause for name/birthdate, resume only if consented and recording available; skip consent + warn when project recording is off.
+- **`startRecording` / `resumeRecording` deny** — when session `recordingAvailable` is false, return `{ ok: false, reason: "disabled" }` and warn; agent cannot turn recording on.
+
 ## [0.5.5] - 2026-08-30
 
 ### Fixed

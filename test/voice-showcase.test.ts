@@ -21,6 +21,11 @@ import {
   wmoCodeToPhrase,
   type FetchFn,
 } from "../templates/voice-showcase/weather.js";
+import {
+  applyOutboundOps,
+  greetingOps,
+  spokenThenPlayOps,
+} from "../templates/voice-showcase/delivery.js";
 
 describe("voice-showcase conversation", () => {
   beforeEach(() => {
@@ -239,5 +244,52 @@ describe("voice-showcase conversation", () => {
       failFetch,
     );
     expect(failed.speakLines[0]).toContain("could not find");
+  });
+});
+
+describe("voice-showcase send-then-play delivery", () => {
+  it("greeting sends spoken TTS to the client before play", () => {
+    const ops = greetingOps("session-1", GREETING);
+    const chatIdx = ops.findIndex(
+      (op) => op.kind === "send" && op.message.type === "chat_reply",
+    );
+    const playIdx = ops.findIndex((op) => op.kind === "play");
+    expect(chatIdx).toBeGreaterThanOrEqual(0);
+    expect(playIdx).toBeGreaterThan(chatIdx);
+    expect(ops[chatIdx]).toMatchObject({
+      kind: "send",
+      message: { type: "chat_reply", text: GREETING },
+    });
+    expect(ops[playIdx]).toEqual({ kind: "play", text: GREETING });
+  });
+
+  it("turn ops send every message before any TTS play command", () => {
+    const result = handleUtterance(createInitialState(), "my name is Ada");
+    const ops = spokenThenPlayOps(result.messages, result.speakLines);
+    const firstPlay = ops.findIndex((op) => op.kind === "play");
+    const lastSend = ops.reduce(
+      (last, op, index) => (op.kind === "send" ? index : last),
+      -1,
+    );
+    expect(result.speakLines.length).toBeGreaterThan(0);
+    expect(result.messages.length).toBeGreaterThan(0);
+    expect(firstPlay).toBeGreaterThan(lastSend);
+  });
+
+  it("applyOutboundOps invokes sendToClient before speak", () => {
+    const calls: string[] = [];
+    applyOutboundOps(
+      "session-1",
+      spokenThenPlayOps([{ type: "chat_reply", text: "Hello" }], ["Hello"]),
+      {
+        sendToClient: (_sessionId, payload) => {
+          calls.push(`send:${(payload as { text?: string }).text}`);
+        },
+        speak: (_sessionId, text) => {
+          calls.push(`play:${text}`);
+        },
+      },
+    );
+    expect(calls).toEqual(["send:Hello", "play:Hello"]);
   });
 });

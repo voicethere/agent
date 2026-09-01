@@ -83,6 +83,25 @@ describe("agent template registry", () => {
     }
   });
 
+  it("loads voice-showcase sources including send-then-play delivery", () => {
+    const sources = loadTemplateSources("voice-showcase");
+    expect(sources.map((source) => source.path).sort()).toEqual(
+      [
+        "agent.ts",
+        "conversation.ts",
+        "delivery.ts",
+        "fun-facts.ts",
+        "recipes.ts",
+        "weather.ts",
+      ].sort(),
+    );
+    const delivery = sources.find(
+      (source) => source.path === "delivery.ts",
+    )?.content;
+    expect(delivery).toContain("spokenThenPlayOps");
+    expect(delivery).toContain("greetingOps");
+  });
+
   it("loads redis-sync multi-file sources with world-layout", () => {
     const sources = loadTemplateSources("redis-sync");
     expect(sources.map((source) => source.path).sort()).toEqual(

@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Changed
+
+- **`voice-showcase` TTS order** — send spoken text to the client (`chat_reply` / menu) first, then trigger TTS play (`speak`). Greeting and later turns no longer start playback before the client has the utterance.
+
 ### Fixed
 
 - **`game-sync` join snapshot** — `world_snapshot` lists live Redis/world slots via `collectActiveObjectIds`, not in-process `objectOwners` only; join hydrates from Redis when enabled.

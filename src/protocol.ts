@@ -211,7 +211,9 @@ export type MixControlAction =
   | "set_pose"
   | "set_positional"
   | "set_default_placement"
-  | "set_tts_placement";
+  | "set_tts_placement"
+  | "set_tts_pose"
+  | "clear_tts_pose";
 
 /**
  * Ask the runner parent to change mix groups, poses, or placement settings.

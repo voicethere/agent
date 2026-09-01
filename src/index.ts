@@ -60,6 +60,8 @@ export {
   setPositionalMixing,
   setSttEnabled,
   setTtsMixPlacement,
+  setTtsPose,
+  clearTtsPose,
   speak,
   startRecording,
   stopRecording,

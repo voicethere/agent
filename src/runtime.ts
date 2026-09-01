@@ -1012,6 +1012,16 @@ export function setTtsMixPlacement(
   return sendMixControl("set_tts_placement", { placement });
 }
 
+/** Set a live world-space pose for the TTS speaker (positional mixing on). */
+export function setTtsPose(pose: MixPose): Promise<MixControlResult> {
+  return sendMixControl("set_tts_pose", { pose });
+}
+
+/** Clear the live TTS pose; named placement applies again. */
+export function clearTtsPose(): Promise<MixControlResult> {
+  return sendMixControl("clear_tts_pose", {});
+}
+
 /**
  * Enable or disable STT for one client or all connected clients.
  *

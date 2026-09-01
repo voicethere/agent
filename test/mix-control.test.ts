@@ -7,6 +7,7 @@ import {
 } from "../src/protocol.js";
 import {
   addClientToMix,
+  clearTtsPose,
   createMixGroup,
   defineAgent,
   removeClientFromMix,
@@ -16,6 +17,7 @@ import {
   setPositionalMixing,
   setSttEnabled,
   setTtsMixPlacement,
+  setTtsPose,
 } from "../src/runtime.js";
 import { installProcessMessageCapture } from "./helpers/process-mock.js";
 
@@ -190,6 +192,8 @@ describe("mix control", () => {
       () => setDefaultMixPlacement("left"),
       () => setTtsMixPlacement("right"),
       () => setClientPose("peer-2", pose),
+      () => setTtsPose(pose),
+      () => clearTtsPose(),
     ];
 
     const expectedActions = [
@@ -199,6 +203,8 @@ describe("mix control", () => {
       "set_default_placement",
       "set_tts_placement",
       "set_pose",
+      "set_tts_pose",
+      "clear_tts_pose",
     ];
 
     for (let i = 0; i < calls.length; i++) {

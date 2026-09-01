@@ -26,6 +26,8 @@ export type ParentToChildMessage =
   | DataChannelBinaryMessage
   | IdleTimeoutMessage
   | RecordingControlAckMessage
+  | MixControlAckMessage
+  | SttControlAckMessage
   | WebhookMessage;
 
 /**
@@ -37,6 +39,8 @@ export type ChildToParentMessage =
   | SessionStartAckMessage
   | SpeakMessage
   | RecordingControlMessage
+  | MixControlMessage
+  | SttControlMessage
   | AgentLogMessage
   | AgentErrorMessage
   | SendToClientMessage
@@ -68,6 +72,11 @@ export interface SessionStartMessage {
    * Absent on older runners — treat as `false`.
    */
   recordingAvailable?: boolean;
+  /**
+   * When `true`, the runner session is Voice+Data and positional mix APIs are available.
+   * Absent on older runners or voice/data-only sessions — treat as `false`.
+   */
+  mixAvailable?: boolean;
 }
 
 /**
@@ -184,6 +193,101 @@ export type RecordingControlResult = {
   reason?: string;
   requestId: string;
 };
+
+/** Named stereo placement when positional mixing is off (and for TTS panning). */
+export type MixPlacement =
+  "center" | "left" | "right" | "front" | "behind" | "below" | "above";
+
+/** 6DOF pose for positional mixing (world position + unit quaternion). */
+export interface MixPose {
+  position: { x: number; y: number; z: number };
+  orientation: { x: number; y: number; z: number; w: number };
+}
+
+export type MixControlAction =
+  | "create_group"
+  | "add_client"
+  | "remove_client"
+  | "set_pose"
+  | "set_positional"
+  | "set_default_placement"
+  | "set_tts_placement";
+
+/**
+ * Ask the runner parent to change mix groups, poses, or placement settings.
+ *
+ * Mix runs in the runner parent — use {@link createMixGroup}, {@link setClientPose},
+ * and related helpers instead of raw `process.send`. Requires Voice+Data
+ * ({@link SessionStartMessage.mixAvailable}).
+ */
+export interface MixControlMessage {
+  type: "mix_control";
+  action: MixControlAction;
+  /** Correlates with {@link MixControlAckMessage.requestId}. */
+  requestId: string;
+  groupId?: string;
+  /** Peer/session ids (orchestrator session id). */
+  clientIds?: string[];
+  /** Single peer/session id for add/remove/pose actions. */
+  clientId?: string;
+  pose?: MixPose;
+  enabled?: boolean;
+  placement?: MixPlacement;
+}
+
+/** Runner acknowledgement for a {@link MixControlMessage}. */
+export interface MixControlAckMessage {
+  type: "mix_control_ack";
+  action: MixControlAction;
+  requestId: string;
+  ok: boolean;
+  reason?: "applied" | "unsupported" | "local_mock" | "timeout" | string;
+}
+
+/** Result returned by mix control helpers. */
+export type MixControlResult = {
+  ok: boolean;
+  reason?: string;
+  requestId: string;
+};
+
+/**
+ * Ask the runner parent to enable or disable STT for one client or all clients.
+ *
+ * `clientId` omitted targets every connected client. `clientId` is the same id as
+ * {@link SessionContext.sessionId} (orchestrator/browser peer id).
+ */
+export interface SttControlMessage {
+  type: "stt_control";
+  requestId: string;
+  enabled: boolean;
+  /** When set, only this peer/session is affected. */
+  clientId?: string;
+  /**
+   * Optional scope hint for the runner (same id as `clientId` when targeting one peer).
+   * Omitted when toggling all clients.
+   */
+  sessionId?: string;
+}
+
+/** Runner acknowledgement for a {@link SttControlMessage}. */
+export interface SttControlAckMessage {
+  type: "stt_control_ack";
+  requestId: string;
+  ok: boolean;
+  reason?: "applied" | "unsupported" | "local_mock" | "timeout" | string;
+}
+
+/** Result returned by {@link setSttEnabled}. */
+export type SttControlResult = {
+  ok: boolean;
+  reason?: string;
+  requestId: string;
+};
+
+/** Thrown by mix helpers when {@link SessionStartMessage.mixAvailable} is not `true`. */
+export const MIX_REQUIRES_VOICE_PLUS_DATA =
+  "Mix APIs require sessionMode 'voice+data' (voice tracks and a sync data channel)";
 
 /** Log severity forwarded to the runner parent process. */
 export type AgentLogLevel = "debug" | "info" | "warn" | "error";

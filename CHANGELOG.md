@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-01
+
 ### Added
 
 - **`loadTemplateWorkspaceSources`** — template sources with registry `sourceFiles` paths preserved (e.g. `voice-showcase/agent.ts`, `redis-sync/world-layout.ts`).

@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- **`loadTemplateWorkspaceSources`** — template sources with registry `sourceFiles` paths preserved (e.g. `voice-showcase/agent.ts`, `redis-sync/world-layout.ts`).
+- **`@voicethere/agent/build`** — exports `buildAgentBundle` and `BuildAgentBundleOptions` for dashboard workspace bundling.
+
 ### Changed
 
 - **`voice-showcase` TTS order** — send spoken text to the client (`chat_reply` / menu) first, then trigger TTS play (`speak`). Greeting and later turns no longer start playback before the client has the utterance.

@@ -1,6 +1,6 @@
 {
   "name": "@voicethere/agent",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "VoiceThere customer agent SDK — IPC types and runtime helpers for sandboxed child bundles",
   "type": "module",
   "exports": {
@@ -95,9 +95,9 @@
     "@node-webrtc-rust/sdk": ">=0.6.5"
   },
   "devDependencies": {
-    "@node-webrtc-rust/helpers": "0.7.4",
-    "@node-webrtc-rust/sdk": "0.7.4",
-    "@node-webrtc-rust/signaling": "0.7.4",
+    "@node-webrtc-rust/helpers": "0.8.0",
+    "@node-webrtc-rust/sdk": "0.8.0",
+    "@node-webrtc-rust/signaling": "0.8.0",
     "@types/node": "22.20.1",
     "http-server": "14.1.1",
     "ioredis": "5.11.1",

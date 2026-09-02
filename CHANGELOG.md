@@ -6,6 +6,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-03
+
+### Added
+
+- **Mix group APIs** — `createMixGroup`, `addClientToMix`, `removeClientFromMix`, `setPositionalMixing`, `setDefaultMixPlacement`, `setTtsMixPlacement`, and `setClientPose` for Voice+Data sessions (`mixAvailable` on `session_start`). Gated by `isMixAvailable(ctx)`.
+- **`setTtsPose` / `clearTtsPose`** — positional TTS orbit per session (`ttsPoseAvailable` on `session_start`); `isTtsPoseAvailable(ctx)` helper.
+- **`setSttEnabled`** — toggle STT for one client or all agents in a session (`SttControlMessage` IPC).
+- **`positional-tts` product template** — orbiting speaker demo using TTS pose APIs.
+- **`mix-smoke` E2E template** — DataChannel commands for positional mix smoke tests (Voice+Data, shared child).
+
+### Changed
+
+- **Dev deps** — `@node-webrtc-rust/{helpers,sdk,signaling}` **0.8.0** (mix graph, `setTtsPose`, `setSttEnabled` in live-test stack).
+
 ## [0.6.0] - 2026-09-01
 
 ### Added

@@ -15,10 +15,10 @@ import {
 
 ## Product vs e2e
 
-| Kind        | Dashboard create                                                                                                           | Prebuilt seed bundle                 | Typical consumer        |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
-| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `game-sync`, `voice-showcase`, `recording-consent`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
-| **e2e**     | No                                                                                                                         | No — build from sources at test time | `voicethere/e2e` smokes |
+| Kind        | Dashboard create                                                                                                                             | Prebuilt seed bundle                 | Typical consumer        |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
+| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `game-sync`, `voice-showcase`, `recording-consent`, `positional-tts`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
+| **e2e**     | No                                                                                                                                           | No — build from sources at test time | `voicethere/e2e` smokes |
 
 Product templates always set `seedOnCreate: true`. CI fails if a product template is missing its prebuilt bundle after `npm run build`.
 
@@ -72,6 +72,12 @@ Sources: `voice-showcase/agent.ts` (defineAgent wiring), `conversation.ts` (pure
 Demonstrates conversation recording consent on connect: asks whether recording is OK when the project has recording enabled, pauses capture while collecting name and date of birth, then resumes only if the customer consented. When project recording is off, logs a warning and never calls `startRecording`. Voice finals and typed chat share the same handler.
 
 Sources: `recording-consent/agent.ts` (defineAgent wiring), `conversation.ts` (pure state machine).
+
+### `positional-tts/` (`positional-tts`)
+
+Voice+Data demo — enables positional mixing and orbits each listener’s TTS speaker with `setTtsPose` on a ~50 ms timer. Speaks a short greeting on connect and echoes voice finals / chat so you hear panning while TTS plays. Requires Voice+Data runner mode (`isMixAvailable`).
+
+Sources: `positional-tts/agent.ts` (defineAgent wiring), `positional-tts/orbit.ts` (pure circle helper for tests).
 
 ### `webhooks.ts` (`webhooks`)
 

@@ -84,6 +84,15 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     ],
   },
   {
+    id: "positional-tts",
+    entry: "positional-tts/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    description:
+      "Voice+Data demo — TTS speaker orbits each listener with per-client setTtsPose.",
+    sourceFiles: ["positional-tts/agent.ts", "positional-tts/orbit.ts"],
+  },
+  {
     id: "webhooks",
     entry: "webhooks.ts",
     kind: "product",

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   MIX_REQUIRES_VOICE_PLUS_DATA,
+  TTS_POSE_REQUIRES_VOICE,
   type ChildToParentMessage,
   type ParentToChildMessage,
 } from "../src/protocol.js";
@@ -23,13 +24,16 @@ import { installProcessMessageCapture } from "./helpers/process-mock.js";
 
 async function startMixSession(
   capture: ReturnType<typeof installProcessMessageCapture>,
-  options?: { mixAvailable?: boolean },
+  options?: { mixAvailable?: boolean; ttsPoseAvailable?: boolean },
 ): Promise<void> {
+  const mixAvailable = options?.mixAvailable ?? true;
+  const ttsPoseAvailable = options?.ttsPoseAvailable ?? mixAvailable;
   capture.emit({
     type: "session_start",
     sessionId: "peer-1",
     env: { SESSION_ID: "peer-1" },
-    mixAvailable: options?.mixAvailable ?? true,
+    mixAvailable,
+    ttsPoseAvailable,
   });
   await vi.waitFor(() =>
     expect(capture.send).toHaveBeenCalledWith(
@@ -229,18 +233,58 @@ describe("mix control", () => {
     process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
     const capture = installProcessMessageCapture();
     defineAgent({});
-    await startMixSession(capture, { mixAvailable: false });
+    await startMixSession(capture, {
+      mixAvailable: false,
+      ttsPoseAvailable: true,
+    });
 
     await expect(
       createMixGroup({ id: "g1", clientIds: ["peer-1"] }),
     ).rejects.toThrow(MIX_REQUIRES_VOICE_PLUS_DATA);
     expect(capture.send).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: "mix_control" }),
+      expect.objectContaining({ type: "mix_control", action: "create_group" }),
     );
     capture.restore();
   });
 
-  it("throws when mixAvailable is omitted (older runner / data-only)", async () => {
+  it("sends TTS pose mix_control on voice-only (ttsPoseAvailable true)", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+    await startMixSession(capture, {
+      mixAvailable: false,
+      ttsPoseAvailable: true,
+    });
+
+    const posePromise = setTtsPose("peer-1", {
+      position: { x: 1, y: 0, z: 0 },
+      orientation: { x: 0, y: 0, z: 0, w: 1 },
+    });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const sent = capture.send.mock.calls.at(-1)?.[0] as {
+      type: string;
+      action: string;
+      requestId: string;
+    };
+    expect(sent.type).toBe("mix_control");
+    expect(sent.action).toBe("set_tts_pose");
+    emitMixAck(capture, sent);
+    await posePromise;
+
+    capture.send.mockClear();
+    const positionalPromise = setPositionalMixing(true);
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const positionalSent = capture.send.mock.calls.at(-1)?.[0] as {
+      action: string;
+      requestId: string;
+    };
+    expect(positionalSent.action).toBe("set_positional");
+    emitMixAck(capture, positionalSent);
+    await positionalPromise;
+    capture.restore();
+  });
+
+  it("throws TTS pose when ttsPoseAvailable is omitted (data-only / older runner)", async () => {
     const capture = installProcessMessageCapture();
     defineAgent({});
 
@@ -257,7 +301,7 @@ describe("mix control", () => {
     capture.send.mockClear();
 
     await expect(setPositionalMixing(true)).rejects.toThrow(
-      MIX_REQUIRES_VOICE_PLUS_DATA,
+      TTS_POSE_REQUIRES_VOICE,
     );
     capture.restore();
   });

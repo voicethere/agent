@@ -204,6 +204,7 @@ describe("defineAgent", () => {
         },
         recordingAvailable: false,
         mixAvailable: false,
+        ttsPoseAvailable: false,
       });
       expect(capture.send).toHaveBeenCalledWith({
         type: "session_start_ack",
@@ -243,6 +244,7 @@ describe("defineAgent", () => {
         env: { SESSION_ID: "peer-delay-default" },
         recordingAvailable: false,
         mixAvailable: false,
+        ttsPoseAvailable: false,
       });
     } finally {
       if (originalEnabled === undefined) {
@@ -290,6 +292,7 @@ describe("defineAgent", () => {
         env: { SESSION_ID: "peer-delay-custom" },
         recordingAvailable: false,
         mixAvailable: false,
+        ttsPoseAvailable: false,
       });
     } finally {
       if (originalEnabled === undefined) {
@@ -330,6 +333,7 @@ describe("defineAgent", () => {
           env: { SESSION_ID: "peer-delay-disabled" },
           recordingAvailable: false,
           mixAvailable: false,
+          ttsPoseAvailable: false,
         });
       });
     } finally {
@@ -1288,6 +1292,7 @@ describe("session_start recordingAvailable", () => {
       env: { SESSION_ID: "peer-1" },
       recordingAvailable: true,
       mixAvailable: false,
+      ttsPoseAvailable: false,
     });
     capture.restore();
   });
@@ -1309,6 +1314,7 @@ describe("session_start recordingAvailable", () => {
       env: { SESSION_ID: "peer-1" },
       recordingAvailable: false,
       mixAvailable: false,
+      ttsPoseAvailable: false,
     });
     capture.restore();
   });

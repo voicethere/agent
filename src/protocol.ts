@@ -77,6 +77,11 @@ export interface SessionStartMessage {
    * Absent on older runners or voice/data-only sessions — treat as `false`.
    */
   mixAvailable?: boolean;
+  /**
+   * When `true`, TTS pose / listener pose / positional panning APIs are available
+   * (voice or Voice+Data). Absent on data-only or older runners — treat as `false`.
+   */
+  ttsPoseAvailable?: boolean;
 }
 
 /**
@@ -287,9 +292,13 @@ export type SttControlResult = {
   requestId: string;
 };
 
-/** Thrown by mix helpers when {@link SessionStartMessage.mixAvailable} is not `true`. */
+/** Thrown by mix group helpers when {@link SessionStartMessage.mixAvailable} is not `true`. */
 export const MIX_REQUIRES_VOICE_PLUS_DATA =
   "Mix APIs require sessionMode 'voice+data' (voice tracks and a sync data channel)";
+
+/** Thrown by TTS pose helpers when {@link SessionStartMessage.ttsPoseAvailable} is not `true`. */
+export const TTS_POSE_REQUIRES_VOICE =
+  "TTS pose APIs require voice or voice+data (not data-only)";
 
 /** Log severity forwarded to the runner parent process. */
 export type AgentLogLevel = "debug" | "info" | "warn" | "error";

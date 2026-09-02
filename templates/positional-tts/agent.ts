@@ -1,8 +1,8 @@
 /**
  * Positional TTS template — each listener hears TTS orbiting their own pose.
  *
- * Requires Voice+Data runner mode ({@link isMixAvailable}). Mix APIs throw
- * `MIX_REQUIRES_VOICE_PLUS_DATA` otherwise.
+ * Requires voice or Voice+Data runner mode ({@link isTtsPoseAvailable}). Mix group
+ * APIs still require Voice+Data ({@link isMixAvailable}).
  *
  * Build:
  *   npx @voicethere/agent build --entry templates/positional-tts/agent.ts
@@ -11,7 +11,7 @@ import {
   agentLog,
   clearTtsPose,
   defineAgent,
-  isMixAvailable,
+  isTtsPoseAvailable,
   parseChatText,
   setPositionalMixing,
   setTtsPose,
@@ -66,15 +66,11 @@ defineAgent({
   onSessionStart(ctx) {
     const { sessionId } = ctx;
 
-    if (!isMixAvailable(ctx)) {
+    if (!isTtsPoseAvailable(ctx)) {
       agentLog(
         "warn",
-        "positional-tts requires Voice+Data runner mode — mix APIs unavailable",
+        "positional-tts requires voice or Voice+Data — TTS pose APIs unavailable",
         sessionId,
-      );
-      speak(
-        sessionId,
-        "This demo needs Voice and Data channels. Enable Voice+Data in runner settings.",
       );
       return;
     }

@@ -8,6 +8,7 @@ export type {
 export {
   ALLOWED_CHILD_ENV_KEYS,
   MIX_REQUIRES_VOICE_PLUS_DATA,
+  TTS_POSE_REQUIRES_VOICE,
   type AgentErrorMessage,
   type AgentLogLevel,
   type AgentLogMessage,
@@ -49,6 +50,7 @@ export {
   defineAgent,
   disconnectClient,
   isMixAvailable,
+  isTtsPoseAvailable,
   parseChatText,
   pauseRecording,
   removeClientFromMix,

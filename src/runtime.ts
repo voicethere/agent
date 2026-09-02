@@ -21,7 +21,10 @@ import type {
   SttControlResult,
   WebhookMessage,
 } from "./protocol.js";
-import { MIX_REQUIRES_VOICE_PLUS_DATA } from "./protocol.js";
+import {
+  MIX_REQUIRES_VOICE_PLUS_DATA,
+  TTS_POSE_REQUIRES_VOICE,
+} from "./protocol.js";
 import { SessionSerialQueue } from "./session-serial-queue.js";
 
 export const SESSION_START_INIT_DELAY_ENABLED_ENV =
@@ -35,8 +38,10 @@ export interface SessionContext {
   env: Record<string, string>;
   /** `true` when the runner advertises conversation recording for this project. */
   recordingAvailable: boolean;
-  /** `true` when the runner session is Voice+Data and mix APIs are available. */
+  /** `true` when the runner session is Voice+Data and mix group APIs are available. */
   mixAvailable: boolean;
+  /** `true` when TTS pose / listener pose APIs are available (voice or Voice+Data). */
+  ttsPoseAvailable: boolean;
 }
 
 export interface SpeechContext {
@@ -251,6 +256,8 @@ const peerEnvBySessionId = new Map<string, Record<string, string>>();
 const recordingAvailableBySessionId = new Map<string, boolean>();
 /** Cached from `session_start.mixAvailable` until `session_end`. */
 const mixAvailableBySessionId = new Map<string, boolean>();
+/** Cached from `session_start.ttsPoseAvailable` until `session_end`. */
+const ttsPoseAvailableBySessionId = new Map<string, boolean>();
 /** Sessions that received `session_end`; `speak()` becomes a no-op when no live gen. */
 const endedSessionIds = new Set<string>();
 
@@ -342,6 +349,19 @@ function isMixAvailableInProcess(): boolean {
 function assertMixAvailable(): void {
   if (!isMixAvailableInProcess()) {
     throw new Error(MIX_REQUIRES_VOICE_PLUS_DATA);
+  }
+}
+
+function isTtsPoseAvailableInProcess(): boolean {
+  for (const available of ttsPoseAvailableBySessionId.values()) {
+    if (available) return true;
+  }
+  return false;
+}
+
+function assertTtsPoseAvailable(): void {
+  if (!isTtsPoseAvailableInProcess()) {
+    throw new Error(TTS_POSE_REQUIRES_VOICE);
   }
 }
 
@@ -579,6 +599,10 @@ async function handleParentMessage(
         message.sessionId,
         message.mixAvailable ?? false,
       );
+      ttsPoseAvailableBySessionId.set(
+        message.sessionId,
+        message.ttsPoseAvailable ?? false,
+      );
       const sessionStartInitDelayMs = resolveSessionStartInitDelayMs();
       if (sessionStartInitDelayMs > 0) {
         await new Promise((resolve) =>
@@ -590,6 +614,7 @@ async function handleParentMessage(
         env: message.env,
         recordingAvailable: message.recordingAvailable ?? false,
         mixAvailable: message.mixAvailable ?? false,
+        ttsPoseAvailable: message.ttsPoseAvailable ?? false,
       });
       sendParentMessage({
         type: "session_start_ack",
@@ -635,6 +660,7 @@ async function handleParentMessage(
       peerEnvBySessionId.delete(message.sessionId);
       recordingAvailableBySessionId.delete(message.sessionId);
       mixAvailableBySessionId.delete(message.sessionId);
+      ttsPoseAvailableBySessionId.delete(message.sessionId);
       await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
         sessionId: message.sessionId,
       });
@@ -871,6 +897,7 @@ export function resetAgentIpcStateForTests(): void {
   peerEnvBySessionId.clear();
   recordingAvailableBySessionId.clear();
   mixAvailableBySessionId.clear();
+  ttsPoseAvailableBySessionId.clear();
   inboundQueueAuthority = null;
   for (const [requestId, pending] of pendingRecordingAcks) {
     clearTimeout(pending.timer);
@@ -895,11 +922,45 @@ export function isMixAvailable(ctx: SessionContext): boolean {
   return ctx.mixAvailable;
 }
 
+/** True when {@link SessionStartMessage.ttsPoseAvailable} was set for the session. */
+export function isTtsPoseAvailable(ctx: SessionContext): boolean {
+  return ctx.ttsPoseAvailable;
+}
+
 async function sendMixControl(
   action: MixControlAction,
   payload: Omit<MixControlMessage, "type" | "action" | "requestId">,
 ): Promise<MixControlResult> {
   assertMixAvailable();
+
+  const requestId = randomUUID();
+
+  if (!isVoicethereAgentChild()) {
+    return { ok: true, reason: "local_mock", requestId };
+  }
+
+  return new Promise<MixControlResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingMixAcks.delete(requestId);
+      resolve({ ok: false, reason: "timeout", requestId });
+    }, MIX_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingMixAcks.set(requestId, { resolve, timer });
+
+    sendParentMessage({
+      type: "mix_control",
+      action,
+      requestId,
+      ...payload,
+    });
+  });
+}
+
+async function sendTtsPoseControl(
+  action: MixControlAction,
+  payload: Omit<MixControlMessage, "type" | "action" | "requestId">,
+): Promise<MixControlResult> {
+  assertTtsPoseAvailable();
 
   const requestId = randomUUID();
 
@@ -988,14 +1049,14 @@ export function setClientPose(
   clientId: string,
   pose: MixPose,
 ): Promise<MixControlResult> {
-  return sendMixControl("set_pose", { clientId, pose });
+  return sendTtsPoseControl("set_pose", { clientId, pose });
 }
 
-/** Enable or disable live pose-based panning (Voice+Data only). */
+/** Enable or disable live pose-based panning (voice or Voice+Data). */
 export function setPositionalMixing(
   enabled: boolean,
 ): Promise<MixControlResult> {
-  return sendMixControl("set_positional", { enabled });
+  return sendTtsPoseControl("set_positional", { enabled });
 }
 
 /** Set named placement for client sources when positional mixing is off. */
@@ -1009,7 +1070,7 @@ export function setDefaultMixPlacement(
 export function setTtsMixPlacement(
   placement: MixPlacement,
 ): Promise<MixControlResult> {
-  return sendMixControl("set_tts_placement", { placement });
+  return sendTtsPoseControl("set_tts_placement", { placement });
 }
 
 /** Set a live world-space pose for the TTS speaker (positional mixing on). */
@@ -1017,12 +1078,12 @@ export function setTtsPose(
   sessionId: string,
   pose: MixPose,
 ): Promise<MixControlResult> {
-  return sendMixControl("set_tts_pose", { clientId: sessionId, pose });
+  return sendTtsPoseControl("set_tts_pose", { clientId: sessionId, pose });
 }
 
 /** Clear the live TTS pose for one client; named placement applies again. */
 export function clearTtsPose(sessionId: string): Promise<MixControlResult> {
-  return sendMixControl("clear_tts_pose", { clientId: sessionId });
+  return sendTtsPoseControl("clear_tts_pose", { clientId: sessionId });
 }
 
 /**

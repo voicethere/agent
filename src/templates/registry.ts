@@ -84,6 +84,15 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     ],
   },
   {
+    id: "positional-tts",
+    entry: "positional-tts/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    description:
+      "Voice+Data demo — TTS speaker orbits each listener with per-client setTtsPose.",
+    sourceFiles: ["positional-tts/agent.ts", "positional-tts/orbit.ts"],
+  },
+  {
     id: "webhooks",
     entry: "webhooks.ts",
     kind: "product",
@@ -136,6 +145,15 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     description:
       "Redis-backed world buffer sync for redis-sync-smoke (Advanced tier + project Redis).",
     sourceFiles: ["redis-sync/agent.ts", "redis-sync/world-layout.ts"],
+  },
+  {
+    id: "mix-smoke",
+    entry: "mix-smoke.ts",
+    kind: "e2e",
+    seedOnCreate: false,
+    description:
+      "Positional mix DC commands for voice-data-mix-smoke (Voice+Data, shared child).",
+    sourceFiles: ["mix-smoke.ts"],
   },
 ] as const;
 

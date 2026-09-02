@@ -7,11 +7,23 @@ import type {
   AgentLogLevel,
   AgentLogMessage,
   DataChannelKind,
+  MixControlAckMessage,
+  MixControlAction,
+  MixControlMessage,
+  MixControlResult,
+  MixPlacement,
+  MixPose,
   ParentToChildMessage,
   RecordingControlAckMessage,
   RecordingControlAction,
   RecordingControlResult,
+  SttControlAckMessage,
+  SttControlResult,
   WebhookMessage,
+} from "./protocol.js";
+import {
+  MIX_REQUIRES_VOICE_PLUS_DATA,
+  TTS_POSE_REQUIRES_VOICE,
 } from "./protocol.js";
 import { SessionSerialQueue } from "./session-serial-queue.js";
 
@@ -26,6 +38,10 @@ export interface SessionContext {
   env: Record<string, string>;
   /** `true` when the runner advertises conversation recording for this project. */
   recordingAvailable: boolean;
+  /** `true` when the runner session is Voice+Data and mix group APIs are available. */
+  mixAvailable: boolean;
+  /** `true` when TTS pose / listener pose APIs are available (voice or Voice+Data). */
+  ttsPoseAvailable: boolean;
 }
 
 export interface SpeechContext {
@@ -136,6 +152,18 @@ function isRecordingControlAckMessage(
   );
 }
 
+function isMixControlAckMessage(value: unknown): value is MixControlAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return msg.type === "mix_control_ack" && typeof msg.requestId === "string";
+}
+
+function isSttControlAckMessage(value: unknown): value is SttControlAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return msg.type === "stt_control_ack" && typeof msg.requestId === "string";
+}
+
 function isWebhookMessage(value: unknown): value is WebhookMessage {
   if (!value || typeof value !== "object") return false;
   const msg = value as {
@@ -194,12 +222,20 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "data_channel_binary" ||
     msg.type === "idle_timeout" ||
     msg.type === "recording_control_ack" ||
+    msg.type === "mix_control_ack" ||
+    msg.type === "stt_control_ack" ||
     msg.type === "webhook"
   );
 }
 
-/** Parent IPC tied to a `sessionId` (excludes process-wide `webhook`). */
-type SessionScopedParentMessage = Exclude<ParentToChildMessage, WebhookMessage>;
+/** Parent IPC tied to a `sessionId` (excludes process-wide `webhook` and control acks). */
+type SessionScopedParentMessage = Exclude<
+  ParentToChildMessage,
+  | WebhookMessage
+  | RecordingControlAckMessage
+  | MixControlAckMessage
+  | SttControlAckMessage
+>;
 
 function isSessionScopedParentMessage(
   value: unknown,
@@ -218,6 +254,10 @@ function parseDataChannelPayload(raw: string): unknown {
 const peerEnvBySessionId = new Map<string, Record<string, string>>();
 /** Cached from `session_start.recordingAvailable` until `session_end`. */
 const recordingAvailableBySessionId = new Map<string, boolean>();
+/** Cached from `session_start.mixAvailable` until `session_end`. */
+const mixAvailableBySessionId = new Map<string, boolean>();
+/** Cached from `session_start.ttsPoseAvailable` until `session_end`. */
+const ttsPoseAvailableBySessionId = new Map<string, boolean>();
 /** Sessions that received `session_end`; `speak()` becomes a no-op when no live gen. */
 const endedSessionIds = new Set<string>();
 
@@ -231,6 +271,22 @@ type PendingRecordingAck = {
 
 const pendingRecordingAcks = new Map<string, PendingRecordingAck>();
 
+const MIX_CONTROL_ACK_TIMEOUT_MS = 5000;
+const STT_CONTROL_ACK_TIMEOUT_MS = 5000;
+
+type PendingMixAck = {
+  resolve: (result: MixControlResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+type PendingSttAck = {
+  resolve: (result: SttControlResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const pendingMixAcks = new Map<string, PendingMixAck>();
+const pendingSttAcks = new Map<string, PendingSttAck>();
+
 function handleRecordingControlAck(message: RecordingControlAckMessage): void {
   const pending = pendingRecordingAcks.get(message.requestId);
   if (!pending) return;
@@ -241,6 +297,72 @@ function handleRecordingControlAck(message: RecordingControlAckMessage): void {
     reason: message.reason,
     requestId: message.requestId,
   });
+}
+
+function handleMixControlAck(message: MixControlAckMessage): void {
+  const pending = pendingMixAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingMixAcks.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    reason: message.reason,
+    requestId: message.requestId,
+  });
+}
+
+function handleSttControlAck(message: SttControlAckMessage): void {
+  const pending = pendingSttAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingSttAcks.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    reason: message.reason,
+    requestId: message.requestId,
+  });
+}
+
+function clearPendingMixAcks(reason: string): void {
+  for (const [requestId, pending] of pendingMixAcks) {
+    clearTimeout(pending.timer);
+    pendingMixAcks.delete(requestId);
+    pending.resolve({ ok: false, reason, requestId });
+  }
+}
+
+function clearPendingSttAcks(reason: string): void {
+  for (const [requestId, pending] of pendingSttAcks) {
+    clearTimeout(pending.timer);
+    pendingSttAcks.delete(requestId);
+    pending.resolve({ ok: false, reason, requestId });
+  }
+}
+
+function isMixAvailableInProcess(): boolean {
+  for (const available of mixAvailableBySessionId.values()) {
+    if (available) return true;
+  }
+  return false;
+}
+
+function assertMixAvailable(): void {
+  if (!isMixAvailableInProcess()) {
+    throw new Error(MIX_REQUIRES_VOICE_PLUS_DATA);
+  }
+}
+
+function isTtsPoseAvailableInProcess(): boolean {
+  for (const available of ttsPoseAvailableBySessionId.values()) {
+    if (available) return true;
+  }
+  return false;
+}
+
+function assertTtsPoseAvailable(): void {
+  if (!isTtsPoseAvailableInProcess()) {
+    throw new Error(TTS_POSE_REQUIRES_VOICE);
+  }
 }
 
 function clearPendingRecordingAcksForSession(
@@ -351,6 +473,15 @@ export function allowOutboundForSession(sessionId?: string): boolean {
 }
 
 function sendParentMessage(message: unknown): void {
+  const msgType =
+    message && typeof message === "object" && "type" in message
+      ? (message as { type?: string }).type
+      : undefined;
+  if (msgType === "mix_control" || msgType === "stt_control") {
+    process.send?.(message as never);
+    return;
+  }
+
   const sessionId =
     message &&
     typeof message === "object" &&
@@ -464,6 +595,14 @@ async function handleParentMessage(
         message.sessionId,
         message.recordingAvailable ?? false,
       );
+      mixAvailableBySessionId.set(
+        message.sessionId,
+        message.mixAvailable ?? false,
+      );
+      ttsPoseAvailableBySessionId.set(
+        message.sessionId,
+        message.ttsPoseAvailable ?? false,
+      );
       const sessionStartInitDelayMs = resolveSessionStartInitDelayMs();
       if (sessionStartInitDelayMs > 0) {
         await new Promise((resolve) =>
@@ -474,6 +613,8 @@ async function handleParentMessage(
         sessionId: message.sessionId,
         env: message.env,
         recordingAvailable: message.recordingAvailable ?? false,
+        mixAvailable: message.mixAvailable ?? false,
+        ttsPoseAvailable: message.ttsPoseAvailable ?? false,
       });
       sendParentMessage({
         type: "session_start_ack",
@@ -518,6 +659,8 @@ async function handleParentMessage(
       clearPendingRecordingAcksForSession(message.sessionId, "session_ended");
       peerEnvBySessionId.delete(message.sessionId);
       recordingAvailableBySessionId.delete(message.sessionId);
+      mixAvailableBySessionId.delete(message.sessionId);
+      ttsPoseAvailableBySessionId.delete(message.sessionId);
       await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
         sessionId: message.sessionId,
       });
@@ -547,6 +690,14 @@ export function defineAgent(handlers: AgentHandlers): void {
   process.on("message", (message: unknown) => {
     if (isRecordingControlAckMessage(message)) {
       handleRecordingControlAck(message);
+      return;
+    }
+    if (isMixControlAckMessage(message)) {
+      handleMixControlAck(message);
+      return;
+    }
+    if (isSttControlAckMessage(message)) {
+      handleSttControlAck(message);
       return;
     }
     if (isWebhookMessage(message)) {
@@ -745,11 +896,15 @@ export function resetAgentIpcStateForTests(): void {
   endedSessionIds.clear();
   peerEnvBySessionId.clear();
   recordingAvailableBySessionId.clear();
+  mixAvailableBySessionId.clear();
+  ttsPoseAvailableBySessionId.clear();
   inboundQueueAuthority = null;
   for (const [requestId, pending] of pendingRecordingAcks) {
     clearTimeout(pending.timer);
     pendingRecordingAcks.delete(requestId);
   }
+  clearPendingMixAcks("reset");
+  clearPendingSttAcks("reset");
 }
 
 /** Ask the runner parent to synthesize speech for the session. */
@@ -760,6 +915,190 @@ export function speak(sessionId: string, text: string): void {
 /** True when {@link SessionStartMessage.recordingAvailable} was set for the session. */
 export function isRecordingAvailable(ctx: SessionContext): boolean {
   return ctx.recordingAvailable;
+}
+
+/** True when {@link SessionStartMessage.mixAvailable} was set for the session. */
+export function isMixAvailable(ctx: SessionContext): boolean {
+  return ctx.mixAvailable;
+}
+
+/** True when {@link SessionStartMessage.ttsPoseAvailable} was set for the session. */
+export function isTtsPoseAvailable(ctx: SessionContext): boolean {
+  return ctx.ttsPoseAvailable;
+}
+
+async function sendMixControl(
+  action: MixControlAction,
+  payload: Omit<MixControlMessage, "type" | "action" | "requestId">,
+): Promise<MixControlResult> {
+  assertMixAvailable();
+
+  const requestId = randomUUID();
+
+  if (!isVoicethereAgentChild()) {
+    return { ok: true, reason: "local_mock", requestId };
+  }
+
+  return new Promise<MixControlResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingMixAcks.delete(requestId);
+      resolve({ ok: false, reason: "timeout", requestId });
+    }, MIX_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingMixAcks.set(requestId, { resolve, timer });
+
+    sendParentMessage({
+      type: "mix_control",
+      action,
+      requestId,
+      ...payload,
+    });
+  });
+}
+
+async function sendTtsPoseControl(
+  action: MixControlAction,
+  payload: Omit<MixControlMessage, "type" | "action" | "requestId">,
+): Promise<MixControlResult> {
+  assertTtsPoseAvailable();
+
+  const requestId = randomUUID();
+
+  if (!isVoicethereAgentChild()) {
+    return { ok: true, reason: "local_mock", requestId };
+  }
+
+  return new Promise<MixControlResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingMixAcks.delete(requestId);
+      resolve({ ok: false, reason: "timeout", requestId });
+    }, MIX_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingMixAcks.set(requestId, { resolve, timer });
+
+    sendParentMessage({
+      type: "mix_control",
+      action,
+      requestId,
+      ...payload,
+    });
+  });
+}
+
+async function sendSttControl(options: {
+  enabled: boolean;
+  clientId?: string;
+  sessionId?: string;
+}): Promise<SttControlResult> {
+  const requestId = randomUUID();
+
+  if (!isVoicethereAgentChild()) {
+    return { ok: true, reason: "local_mock", requestId };
+  }
+
+  return new Promise<SttControlResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingSttAcks.delete(requestId);
+      resolve({ ok: false, reason: "timeout", requestId });
+    }, STT_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingSttAcks.set(requestId, { resolve, timer });
+
+    sendParentMessage({
+      type: "stt_control",
+      requestId,
+      enabled: options.enabled,
+      ...(options.clientId ? { clientId: options.clientId } : {}),
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    });
+  });
+}
+
+/** Create a mix group with initial members (Voice+Data only). */
+export function createMixGroup(options: {
+  id: string;
+  clientIds: string[];
+}): Promise<MixControlResult> {
+  return sendMixControl("create_group", {
+    groupId: options.id,
+    clientIds: [...options.clientIds],
+  });
+}
+
+/**
+ * Move a client into a mix group (exclusive — removed from any previous group).
+ * `clientId` is the orchestrator/browser peer id ({@link SessionContext.sessionId}).
+ */
+export function addClientToMix(
+  groupId: string,
+  clientId: string,
+): Promise<MixControlResult> {
+  return sendMixControl("add_client", { groupId, clientId });
+}
+
+/** Remove a client from a mix group (ungrouped — hears nobody). */
+export function removeClientFromMix(
+  groupId: string,
+  clientId: string,
+): Promise<MixControlResult> {
+  return sendMixControl("remove_client", { groupId, clientId });
+}
+
+/** Update a client's 6DOF pose for positional mixing. */
+export function setClientPose(
+  clientId: string,
+  pose: MixPose,
+): Promise<MixControlResult> {
+  return sendTtsPoseControl("set_pose", { clientId, pose });
+}
+
+/** Enable or disable live pose-based panning (voice or Voice+Data). */
+export function setPositionalMixing(
+  enabled: boolean,
+): Promise<MixControlResult> {
+  return sendTtsPoseControl("set_positional", { enabled });
+}
+
+/** Set named placement for client sources when positional mixing is off. */
+export function setDefaultMixPlacement(
+  placement: MixPlacement,
+): Promise<MixControlResult> {
+  return sendMixControl("set_default_placement", { placement });
+}
+
+/** Set named placement for agent TTS in the mix output. */
+export function setTtsMixPlacement(
+  placement: MixPlacement,
+): Promise<MixControlResult> {
+  return sendTtsPoseControl("set_tts_placement", { placement });
+}
+
+/** Set a live world-space pose for the TTS speaker (positional mixing on). */
+export function setTtsPose(
+  sessionId: string,
+  pose: MixPose,
+): Promise<MixControlResult> {
+  return sendTtsPoseControl("set_tts_pose", { clientId: sessionId, pose });
+}
+
+/** Clear the live TTS pose for one client; named placement applies again. */
+export function clearTtsPose(sessionId: string): Promise<MixControlResult> {
+  return sendTtsPoseControl("clear_tts_pose", { clientId: sessionId });
+}
+
+/**
+ * Enable or disable STT for one client or all connected clients.
+ *
+ * When `clientId` is omitted, the runner applies the change to every client.
+ * `clientId` matches {@link SessionContext.sessionId}. Optional `sessionId` is
+ * forwarded to the runner when provided (same peer id for single-client scope).
+ */
+export function setSttEnabled(options: {
+  enabled: boolean;
+  clientId?: string;
+  sessionId?: string;
+}): Promise<SttControlResult> {
+  return sendSttControl(options);
 }
 
 async function sendRecordingControl(

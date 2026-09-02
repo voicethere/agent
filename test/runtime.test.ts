@@ -203,6 +203,8 @@ describe("defineAgent", () => {
           BUILD_ID: "build-1",
         },
         recordingAvailable: false,
+        mixAvailable: false,
+        ttsPoseAvailable: false,
       });
       expect(capture.send).toHaveBeenCalledWith({
         type: "session_start_ack",
@@ -241,6 +243,8 @@ describe("defineAgent", () => {
         sessionId: "peer-delay-default",
         env: { SESSION_ID: "peer-delay-default" },
         recordingAvailable: false,
+        mixAvailable: false,
+        ttsPoseAvailable: false,
       });
     } finally {
       if (originalEnabled === undefined) {
@@ -287,6 +291,8 @@ describe("defineAgent", () => {
         sessionId: "peer-delay-custom",
         env: { SESSION_ID: "peer-delay-custom" },
         recordingAvailable: false,
+        mixAvailable: false,
+        ttsPoseAvailable: false,
       });
     } finally {
       if (originalEnabled === undefined) {
@@ -326,6 +332,8 @@ describe("defineAgent", () => {
           sessionId: "peer-delay-disabled",
           env: { SESSION_ID: "peer-delay-disabled" },
           recordingAvailable: false,
+          mixAvailable: false,
+          ttsPoseAvailable: false,
         });
       });
     } finally {
@@ -1042,6 +1050,7 @@ describe("recording control", () => {
       sessionId: "peer-1",
       env: { SESSION_ID: "peer-1" },
       recordingAvailable: true,
+      mixAvailable: false,
     });
     await vi.waitFor(() =>
       expect(capture.send).toHaveBeenCalledWith(
@@ -1093,6 +1102,7 @@ describe("recording control", () => {
       sessionId: "peer-1",
       env: { SESSION_ID: "peer-1" },
       recordingAvailable: true,
+      mixAvailable: false,
     });
     await vi.waitFor(() =>
       expect(capture.send).toHaveBeenCalledWith(
@@ -1247,6 +1257,7 @@ describe("recording control", () => {
       sessionId: "peer-1",
       env: { SESSION_ID: "peer-1", PEER_ID: "p1" },
       recordingAvailable: true,
+      mixAvailable: false,
     });
     await vi.waitFor(() => expect(capture.send).not.toHaveBeenCalled());
     await vi.waitFor(() => expect(onSessionEnd).toHaveBeenCalledTimes(0));
@@ -1272,6 +1283,7 @@ describe("session_start recordingAvailable", () => {
       sessionId: "peer-1",
       env: { SESSION_ID: "peer-1" },
       recordingAvailable: true,
+      mixAvailable: false,
     });
 
     await vi.waitFor(() => expect(onSessionStart).toHaveBeenCalled());
@@ -1279,6 +1291,8 @@ describe("session_start recordingAvailable", () => {
       sessionId: "peer-1",
       env: { SESSION_ID: "peer-1" },
       recordingAvailable: true,
+      mixAvailable: false,
+      ttsPoseAvailable: false,
     });
     capture.restore();
   });
@@ -1299,6 +1313,8 @@ describe("session_start recordingAvailable", () => {
       sessionId: "peer-1",
       env: { SESSION_ID: "peer-1" },
       recordingAvailable: false,
+      mixAvailable: false,
+      ttsPoseAvailable: false,
     });
     capture.restore();
   });

@@ -37,6 +37,7 @@ describe("agent template registry", () => {
         "echo-smoke",
         "game-sync",
         "game-sync-smoke",
+        "mix-smoke",
         "positional-tts",
         "recording-consent",
         "redis-sync",
@@ -55,7 +56,7 @@ describe("agent template registry", () => {
 
     const e2e = listTemplates({ kind: "e2e" });
     expect(e2e.every((template) => template.kind === "e2e")).toBe(true);
-    expect(e2e).toHaveLength(4);
+    expect(e2e).toHaveLength(5);
   });
 
   it("throws for unknown template ids", () => {

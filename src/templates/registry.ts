@@ -146,6 +146,15 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
       "Redis-backed world buffer sync for redis-sync-smoke (Advanced tier + project Redis).",
     sourceFiles: ["redis-sync/agent.ts", "redis-sync/world-layout.ts"],
   },
+  {
+    id: "mix-smoke",
+    entry: "mix-smoke.ts",
+    kind: "e2e",
+    seedOnCreate: false,
+    description:
+      "Positional mix DC commands for voice-data-mix-smoke (Voice+Data, shared child).",
+    sourceFiles: ["mix-smoke.ts"],
+  },
 ] as const;
 
 export type AgentTemplateId = (typeof AGENT_TEMPLATES)[number]["id"];

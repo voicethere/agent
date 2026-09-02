@@ -192,8 +192,8 @@ describe("mix control", () => {
       () => setDefaultMixPlacement("left"),
       () => setTtsMixPlacement("right"),
       () => setClientPose("peer-2", pose),
-      () => setTtsPose(pose),
-      () => clearTtsPose(),
+      () => setTtsPose("peer-2", pose),
+      () => clearTtsPose("peer-2"),
     ];
 
     const expectedActions = [

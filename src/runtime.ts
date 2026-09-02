@@ -1013,13 +1013,16 @@ export function setTtsMixPlacement(
 }
 
 /** Set a live world-space pose for the TTS speaker (positional mixing on). */
-export function setTtsPose(pose: MixPose): Promise<MixControlResult> {
-  return sendMixControl("set_tts_pose", { pose });
+export function setTtsPose(
+  sessionId: string,
+  pose: MixPose,
+): Promise<MixControlResult> {
+  return sendMixControl("set_tts_pose", { clientId: sessionId, pose });
 }
 
-/** Clear the live TTS pose; named placement applies again. */
-export function clearTtsPose(): Promise<MixControlResult> {
-  return sendMixControl("clear_tts_pose", {});
+/** Clear the live TTS pose for one client; named placement applies again. */
+export function clearTtsPose(sessionId: string): Promise<MixControlResult> {
+  return sendMixControl("clear_tts_pose", { clientId: sessionId });
 }
 
 /**

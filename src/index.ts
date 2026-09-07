@@ -96,6 +96,7 @@ export {
   type SessionContext,
   type SpeechContext,
   type SpeechEventContext,
+  type UserLanguageContext,
   type WebhookContext,
   type PlayOptions,
   type AudioPosition,

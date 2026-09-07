@@ -32,7 +32,7 @@ Before deploying to VoiceThere, build your bundle and run static checks:
 npx @voicethere/agent verify
 ```
 
-This runs a short checklist: Node version, bundle build, bundle presence, `defineAgent(...)` registration, and at least one supported callback (`onSpeechEvent`, `onUserSpeechFinal`, `onDataChannelMessage`, or `onDataChannelBinary`).
+This runs a short checklist: Node version, bundle build, bundle presence, `defineAgent(...)` registration, and at least one supported callback (`onSpeechEvent`, `onUserSpeechFinal`, `onUserLanguage`, `onDataChannelMessage`, or `onDataChannelBinary`).
 
 For sandbox startup validation (without full voice/WebRTC E2E), use:
 
@@ -180,15 +180,15 @@ On plans that include project Redis, the runner injects **`AGENT_REDIS_URL`** in
 
 For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in project settings. The runner forwards the exact request bytes on process-wide **`onWebhook`** IPC (not session-queued). Verify HMAC on `ctx.body` before `JSON.parse` — VoiceThere does not verify signatures in the SDK. See [`templates/webhooks.ts`](./templates/webhooks.ts).
 
-| Export                                                                    | Purpose                                                                                         |
-| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `defineAgent`                                                             | Register `onAgentStart`, `onWebhook`, `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onSessionEnd` |
-| `SpeechEvent`, `SpeechEventType`                                          | Re-exported **types** from `@node-webrtc-rust/sdk/voice`                                        |
-| `SPEECH_EVENT_TYPE`                                                       | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)           |
-| `speak`                                                                   | Request parent TTS                                                                              |
-| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording` | Request parent conversation recording control                                                   |
-| `agentLog`                                                                | Forward structured logs to parent                                                               |
-| `ParentToChildMessage` / `ChildToParentMessage`                           | IPC contract shared with the VoiceThere agent runner                                            |
+| Export                                                                    | Purpose                                                                                                                        |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `defineAgent`                                                             | Register `onAgentStart`, `onWebhook`, `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onUserLanguage`, `onSessionEnd` |
+| `SpeechEvent`, `SpeechEventType`                                          | Re-exported **types** from `@node-webrtc-rust/sdk/voice`                                                                       |
+| `SPEECH_EVENT_TYPE`                                                       | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                                          |
+| `speak`                                                                   | Request parent TTS                                                                                                             |
+| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording` | Request parent conversation recording control                                                                                  |
+| `agentLog`                                                                | Forward structured logs to parent                                                                                              |
+| `ParentToChildMessage` / `ChildToParentMessage`                           | IPC contract shared with the VoiceThere agent runner                                                                           |
 
 ### Runner runtime subpath (minimal shared sandbox API)
 
@@ -215,12 +215,13 @@ Forwarded from the runner voice pipeline as SDK `SpeechEvent` payloads on `speec
 | `user_speaking_start` / `user_speaking_end`   | UI state, turn-taking                                   |
 | `user_speech_partial`                         | Live captions, early barge-in logic                     |
 | `user_speech_final`                           | Primary turn boundary (`onUserSpeechFinal` convenience) |
+| `user_language`                               | Detected ISO 639-1 code (`onUserLanguage` convenience)  |
 | `agent_speaking_start` / `agent_speaking_end` | Know when TTS playback starts/stops                     |
 | `barge_in`                                    | User interrupted agent playback                         |
 | `vad_triggered`, `stt_stream_*`, `user_stt_*` | Low-level pipeline hooks                                |
 | `error`                                       | Vendor or pipeline failure                              |
 
-Copy [`templates/agent.ts`](./templates/agent.ts) as a starting point — exhaustive `switch` over all 14 `SpeechEvent` types with per-peer state stubs and `agentLog` tracing.
+Copy [`templates/agent.ts`](./templates/agent.ts) as a starting point — exhaustive `switch` over speech event types with per-peer state stubs and `agentLog` tracing.
 
 ## Multiplayer / shared state
 

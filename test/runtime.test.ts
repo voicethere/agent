@@ -35,6 +35,7 @@ const SPEECH_EVENT_TYPES = [
   "user_stt_not_found",
   "user_speech_partial",
   "user_speech_final",
+  "user_language",
   "agent_speaking_start",
   "agent_speaking_end",
   "barge_in",
@@ -438,9 +439,11 @@ describe("defineAgent", () => {
       const event =
         eventType === "user_speech_final" || eventType === "user_speech_partial"
           ? { type: eventType, text: "sample" }
-          : eventType === "error"
-            ? { type: eventType, error: "vendor failed" }
-            : { type: eventType };
+          : eventType === "user_language"
+            ? { type: eventType, text: "de", language: "de" }
+            : eventType === "error"
+              ? { type: eventType, error: "vendor failed" }
+              : { type: eventType };
 
       capture.emit({
         type: "speech_event",
@@ -470,6 +473,83 @@ describe("defineAgent", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(onUserSpeechFinal).not.toHaveBeenCalled();
+  });
+
+  it("dispatches onSpeechEvent and onUserLanguage for user_language", async () => {
+    const onSpeechEvent = vi.fn();
+    const onUserLanguage = vi.fn();
+    capture = installProcessMessageCapture();
+    defineAgent({ onSpeechEvent, onUserLanguage });
+
+    capture.emit({
+      type: "speech_event",
+      sessionId: "peer-1",
+      event: { type: "user_language", text: "de", language: "de" },
+    });
+
+    await vi.waitFor(() => {
+      expect(onSpeechEvent).toHaveBeenCalledWith(
+        { sessionId: "peer-1" },
+        { type: "user_language", text: "de", language: "de" },
+      );
+      expect(onUserLanguage).toHaveBeenCalledWith({
+        sessionId: "peer-1",
+        language: "de",
+      });
+    });
+  });
+
+  it("prefers event.language over text for onUserLanguage", async () => {
+    const onUserLanguage = vi.fn();
+    capture = installProcessMessageCapture();
+    defineAgent({ onUserLanguage });
+
+    capture.emit({
+      type: "speech_event",
+      sessionId: "peer-1",
+      event: { type: "user_language", text: "ignored", language: "  es  " },
+    });
+
+    await vi.waitFor(() => {
+      expect(onUserLanguage).toHaveBeenCalledWith({
+        sessionId: "peer-1",
+        language: "es",
+      });
+    });
+  });
+
+  it("falls back to event.text when language is missing for onUserLanguage", async () => {
+    const onUserLanguage = vi.fn();
+    capture = installProcessMessageCapture();
+    defineAgent({ onUserLanguage });
+
+    capture.emit({
+      type: "speech_event",
+      sessionId: "peer-1",
+      event: { type: "user_language", text: "fr" },
+    });
+
+    await vi.waitFor(() => {
+      expect(onUserLanguage).toHaveBeenCalledWith({
+        sessionId: "peer-1",
+        language: "fr",
+      });
+    });
+  });
+
+  it("ignores user_language without language or text for onUserLanguage", async () => {
+    const onUserLanguage = vi.fn();
+    capture = installProcessMessageCapture();
+    defineAgent({ onUserLanguage });
+
+    capture.emit({
+      type: "speech_event",
+      sessionId: "peer-1",
+      event: { type: "user_language" },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(onUserLanguage).not.toHaveBeenCalled();
   });
 
   it("ignores user_speech_final without text for onUserSpeechFinal", async () => {

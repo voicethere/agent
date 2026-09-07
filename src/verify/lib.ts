@@ -8,6 +8,7 @@ export const DEFAULT_VERIFY_ENTRY = "agent.ts";
 export const VERIFY_CALLBACK_KEYS = [
   "onSpeechEvent",
   "onUserSpeechFinal",
+  "onUserLanguage",
   "onDataChannelMessage",
   "onDataChannelBinary",
   "onWebhook",

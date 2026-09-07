@@ -126,6 +126,11 @@ describe("detectVerifyCallbacks", () => {
     expect(detectVerifyCallbacks(source)).toEqual(["onWebhook"]);
   });
 
+  it("detects onUserLanguage as a valid verification callback", () => {
+    const source = "defineAgent({ onUserLanguage({ language }) {} });";
+    expect(detectVerifyCallbacks(source)).toEqual(["onUserLanguage"]);
+  });
+
   it("returns empty list when none of the verification callbacks are present", () => {
     expect(detectVerifyCallbacks("defineAgent({});")).toEqual([]);
     expect(

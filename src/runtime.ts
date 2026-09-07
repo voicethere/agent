@@ -55,6 +55,13 @@ export interface SpeechContext {
   text: string;
 }
 
+/** Spoken-language identification result (`speech.type` is `user_language`). */
+export interface UserLanguageContext {
+  sessionId: string;
+  /** ISO 639-1 code from the parent voice pipeline (`en`, `de`, …). */
+  language: string;
+}
+
 export interface SpeechEventContext {
   sessionId: string;
 }
@@ -112,6 +119,8 @@ export interface AgentHandlers {
   ) => void | Promise<void>;
   /** Convenience handler — also invoked when `speech.type` is `user_speech_final`. */
   onUserSpeechFinal?: (ctx: SpeechContext) => void | Promise<void>;
+  /** Convenience handler — also invoked when `speech.type` is `user_language`. */
+  onUserLanguage?: (ctx: UserLanguageContext) => void | Promise<void>;
   /** Alias for {@link AgentHandlers.onSessionEnd}. */
   onClientLeave?: (ctx: { sessionId: string }) => void | Promise<void>;
   onSessionEnd?: (ctx: { sessionId: string }) => void | Promise<void>;
@@ -715,6 +724,17 @@ async function handleWebhookMessage(
   }
 }
 
+function resolveUserLanguageCode(event: SpeechEvent): string | undefined {
+  const withLanguage = event as SpeechEvent & { language?: unknown };
+  const candidates = [withLanguage.language, event.text];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
 async function handleParentMessage(
   message: SessionScopedParentMessage,
   handlers: AgentHandlers,
@@ -767,6 +787,15 @@ async function handleParentMessage(
           sessionId: message.sessionId,
           text: message.event.text.trim(),
         });
+      }
+      if ((message.event.type as string) === "user_language") {
+        const language = resolveUserLanguageCode(message.event);
+        if (language) {
+          await handlers.onUserLanguage?.({
+            sessionId: message.sessionId,
+            language,
+          });
+        }
       }
       break;
     case "data_channel_message":

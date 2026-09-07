@@ -94,10 +94,11 @@ export interface SessionStartMessage {
  * Forwards one speech lifecycle event from the parent Sherpa/VAD/STT/TTS pipeline.
  *
  * The {@link SpeechEvent} shape matches `@node-webrtc-rust/sdk/voice` — see SDK docs
- * for `SpeechEventType` semantics (`user_speech_final`, `barge_in`, etc.).
+ * for `SpeechEventType` semantics (`user_speech_final`, `user_language`, `barge_in`, etc.).
  *
  * Delivered to customer code as `onSpeechEvent(ctx, message.event)`; `user_speech_final`
- * also triggers the `onUserSpeechFinal` handler when `event.text` is non-empty.
+ * also triggers the `onUserSpeechFinal` handler when `event.text` is non-empty, and
+ * `user_language` triggers `onUserLanguage` when `event.language` or `event.text` is set.
  */
 export interface SpeechEventMessage {
   type: "speech_event";

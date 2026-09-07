@@ -101,6 +101,38 @@ describe("mix-smoke command parser", () => {
     ).toBe(true);
   });
 
+  it("accepts set_tts_pose with clientId and pose", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "set_tts_pose",
+        clientId: "peer-1",
+        pose: identityPose,
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts speak with clientId and text", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "speak",
+        clientId: "peer-1",
+        text: "one two three",
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts clear_tts_pose with clientId", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "clear_tts_pose",
+        clientId: "peer-1",
+      }),
+    ).toBe(true);
+  });
+
   it("rejects non-mix type", () => {
     expect(isMixCommand({ type: "tick" })).toBe(false);
     expect(isMixCommand({ type: "mix", action: "tick" })).toBe(false);
@@ -212,6 +244,60 @@ describe("mix-smoke command parser", () => {
       isMixCommand({
         type: "mix",
         action: "get_status",
+        clientId: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects set_tts_pose with empty clientId", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "set_tts_pose",
+        clientId: "",
+        pose: identityPose,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects set_tts_pose with invalid pose", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "set_tts_pose",
+        clientId: "peer-1",
+        pose: { position: { x: 0 } },
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects speak with empty clientId", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "speak",
+        clientId: "",
+        text: "hello",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects speak with empty text", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "speak",
+        clientId: "peer-1",
+        text: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects clear_tts_pose with empty clientId", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "clear_tts_pose",
         clientId: "",
       }),
     ).toBe(false);

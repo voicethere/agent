@@ -52,6 +52,55 @@ describe("mix-smoke command parser", () => {
     expect(isMixCommand({ type: "mix", action: "list_clients" })).toBe(true);
   });
 
+  it("accepts set_global_mute with clientId and muted", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "set_global_mute",
+        clientId: "peer-1",
+        muted: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts set_global_mute with optional sttEnabled", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "set_global_mute",
+        clientId: "peer-1",
+        muted: false,
+        sttEnabled: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts set_listener_mute with listenerId, targetId, muted", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "set_listener_mute",
+        listenerId: "listener-1",
+        targetId: "target-1",
+        muted: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts get_status without clientId", () => {
+    expect(isMixCommand({ type: "mix", action: "get_status" })).toBe(true);
+  });
+
+  it("accepts get_status with clientId", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "get_status",
+        clientId: "peer-1",
+      }),
+    ).toBe(true);
+  });
+
   it("rejects non-mix type", () => {
     expect(isMixCommand({ type: "tick" })).toBe(false);
     expect(isMixCommand({ type: "mix", action: "tick" })).toBe(false);
@@ -96,6 +145,74 @@ describe("mix-smoke command parser", () => {
         type: "mix",
         action: "set_positional",
         enabled: "true",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects set_global_mute with empty clientId", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "set_global_mute",
+        clientId: "",
+        muted: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects set_global_mute without boolean muted", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "set_global_mute",
+        clientId: "peer-1",
+        muted: "true",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects set_global_mute with non-boolean sttEnabled", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "set_global_mute",
+        clientId: "peer-1",
+        muted: true,
+        sttEnabled: "yes",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects set_listener_mute with empty listenerId", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "set_listener_mute",
+        listenerId: "",
+        targetId: "target-1",
+        muted: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects set_listener_mute with empty targetId", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "set_listener_mute",
+        listenerId: "listener-1",
+        targetId: "",
+        muted: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects get_status with empty clientId", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "get_status",
+        clientId: "",
       }),
     ).toBe(false);
   });

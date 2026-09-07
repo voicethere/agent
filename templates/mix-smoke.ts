@@ -7,16 +7,22 @@
  * - `{ type: "mix", action: "set_pose", clientId, pose }`
  * - `{ type: "mix", action: "set_positional", enabled }`
  * - `{ type: "mix", action: "list_clients" }` (optional)
+ * - `{ type: "mix", action: "set_global_mute", clientId, muted, sttEnabled? }`
+ * - `{ type: "mix", action: "set_listener_mute", listenerId, targetId, muted }`
+ * - `{ type: "mix", action: "get_status", clientId? }`
  *
- * Acks: `{ type: "mix_ack", action, ok: true, ... }` or `{ ok: false, error }`.
+ * Acks: `{ type: "mix_ack", action, ok: true, statuses?, ... }` or `{ ok: false, error }`.
  * Ignores `ping` / chat strings (voice-control readiness). No TTS during smoke.
  */
 import {
   MIX_REQUIRES_VOICE_PLUS_DATA,
   createMixGroup,
   defineAgent,
+  getClientMixStatus,
   sendToClient,
   setClientPose,
+  setGlobalMute,
+  setListenerMute,
   setPositionalMixing,
 } from "@voicethere/agent";
 
@@ -38,7 +44,30 @@ export type MixCommand =
     }
   | { type: "mix"; action: "set_pose"; clientId: string; pose: MixPose }
   | { type: "mix"; action: "set_positional"; enabled: boolean }
-  | { type: "mix"; action: "list_clients" };
+  | { type: "mix"; action: "list_clients" }
+  | {
+      type: "mix";
+      action: "set_global_mute";
+      clientId: string;
+      muted: boolean;
+      sttEnabled?: boolean;
+    }
+  | {
+      type: "mix";
+      action: "set_listener_mute";
+      listenerId: string;
+      targetId: string;
+      muted: boolean;
+    }
+  | { type: "mix"; action: "get_status"; clientId?: string };
+
+export type MixClientStatus = {
+  clientId?: string;
+  globallyMuted?: boolean;
+  mutedBy?: string[];
+  sttEnabled?: boolean;
+  groupId?: string | null;
+};
 
 export type MixAck =
   | {
@@ -47,6 +76,7 @@ export type MixAck =
       ok: true;
       sessionId?: string;
       clientIds?: string[];
+      statuses?: MixClientStatus[];
     }
   | { type: "mix_ack"; action: string; ok: false; error: string };
 
@@ -87,6 +117,50 @@ export function isMixCommand(message: unknown): message is MixCommand {
       const positional = message as { enabled?: unknown };
       return typeof positional.enabled === "boolean";
     }
+    case "set_global_mute": {
+      const mute = message as {
+        clientId?: unknown;
+        muted?: unknown;
+        sttEnabled?: unknown;
+      };
+      if (
+        typeof mute.clientId !== "string" ||
+        mute.clientId.trim().length === 0 ||
+        typeof mute.muted !== "boolean"
+      ) {
+        return false;
+      }
+      if (
+        mute.sttEnabled !== undefined &&
+        typeof mute.sttEnabled !== "boolean"
+      ) {
+        return false;
+      }
+      return true;
+    }
+    case "set_listener_mute": {
+      const listener = message as {
+        listenerId?: unknown;
+        targetId?: unknown;
+        muted?: unknown;
+      };
+      return (
+        typeof listener.listenerId === "string" &&
+        listener.listenerId.trim().length > 0 &&
+        typeof listener.targetId === "string" &&
+        listener.targetId.trim().length > 0 &&
+        typeof listener.muted === "boolean"
+      );
+    }
+    case "get_status": {
+      const status = message as { clientId?: unknown };
+      if (status.clientId === undefined) {
+        return true;
+      }
+      return (
+        typeof status.clientId === "string" && status.clientId.trim().length > 0
+      );
+    }
     default:
       return false;
   }
@@ -124,7 +198,11 @@ function isQuat(
 function ackOk(
   sessionId: string,
   action: string,
-  extra?: { sessionId?: string; clientIds?: string[] },
+  extra?: {
+    sessionId?: string;
+    clientIds?: string[];
+    statuses?: MixClientStatus[];
+  },
 ): void {
   sendToClient(sessionId, {
     type: "mix_ack",
@@ -197,6 +275,56 @@ async function handleMixCommand(
         return;
       }
       ackOk(sessionId, action);
+      return;
+    }
+    case "set_global_mute": {
+      if (!requireMix(sessionId, action)) return;
+      const result = await setGlobalMute({
+        clientId: command.clientId,
+        muted: command.muted,
+        ...(command.sttEnabled !== undefined
+          ? { sttEnabled: command.sttEnabled }
+          : {}),
+      });
+      if (!result.ok) {
+        ackError(sessionId, action, result.reason ?? "set_global_mute failed");
+        return;
+      }
+      ackOk(sessionId, action, {
+        ...(result.statuses ? { statuses: result.statuses } : {}),
+      });
+      return;
+    }
+    case "set_listener_mute": {
+      if (!requireMix(sessionId, action)) return;
+      const result = await setListenerMute({
+        listenerId: command.listenerId,
+        targetId: command.targetId,
+        muted: command.muted,
+      });
+      if (!result.ok) {
+        ackError(
+          sessionId,
+          action,
+          result.reason ?? "set_listener_mute failed",
+        );
+        return;
+      }
+      ackOk(sessionId, action, {
+        ...(result.statuses ? { statuses: result.statuses } : {}),
+      });
+      return;
+    }
+    case "get_status": {
+      if (!requireMix(sessionId, action)) return;
+      const result = await getClientMixStatus(command.clientId);
+      if (!result.ok) {
+        ackError(sessionId, action, result.reason ?? "get_status failed");
+        return;
+      }
+      ackOk(sessionId, action, {
+        ...(result.statuses ? { statuses: result.statuses } : {}),
+      });
       return;
     }
     default:

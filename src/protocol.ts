@@ -261,9 +261,9 @@ export interface PlayAckMessage {
     | string;
 }
 
-/** Lifecycle state for a clip play job (runner-defined snapshot). */
+/** Lifecycle state for a clip play job (native ClipPlayer snapshot). */
 export type PlayStatusState =
-  "queued" | "playing" | "stopped" | "completed" | "failed";
+  "buffering" | "playing" | "stopped" | "ended" | "error";
 
 /** Runner acknowledgement for a {@link PlayStatusMessage}. */
 export interface PlayStatusAckMessage {

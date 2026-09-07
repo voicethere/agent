@@ -1440,7 +1440,7 @@ async function sendPlayStatus(playId: string): Promise<GetPlayResult> {
     return {
       ok: true,
       playId,
-      status: "completed",
+      status: "ended",
       reason: "local_mock",
       requestId,
     };

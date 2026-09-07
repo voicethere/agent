@@ -308,6 +308,7 @@ function handleMixControlAck(message: MixControlAckMessage): void {
     ok: message.ok,
     reason: message.reason,
     requestId: message.requestId,
+    ...(message.statuses ? { statuses: message.statuses } : {}),
   });
 }
 
@@ -1084,6 +1085,47 @@ export function setTtsPose(
 /** Clear the live TTS pose for one client; named placement applies again. */
 export function clearTtsPose(sessionId: string): Promise<MixControlResult> {
   return sendTtsPoseControl("clear_tts_pose", { clientId: sessionId });
+}
+
+/** Mute or unmute a client globally in the mix (Voice+Data). */
+export function setGlobalMute(options: {
+  clientId: string;
+  muted: boolean;
+  sttEnabled?: boolean;
+}): Promise<MixControlResult> {
+  return sendMixControl("set_global_mute", {
+    clientId: options.clientId,
+    muted: options.muted,
+    ...(options.sttEnabled !== undefined
+      ? { sttEnabled: options.sttEnabled }
+      : {}),
+  });
+}
+
+/** Mute or unmute one listener's hear of a target client. */
+export function setListenerMute(options: {
+  listenerId: string;
+  targetId: string;
+  muted: boolean;
+}): Promise<MixControlResult> {
+  return sendMixControl("set_listener_mute", {
+    clientId: options.targetId,
+    listenerId: options.listenerId,
+    muted: options.muted,
+  });
+}
+
+/**
+ * Read mix mute/pose/group status for one client or all clients.
+ *
+ * Omit `clientId` to list every connected client.
+ */
+export function getClientMixStatus(
+  clientId?: string,
+): Promise<MixControlResult> {
+  return sendMixControl("get_status", {
+    ...(clientId ? { clientId } : {}),
+  });
 }
 
 /**

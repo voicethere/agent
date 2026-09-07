@@ -218,7 +218,24 @@ export type MixControlAction =
   | "set_default_placement"
   | "set_tts_placement"
   | "set_tts_pose"
-  | "clear_tts_pose";
+  | "clear_tts_pose"
+  | "set_global_mute"
+  | "set_listener_mute"
+  | "get_status";
+
+/** Client pose snapshot in mix status (same shape as {@link MixPose}). */
+export type ClientPose = MixPose;
+
+/** Per-client mix mute/pose/group snapshot from the runner SessionPod. */
+export type ClientMixStatus = {
+  clientId: string;
+  globallyMuted: boolean;
+  sttEnabled: boolean;
+  pose: ClientPose | null;
+  ttsPose: ClientPose | null;
+  mutedBy: string[];
+  groupId: string | null;
+};
 
 /**
  * Ask the runner parent to change mix groups, poses, or placement settings.
@@ -235,8 +252,14 @@ export interface MixControlMessage {
   groupId?: string;
   /** Peer/session ids (orchestrator session id). */
   clientIds?: string[];
-  /** Single peer/session id for add/remove/pose actions. */
+  /** Single peer/session id for add/remove/pose/mute/status actions. */
   clientId?: string;
+  /** Listener peer id for {@link set_listener_mute}. */
+  listenerId?: string;
+  /** Global or listener mute target state. */
+  muted?: boolean;
+  /** When muting globally, keep STT on for this client. */
+  sttEnabled?: boolean;
   pose?: MixPose;
   enabled?: boolean;
   placement?: MixPlacement;
@@ -249,6 +272,8 @@ export interface MixControlAckMessage {
   requestId: string;
   ok: boolean;
   reason?: "applied" | "unsupported" | "local_mock" | "timeout" | string;
+  /** Populated on successful {@link get_status} acks. */
+  statuses?: ClientMixStatus[];
 }
 
 /** Result returned by mix control helpers. */
@@ -256,6 +281,7 @@ export type MixControlResult = {
   ok: boolean;
   reason?: string;
   requestId: string;
+  statuses?: ClientMixStatus[];
 };
 
 /**

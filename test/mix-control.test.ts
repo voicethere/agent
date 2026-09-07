@@ -11,10 +11,13 @@ import {
   clearTtsPose,
   createMixGroup,
   defineAgent,
+  getClientMixStatus,
   removeClientFromMix,
   resetAgentIpcStateForTests,
   setClientPose,
   setDefaultMixPlacement,
+  setGlobalMute,
+  setListenerMute,
   setPositionalMixing,
   setSttEnabled,
   setTtsMixPlacement,
@@ -60,10 +63,21 @@ describe("protocol mix and STT IPC shapes", () => {
   it("accepts parent mix_control_ack and stt_control_ack shapes", () => {
     const mixAck: ParentToChildMessage = {
       type: "mix_control_ack",
-      action: "create_group",
+      action: "get_status",
       requestId: "req-mix",
       ok: true,
       reason: "applied",
+      statuses: [
+        {
+          clientId: "peer-1",
+          globallyMuted: false,
+          sttEnabled: true,
+          pose: null,
+          ttsPose: null,
+          mutedBy: [],
+          groupId: null,
+        },
+      ],
     };
     const sttAck: ParentToChildMessage = {
       type: "stt_control_ack",
@@ -310,6 +324,127 @@ describe("mix control", () => {
     await expect(
       createMixGroup({ id: "g1", clientIds: ["peer-1"] }),
     ).rejects.toThrow(MIX_REQUIRES_VOICE_PLUS_DATA);
+  });
+
+  it("sends setGlobalMute, setListenerMute, and getClientMixStatus IPC", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+    await startMixSession(capture, { mixAvailable: true });
+
+    const sampleStatuses = [
+      {
+        clientId: "peer-1",
+        globallyMuted: false,
+        sttEnabled: true,
+        pose: null,
+        ttsPose: null,
+        mutedBy: [],
+        groupId: null,
+      },
+    ];
+
+    const mutePromise = setGlobalMute({
+      clientId: "peer-1",
+      muted: true,
+      sttEnabled: true,
+    });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    let sent = capture.send.mock.calls.at(-1)?.[0] as {
+      type: string;
+      action: string;
+      requestId: string;
+      clientId: string;
+      muted: boolean;
+      sttEnabled: boolean;
+    };
+    expect(sent).toEqual(
+      expect.objectContaining({
+        type: "mix_control",
+        action: "set_global_mute",
+        clientId: "peer-1",
+        muted: true,
+        sttEnabled: true,
+      }),
+    );
+    capture.emit({
+      type: "mix_control_ack",
+      action: sent.action,
+      requestId: sent.requestId,
+      ok: true,
+      reason: "applied",
+    });
+    await mutePromise;
+
+    capture.send.mockClear();
+    const listenerPromise = setListenerMute({
+      listenerId: "peer-2",
+      targetId: "peer-1",
+      muted: true,
+    });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    sent = capture.send.mock.calls.at(-1)?.[0] as typeof sent;
+    expect(sent).toEqual(
+      expect.objectContaining({
+        type: "mix_control",
+        action: "set_listener_mute",
+        clientId: "peer-1",
+        listenerId: "peer-2",
+        muted: true,
+      }),
+    );
+    capture.emit({
+      type: "mix_control_ack",
+      action: sent.action,
+      requestId: sent.requestId,
+      ok: true,
+      reason: "applied",
+    });
+    await listenerPromise;
+
+    capture.send.mockClear();
+    const statusPromise = getClientMixStatus();
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    sent = capture.send.mock.calls.at(-1)?.[0] as typeof sent;
+    expect(sent).toEqual(
+      expect.objectContaining({
+        type: "mix_control",
+        action: "get_status",
+      }),
+    );
+    expect(sent.clientId).toBeUndefined();
+    capture.emit({
+      type: "mix_control_ack",
+      action: sent.action,
+      requestId: sent.requestId,
+      ok: true,
+      reason: "applied",
+      statuses: sampleStatuses,
+    });
+    await expect(statusPromise).resolves.toEqual({
+      ok: true,
+      reason: "applied",
+      requestId: sent.requestId,
+      statuses: sampleStatuses,
+    });
+
+    capture.restore();
+  });
+
+  it("resolves local_mock for mute helpers when not a forked agent child", async () => {
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+    await startMixSession(capture);
+
+    const result = await setGlobalMute({ clientId: "peer-1", muted: true });
+    expect(result).toMatchObject({ ok: true, reason: "local_mock" });
+    expect(capture.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "mix_control",
+        action: "set_global_mute",
+      }),
+    );
+    capture.restore();
   });
 });
 

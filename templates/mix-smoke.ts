@@ -13,6 +13,7 @@
  * - `{ type: "mix", action: "set_tts_pose", clientId, pose }`
  * - `{ type: "mix", action: "speak", clientId, text }`
  * - `{ type: "mix", action: "clear_tts_pose", clientId }`
+ * - `{ type: "mix", action: "play", sessionIds?, bytes?, url?, volume? }`
  *
  * Acks: `{ type: "mix_ack", action, ok: true, statuses?, ... }` or `{ ok: false, error }`.
  * Ignores `ping` / chat strings (voice-control readiness).
@@ -23,6 +24,7 @@ import {
   createMixGroup,
   defineAgent,
   getClientMixStatus,
+  play,
   sendToClient,
   setClientPose,
   setGlobalMute,
@@ -68,7 +70,15 @@ export type MixCommand =
   | { type: "mix"; action: "get_status"; clientId?: string }
   | { type: "mix"; action: "set_tts_pose"; clientId: string; pose: MixPose }
   | { type: "mix"; action: "speak"; clientId: string; text: string }
-  | { type: "mix"; action: "clear_tts_pose"; clientId: string };
+  | { type: "mix"; action: "clear_tts_pose"; clientId: string }
+  | {
+      type: "mix";
+      action: "play";
+      sessionIds?: string[];
+      bytes?: string;
+      url?: string;
+      volume?: number;
+    };
 
 export type MixClientStatus = {
   clientId?: string;
@@ -86,6 +96,7 @@ export type MixAck =
       sessionId?: string;
       clientIds?: string[];
       statuses?: MixClientStatus[];
+      playId?: string;
     }
   | { type: "mix_ack"; action: string; ok: false; error: string };
 
@@ -194,6 +205,47 @@ export function isMixCommand(message: unknown): message is MixCommand {
         clearMsg.clientId.trim().length > 0
       );
     }
+    case "play": {
+      const playMsg = message as {
+        sessionIds?: unknown;
+        bytes?: unknown;
+        url?: unknown;
+        volume?: unknown;
+      };
+      const hasBytes =
+        typeof playMsg.bytes === "string" && playMsg.bytes.trim().length > 0;
+      const hasUrl =
+        typeof playMsg.url === "string" && playMsg.url.trim().length > 0;
+      if (!hasBytes && !hasUrl) {
+        return false;
+      }
+      if (
+        playMsg.bytes !== undefined &&
+        (typeof playMsg.bytes !== "string" || playMsg.bytes.trim().length === 0)
+      ) {
+        return false;
+      }
+      if (
+        playMsg.url !== undefined &&
+        (typeof playMsg.url !== "string" || playMsg.url.trim().length === 0)
+      ) {
+        return false;
+      }
+      if (playMsg.sessionIds !== undefined) {
+        if (
+          !Array.isArray(playMsg.sessionIds) ||
+          !playMsg.sessionIds.every(
+            (id) => typeof id === "string" && id.trim().length > 0,
+          )
+        ) {
+          return false;
+        }
+      }
+      if (playMsg.volume !== undefined && typeof playMsg.volume !== "number") {
+        return false;
+      }
+      return true;
+    }
     default:
       return false;
   }
@@ -235,6 +287,7 @@ function ackOk(
     sessionId?: string;
     clientIds?: string[];
     statuses?: MixClientStatus[];
+    playId?: string;
   },
 ): void {
   sendToClient(sessionId, {
@@ -384,6 +437,24 @@ async function handleMixCommand(
         return;
       }
       ackOk(sessionId, action);
+      return;
+    }
+    case "play": {
+      const inlineUrl =
+        command.url?.trim() || "https://example.com/inline-clip.wav";
+      const result = await play({
+        url: inlineUrl,
+        ...(command.sessionIds?.length
+          ? { sessionIds: command.sessionIds }
+          : {}),
+        ...(command.bytes ? { bytes: command.bytes } : {}),
+        ...(command.volume !== undefined ? { volume: command.volume } : {}),
+      });
+      if (!result.ok || !result.playId) {
+        ackError(sessionId, action, result.reason ?? "play failed");
+        return;
+      }
+      ackOk(sessionId, action, { playId: result.playId });
       return;
     }
     default:

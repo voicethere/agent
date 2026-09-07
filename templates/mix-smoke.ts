@@ -10,12 +10,16 @@
  * - `{ type: "mix", action: "set_global_mute", clientId, muted, sttEnabled? }`
  * - `{ type: "mix", action: "set_listener_mute", listenerId, targetId, muted }`
  * - `{ type: "mix", action: "get_status", clientId? }`
+ * - `{ type: "mix", action: "set_tts_pose", clientId, pose }`
+ * - `{ type: "mix", action: "speak", clientId, text }`
+ * - `{ type: "mix", action: "clear_tts_pose", clientId }`
  *
  * Acks: `{ type: "mix_ack", action, ok: true, statuses?, ... }` or `{ ok: false, error }`.
- * Ignores `ping` / chat strings (voice-control readiness). No TTS during smoke.
+ * Ignores `ping` / chat strings (voice-control readiness).
  */
 import {
   MIX_REQUIRES_VOICE_PLUS_DATA,
+  clearTtsPose,
   createMixGroup,
   defineAgent,
   getClientMixStatus,
@@ -24,6 +28,8 @@ import {
   setGlobalMute,
   setListenerMute,
   setPositionalMixing,
+  setTtsPose,
+  speak,
 } from "@voicethere/agent";
 
 /** E2E fixture marker — rewritten before each fixture upload when needed. */
@@ -59,7 +65,10 @@ export type MixCommand =
       targetId: string;
       muted: boolean;
     }
-  | { type: "mix"; action: "get_status"; clientId?: string };
+  | { type: "mix"; action: "get_status"; clientId?: string }
+  | { type: "mix"; action: "set_tts_pose"; clientId: string; pose: MixPose }
+  | { type: "mix"; action: "speak"; clientId: string; text: string }
+  | { type: "mix"; action: "clear_tts_pose"; clientId: string };
 
 export type MixClientStatus = {
   clientId?: string;
@@ -159,6 +168,30 @@ export function isMixCommand(message: unknown): message is MixCommand {
       }
       return (
         typeof status.clientId === "string" && status.clientId.trim().length > 0
+      );
+    }
+    case "set_tts_pose": {
+      const ttsPose = message as { clientId?: unknown; pose?: unknown };
+      return (
+        typeof ttsPose.clientId === "string" &&
+        ttsPose.clientId.trim().length > 0 &&
+        isMixPose(ttsPose.pose)
+      );
+    }
+    case "speak": {
+      const speakMsg = message as { clientId?: unknown; text?: unknown };
+      return (
+        typeof speakMsg.clientId === "string" &&
+        speakMsg.clientId.trim().length > 0 &&
+        typeof speakMsg.text === "string" &&
+        speakMsg.text.trim().length > 0
+      );
+    }
+    case "clear_tts_pose": {
+      const clearMsg = message as { clientId?: unknown };
+      return (
+        typeof clearMsg.clientId === "string" &&
+        clearMsg.clientId.trim().length > 0
       );
     }
     default:
@@ -325,6 +358,32 @@ async function handleMixCommand(
       ackOk(sessionId, action, {
         ...(result.statuses ? { statuses: result.statuses } : {}),
       });
+      return;
+    }
+    case "set_tts_pose": {
+      if (!requireMix(sessionId, action)) return;
+      const result = await setTtsPose(command.clientId, command.pose);
+      if (!result.ok) {
+        ackError(sessionId, action, result.reason ?? "set_tts_pose failed");
+        return;
+      }
+      ackOk(sessionId, action);
+      return;
+    }
+    case "speak": {
+      if (!requireMix(sessionId, action)) return;
+      speak(command.clientId, command.text);
+      ackOk(sessionId, action);
+      return;
+    }
+    case "clear_tts_pose": {
+      if (!requireMix(sessionId, action)) return;
+      const result = await clearTtsPose(command.clientId);
+      if (!result.ok) {
+        ackError(sessionId, action, result.reason ?? "clear_tts_pose failed");
+        return;
+      }
+      ackOk(sessionId, action);
       return;
     }
     default:

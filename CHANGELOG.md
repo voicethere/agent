@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-07
+
+### Added
+
+- **Mix mute APIs** — `setGlobalMute`, `setListenerMute`, and `getClientMixStatus` (`MixControlMessage` IPC, `MixControlResult` acks; `get_status` acks may include optional `statuses`).
+- **`mix-smoke` DataChannel actions** — `set_global_mute`, `set_listener_mute`, and `get_status` for E2E positional-mix mute smoke tests.
+
 ## [0.7.0] - 2026-09-03
 
 ### Added

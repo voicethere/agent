@@ -26,6 +26,9 @@ export type ParentToChildMessage =
   | DataChannelBinaryMessage
   | IdleTimeoutMessage
   | RecordingControlAckMessage
+  | PlayAckMessage
+  | PlayStatusAckMessage
+  | PlayStopAckMessage
   | MixControlAckMessage
   | SttControlAckMessage
   | WebhookMessage;
@@ -39,6 +42,9 @@ export type ChildToParentMessage =
   | SessionStartAckMessage
   | SpeakMessage
   | RecordingControlMessage
+  | PlayMessage
+  | PlayStatusMessage
+  | PlayStopMessage
   | MixControlMessage
   | SttControlMessage
   | AgentLogMessage
@@ -195,6 +201,122 @@ export interface RecordingControlAckMessage {
 /** Result returned by {@link startRecording} and related helpers. */
 export type RecordingControlResult = {
   ok: boolean;
+  reason?: string;
+  requestId: string;
+};
+
+/**
+ * Ask the runner parent to fetch and play an audio clip to one or more voice clients.
+ *
+ * Media fetch and decode run in the runner parent — the sandboxed child sends IPC only.
+ * Use {@link play} instead of raw `process.send`.
+ */
+export interface PlayMessage {
+  type: "play";
+  /** Correlates with {@link PlayAckMessage.requestId}. */
+  requestId: string;
+  /** HTTPS URL the parent fetches (required unless {@link bytes} is set). */
+  url: string;
+  /**
+   * Target orchestrator session ids. Omitted or empty means all connected voice clients
+   * (parent interprets).
+   */
+  sessionIds?: string[];
+  /** Optional output gain hint (parent clamps/validates). */
+  volume?: number;
+  /** Optional small inline clip as base64 (capped in {@link play}). */
+  bytes?: string;
+}
+
+/** Ask the runner parent for the current status of a play job. */
+export interface PlayStatusMessage {
+  type: "play_status";
+  requestId: string;
+  playId: string;
+}
+
+/** Ask the runner parent to stop an in-flight or queued play job. */
+export interface PlayStopMessage {
+  type: "play_stop";
+  requestId: string;
+  playId: string;
+}
+
+/** Runner acknowledgement for a {@link PlayMessage}. */
+export interface PlayAckMessage {
+  type: "play_ack";
+  requestId: string;
+  ok: boolean;
+  playId?: string;
+  reason?:
+    | "applied"
+    | "unsupported"
+    | "data_only"
+    | "unknown_session"
+    | "fetch_failed"
+    | "decode_failed"
+    | "invalid_payload"
+    | "local_mock"
+    | "timeout"
+    | string;
+}
+
+/** Lifecycle state for a clip play job (runner-defined snapshot). */
+export type PlayStatusState =
+  "queued" | "playing" | "stopped" | "completed" | "failed";
+
+/** Runner acknowledgement for a {@link PlayStatusMessage}. */
+export interface PlayStatusAckMessage {
+  type: "play_status_ack";
+  requestId: string;
+  ok: boolean;
+  playId: string;
+  status?: PlayStatusState;
+  reason?:
+    | "applied"
+    | "unsupported"
+    | "unknown_play"
+    | "local_mock"
+    | "timeout"
+    | string;
+}
+
+/** Runner acknowledgement for a {@link PlayStopMessage}. */
+export interface PlayStopAckMessage {
+  type: "play_stop_ack";
+  requestId: string;
+  ok: boolean;
+  playId: string;
+  reason?:
+    | "applied"
+    | "unsupported"
+    | "unknown_play"
+    | "local_mock"
+    | "timeout"
+    | string;
+}
+
+/** Result returned by {@link play}. */
+export type PlayResult = {
+  ok: boolean;
+  playId?: string;
+  reason?: string;
+  requestId: string;
+};
+
+/** Result returned by {@link getPlay}. */
+export type GetPlayResult = {
+  ok: boolean;
+  playId: string;
+  status?: PlayStatusState;
+  reason?: string;
+  requestId: string;
+};
+
+/** Result returned by {@link stopPlay}. */
+export type StopPlayResult = {
+  ok: boolean;
+  playId: string;
   reason?: string;
   requestId: string;
 };

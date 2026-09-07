@@ -14,6 +14,12 @@ import type {
   MixPlacement,
   MixPose,
   ParentToChildMessage,
+  PlayAckMessage,
+  PlayResult,
+  PlayStatusAckMessage,
+  PlayStopAckMessage,
+  GetPlayResult,
+  StopPlayResult,
   RecordingControlAckMessage,
   RecordingControlAction,
   RecordingControlResult,
@@ -142,6 +148,24 @@ export interface AgentErrorContext {
   customerContext?: Record<string, unknown>;
 }
 
+function isPlayAckMessage(value: unknown): value is PlayAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return msg.type === "play_ack" && typeof msg.requestId === "string";
+}
+
+function isPlayStatusAckMessage(value: unknown): value is PlayStatusAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return msg.type === "play_status_ack" && typeof msg.requestId === "string";
+}
+
+function isPlayStopAckMessage(value: unknown): value is PlayStopAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return msg.type === "play_stop_ack" && typeof msg.requestId === "string";
+}
+
 function isRecordingControlAckMessage(
   value: unknown,
 ): value is RecordingControlAckMessage {
@@ -222,6 +246,9 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "data_channel_binary" ||
     msg.type === "idle_timeout" ||
     msg.type === "recording_control_ack" ||
+    msg.type === "play_ack" ||
+    msg.type === "play_status_ack" ||
+    msg.type === "play_stop_ack" ||
     msg.type === "mix_control_ack" ||
     msg.type === "stt_control_ack" ||
     msg.type === "webhook"
@@ -233,6 +260,9 @@ type SessionScopedParentMessage = Exclude<
   ParentToChildMessage,
   | WebhookMessage
   | RecordingControlAckMessage
+  | PlayAckMessage
+  | PlayStatusAckMessage
+  | PlayStopAckMessage
   | MixControlAckMessage
   | SttControlAckMessage
 >;
@@ -262,6 +292,10 @@ const ttsPoseAvailableBySessionId = new Map<string, boolean>();
 const endedSessionIds = new Set<string>();
 
 const RECORDING_CONTROL_ACK_TIMEOUT_MS = 5000;
+const PLAY_CONTROL_ACK_TIMEOUT_MS = 5000;
+
+/** Max decoded bytes for optional inline `bytes` on {@link play} (base64 in IPC). */
+export const PLAY_BYTES_MAX_DECODED_LENGTH = 64 * 1024;
 
 type PendingRecordingAck = {
   sessionId: string;
@@ -270,6 +304,27 @@ type PendingRecordingAck = {
 };
 
 const pendingRecordingAcks = new Map<string, PendingRecordingAck>();
+
+type PendingPlayAck = {
+  resolve: (result: PlayResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+type PendingPlayStatusAck = {
+  playId: string;
+  resolve: (result: GetPlayResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+type PendingPlayStopAck = {
+  playId: string;
+  resolve: (result: StopPlayResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const pendingPlayAcks = new Map<string, PendingPlayAck>();
+const pendingPlayStatusAcks = new Map<string, PendingPlayStatusAck>();
+const pendingPlayStopAcks = new Map<string, PendingPlayStopAck>();
 
 const MIX_CONTROL_ACK_TIMEOUT_MS = 5000;
 const STT_CONTROL_ACK_TIMEOUT_MS = 5000;
@@ -297,6 +352,74 @@ function handleRecordingControlAck(message: RecordingControlAckMessage): void {
     reason: message.reason,
     requestId: message.requestId,
   });
+}
+
+function handlePlayAck(message: PlayAckMessage): void {
+  const pending = pendingPlayAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingPlayAcks.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    ...(message.playId ? { playId: message.playId } : {}),
+    reason: message.reason,
+    requestId: message.requestId,
+  });
+}
+
+function handlePlayStatusAck(message: PlayStatusAckMessage): void {
+  const pending = pendingPlayStatusAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingPlayStatusAcks.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    playId: message.playId,
+    ...(message.status ? { status: message.status } : {}),
+    reason: message.reason,
+    requestId: message.requestId,
+  });
+}
+
+function handlePlayStopAck(message: PlayStopAckMessage): void {
+  const pending = pendingPlayStopAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingPlayStopAcks.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    playId: message.playId,
+    reason: message.reason,
+    requestId: message.requestId,
+  });
+}
+
+function clearPendingPlayAcks(reason: string): void {
+  for (const [requestId, pending] of pendingPlayAcks) {
+    clearTimeout(pending.timer);
+    pendingPlayAcks.delete(requestId);
+    pending.resolve({ ok: false, reason, requestId });
+  }
+  for (const [requestId, pending] of pendingPlayStatusAcks) {
+    clearTimeout(pending.timer);
+    pendingPlayStatusAcks.delete(requestId);
+    pending.resolve({
+      ok: false,
+      playId: pending.playId,
+      reason,
+      requestId,
+    });
+  }
+  for (const [requestId, pending] of pendingPlayStopAcks) {
+    clearTimeout(pending.timer);
+    pendingPlayStopAcks.delete(requestId);
+    pending.resolve({
+      ok: false,
+      playId: pending.playId,
+      reason,
+      requestId,
+    });
+  }
 }
 
 function handleMixControlAck(message: MixControlAckMessage): void {
@@ -479,6 +602,14 @@ function sendParentMessage(message: unknown): void {
       ? (message as { type?: string }).type
       : undefined;
   if (msgType === "mix_control" || msgType === "stt_control") {
+    process.send?.(message as never);
+    return;
+  }
+  if (
+    msgType === "play" ||
+    msgType === "play_status" ||
+    msgType === "play_stop"
+  ) {
     process.send?.(message as never);
     return;
   }
@@ -693,6 +824,18 @@ export function defineAgent(handlers: AgentHandlers): void {
       handleRecordingControlAck(message);
       return;
     }
+    if (isPlayAckMessage(message)) {
+      handlePlayAck(message);
+      return;
+    }
+    if (isPlayStatusAckMessage(message)) {
+      handlePlayStatusAck(message);
+      return;
+    }
+    if (isPlayStopAckMessage(message)) {
+      handlePlayStopAck(message);
+      return;
+    }
     if (isMixControlAckMessage(message)) {
       handleMixControlAck(message);
       return;
@@ -904,6 +1047,7 @@ export function resetAgentIpcStateForTests(): void {
     clearTimeout(pending.timer);
     pendingRecordingAcks.delete(requestId);
   }
+  clearPendingPlayAcks("reset");
   clearPendingMixAcks("reset");
   clearPendingSttAcks("reset");
 }
@@ -1213,6 +1357,160 @@ export function stopRecording(
   sessionId: string,
 ): Promise<RecordingControlResult> {
   return sendRecordingControl(sessionId, "stop");
+}
+
+export interface PlayOptions {
+  /** HTTPS URL the runner parent fetches (sandbox child does not fetch). */
+  url: string;
+  /** Target session ids; omit for all voice clients (parent interprets). */
+  sessionIds?: readonly string[];
+  volume?: number;
+  /** Optional small inline clip as base64 (see {@link PLAY_BYTES_MAX_DECODED_LENGTH}). */
+  bytes?: string;
+}
+
+function validatePlayOptions(options: PlayOptions): PlayResult | null {
+  const requestId = randomUUID();
+  const url = options.url?.trim();
+  if (!url) {
+    return { ok: false, reason: "invalid_payload", requestId };
+  }
+  if (options.bytes !== undefined) {
+    try {
+      const decoded = Buffer.from(options.bytes, "base64");
+      if (decoded.length > PLAY_BYTES_MAX_DECODED_LENGTH) {
+        return { ok: false, reason: "invalid_payload", requestId };
+      }
+    } catch {
+      return { ok: false, reason: "invalid_payload", requestId };
+    }
+  }
+  return null;
+}
+
+async function sendPlayControl(options: PlayOptions): Promise<PlayResult> {
+  const invalid = validatePlayOptions(options);
+  if (invalid) return invalid;
+
+  const requestId = randomUUID();
+
+  if (!isVoicethereAgentChild()) {
+    return {
+      ok: true,
+      playId: `local-mock-${requestId}`,
+      reason: "local_mock",
+      requestId,
+    };
+  }
+
+  return new Promise<PlayResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingPlayAcks.delete(requestId);
+      resolve({ ok: false, reason: "timeout", requestId });
+    }, PLAY_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingPlayAcks.set(requestId, { resolve, timer });
+
+    sendParentMessage({
+      type: "play",
+      requestId,
+      url: options.url.trim(),
+      ...(options.sessionIds?.length
+        ? { sessionIds: [...options.sessionIds] }
+        : {}),
+      ...(options.volume !== undefined ? { volume: options.volume } : {}),
+      ...(options.bytes !== undefined ? { bytes: options.bytes } : {}),
+    });
+  });
+}
+
+async function sendPlayStatus(playId: string): Promise<GetPlayResult> {
+  const requestId = randomUUID();
+
+  if (!playId?.trim()) {
+    return {
+      ok: false,
+      playId: playId ?? "",
+      reason: "invalid_payload",
+      requestId,
+    };
+  }
+
+  if (!isVoicethereAgentChild()) {
+    return {
+      ok: true,
+      playId,
+      status: "completed",
+      reason: "local_mock",
+      requestId,
+    };
+  }
+
+  return new Promise<GetPlayResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingPlayStatusAcks.delete(requestId);
+      resolve({ ok: false, playId, reason: "timeout", requestId });
+    }, PLAY_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingPlayStatusAcks.set(requestId, { playId, resolve, timer });
+
+    sendParentMessage({
+      type: "play_status",
+      requestId,
+      playId,
+    });
+  });
+}
+
+async function sendPlayStop(playId: string): Promise<StopPlayResult> {
+  const requestId = randomUUID();
+
+  if (!playId?.trim()) {
+    return {
+      ok: false,
+      playId: playId ?? "",
+      reason: "invalid_payload",
+      requestId,
+    };
+  }
+
+  if (!isVoicethereAgentChild()) {
+    return { ok: true, playId, reason: "local_mock", requestId };
+  }
+
+  return new Promise<StopPlayResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingPlayStopAcks.delete(requestId);
+      resolve({ ok: false, playId, reason: "timeout", requestId });
+    }, PLAY_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingPlayStopAcks.set(requestId, { playId, resolve, timer });
+
+    sendParentMessage({
+      type: "play_stop",
+      requestId,
+      playId,
+    });
+  });
+}
+
+/**
+ * Ask the runner parent to fetch and play an audio clip.
+ *
+ * The sandboxed child sends IPC only — no network fetch in customer code.
+ */
+export function play(options: PlayOptions): Promise<PlayResult> {
+  return sendPlayControl(options);
+}
+
+/** Read the current status of a play job started by {@link play}. */
+export function getPlay(playId: string): Promise<GetPlayResult> {
+  return sendPlayStatus(playId);
+}
+
+/** Stop a play job started by {@link play}. */
+export function stopPlay(playId: string): Promise<StopPlayResult> {
+  return sendPlayStop(playId);
 }
 
 /** Send a JSON payload to the browser peer via the runner parent. */

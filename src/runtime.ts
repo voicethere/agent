@@ -1226,6 +1226,36 @@ export function setTtsPose(
   return sendTtsPoseControl("set_tts_pose", { clientId: sessionId, pose });
 }
 
+export type AudioPosition =
+  | { placement: MixPlacement; pose?: never }
+  | { pose: MixPose; placement?: never };
+
+/** Unified TTS panning: named placement or per-client world pose. */
+export function setTtsPosition(
+  position: AudioPosition,
+  options?: { clientId?: string },
+): Promise<MixControlResult> {
+  if (position.placement != null && position.pose != null) {
+    return Promise.resolve({
+      ok: false,
+      reason: "invalid_payload",
+      requestId: randomUUID(),
+    });
+  }
+  if (position.placement != null) {
+    return setTtsMixPlacement(position.placement);
+  }
+  const clientId = options?.clientId?.trim();
+  if (!clientId) {
+    return Promise.resolve({
+      ok: false,
+      reason: "invalid_payload",
+      requestId: randomUUID(),
+    });
+  }
+  return setTtsPose(clientId, position.pose);
+}
+
 /** Clear the live TTS pose for one client; named placement applies again. */
 export function clearTtsPose(sessionId: string): Promise<MixControlResult> {
   return sendTtsPoseControl("clear_tts_pose", { clientId: sessionId });
@@ -1367,12 +1397,19 @@ export interface PlayOptions {
   volume?: number;
   /** Optional small inline clip as base64 (see {@link PLAY_BYTES_MAX_DECODED_LENGTH}). */
   bytes?: string;
+  /** Named placement for clip output (mutually exclusive with {@link pose}). */
+  placement?: MixPlacement;
+  /** World pose for clip panning (mutually exclusive with {@link placement}). */
+  pose?: MixPose;
 }
 
 function validatePlayOptions(options: PlayOptions): PlayResult | null {
   const requestId = randomUUID();
   const url = options.url?.trim();
   if (!url) {
+    return { ok: false, reason: "invalid_payload", requestId };
+  }
+  if (options.placement != null && options.pose != null) {
     return { ok: false, reason: "invalid_payload", requestId };
   }
   if (options.bytes !== undefined) {
@@ -1420,6 +1457,10 @@ async function sendPlayControl(options: PlayOptions): Promise<PlayResult> {
         : {}),
       ...(options.volume !== undefined ? { volume: options.volume } : {}),
       ...(options.bytes !== undefined ? { bytes: options.bytes } : {}),
+      ...(options.placement !== undefined
+        ? { placement: options.placement }
+        : {}),
+      ...(options.pose !== undefined ? { pose: options.pose } : {}),
     });
   });
 }

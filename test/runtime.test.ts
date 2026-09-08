@@ -1463,6 +1463,44 @@ describe("play control", () => {
     expect(capture.send).not.toHaveBeenCalled();
     capture.restore();
   });
+
+  it("rejects play when placement and pose are both set", async () => {
+    const result = await play({
+      url: "https://cdn.example.com/a.wav",
+      placement: "left",
+      pose: {
+        position: { x: 0, y: 0, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    });
+    expect(result).toMatchObject({ ok: false, reason: "invalid_payload" });
+  });
+
+  it("sends placement on play IPC", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    const ackPromise = play({
+      url: "https://cdn.example.com/notify.mp3",
+      placement: "right",
+    });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const sent = capture.send.mock.calls[0]?.[0] as {
+      type: string;
+      placement?: string;
+    };
+    expect(sent).toMatchObject({ type: "play", placement: "right" });
+    capture.emit({
+      type: "play_ack",
+      requestId: (sent as { requestId: string }).requestId,
+      ok: true,
+      playId: "play-1",
+      reason: "applied",
+    });
+    await ackPromise;
+    capture.restore();
+  });
 });
 
 describe("session_start recordingAvailable", () => {

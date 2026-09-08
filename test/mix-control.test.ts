@@ -21,6 +21,7 @@ import {
   setPositionalMixing,
   setSttEnabled,
   setTtsMixPlacement,
+  setTtsPosition,
   setTtsPose,
 } from "../src/runtime.js";
 import { installProcessMessageCapture } from "./helpers/process-mock.js";
@@ -561,6 +562,43 @@ describe("stt control", () => {
       reason: "applied",
     });
     await expect(ackPromise).resolves.toMatchObject({ ok: true });
+    capture.restore();
+  });
+
+  it("setTtsPosition routes to set_tts_placement or set_tts_pose IPC", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+    await startMixSession(capture, { mixAvailable: true });
+
+    const placementPromise = setTtsPosition({ placement: "right" });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const placementSent = capture.send.mock.calls.at(-1)?.[0] as {
+      type: string;
+      action: string;
+      requestId: string;
+    };
+    expect(placementSent.action).toBe("set_tts_placement");
+    emitMixAck(capture, placementSent);
+    await placementPromise;
+
+    const pose = {
+      position: { x: 2, y: 0, z: 0 },
+      orientation: { x: 0, y: 0, z: 0, w: 1 },
+    };
+    const posePromise = setTtsPosition({ pose }, { clientId: "peer-2" });
+    await vi.waitFor(() =>
+      expect(capture.send.mock.calls.length).toBeGreaterThan(1),
+    );
+    const poseSent = capture.send.mock.calls.at(-1)?.[0] as {
+      type: string;
+      action: string;
+      requestId: string;
+    };
+    expect(poseSent.action).toBe("set_tts_pose");
+    emitMixAck(capture, poseSent);
+    await posePromise;
+
     capture.restore();
   });
 });

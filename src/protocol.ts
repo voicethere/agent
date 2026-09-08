@@ -226,6 +226,10 @@ export interface PlayMessage {
   volume?: number;
   /** Optional small inline clip as base64 (capped in {@link play}). */
   bytes?: string;
+  /** Named stereo placement for the clip (mutually exclusive with {@link pose}). */
+  placement?: MixPlacement;
+  /** World pose for clip panning when positional mixing is on (mutually exclusive with {@link placement}). */
+  pose?: MixPose;
 }
 
 /** Ask the runner parent for the current status of a play job. */

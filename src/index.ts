@@ -79,6 +79,7 @@ export {
   setPositionalMixing,
   setSttEnabled,
   setTtsMixPlacement,
+  setTtsPosition,
   setTtsPose,
   clearTtsPose,
   speak,
@@ -97,5 +98,6 @@ export {
   type SpeechEventContext,
   type WebhookContext,
   type PlayOptions,
+  type AudioPosition,
   PLAY_BYTES_MAX_DECODED_LENGTH,
 } from "./runtime.js";

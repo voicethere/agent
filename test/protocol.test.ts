@@ -43,6 +43,34 @@ describe("protocol", () => {
     expect(message.reason).toBe("applied");
   });
 
+  it("accepts parent play ack shapes", () => {
+    const playAck: ParentToChildMessage = {
+      type: "play_ack",
+      requestId: "req-play",
+      ok: true,
+      playId: "play-1",
+      reason: "applied",
+    };
+    const statusAck: ParentToChildMessage = {
+      type: "play_status_ack",
+      requestId: "req-status",
+      ok: true,
+      playId: "play-1",
+      status: "playing",
+      reason: "applied",
+    };
+    const stopAck: ParentToChildMessage = {
+      type: "play_stop_ack",
+      requestId: "req-stop",
+      ok: true,
+      playId: "play-1",
+      reason: "applied",
+    };
+    expect(playAck.playId).toBe("play-1");
+    expect(statusAck.status).toBe("playing");
+    expect(stopAck.ok).toBe(true);
+  });
+
   it("accepts speech_event with SDK event payload", () => {
     const message: ParentToChildMessage = {
       type: "speech_event",
@@ -64,6 +92,23 @@ describe("protocol", () => {
       action: "start",
       requestId: "req-abc",
     };
+    const play: ChildToParentMessage = {
+      type: "play",
+      requestId: "req-play",
+      url: "https://cdn.example.com/notify.mp3",
+      sessionIds: ["peer-1"],
+      volume: 0.5,
+    };
+    const playStatus: ChildToParentMessage = {
+      type: "play_status",
+      requestId: "req-status",
+      playId: "play-1",
+    };
+    const playStop: ChildToParentMessage = {
+      type: "play_stop",
+      requestId: "req-stop",
+      playId: "play-1",
+    };
     const binary: ChildToParentMessage = {
       type: "send_binary_to_client",
       sessionId: "peer-1",
@@ -82,6 +127,9 @@ describe("protocol", () => {
     };
     expect(speak.type).toBe("speak");
     expect(recording.action).toBe("start");
+    expect(play.url).toContain("notify.mp3");
+    expect(playStatus.playId).toBe("play-1");
+    expect(playStop.type).toBe("play_stop");
     expect(binary.channel).toBe("sync");
     expect(log.level).toBe("info");
     expect(error.type).toBe("agent_error");

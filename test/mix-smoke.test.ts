@@ -133,6 +133,28 @@ describe("mix-smoke command parser", () => {
     ).toBe(true);
   });
 
+  it("accepts play with bytes", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "play",
+        bytes: Buffer.from("wav").toString("base64"),
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts play with url and optional sessionIds", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "play",
+        url: "https://cdn.example.com/chime.mp3",
+        sessionIds: ["peer-1"],
+        volume: 0.8,
+      }),
+    ).toBe(true);
+  });
+
   it("rejects non-mix type", () => {
     expect(isMixCommand({ type: "tick" })).toBe(false);
     expect(isMixCommand({ type: "mix", action: "tick" })).toBe(false);
@@ -299,6 +321,29 @@ describe("mix-smoke command parser", () => {
         type: "mix",
         action: "clear_tts_pose",
         clientId: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects play with empty payload", () => {
+    expect(isMixCommand({ type: "mix", action: "play" })).toBe(false);
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "play",
+        bytes: "",
+        url: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects play with invalid sessionIds", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "play",
+        bytes: Buffer.from("wav").toString("base64"),
+        sessionIds: [""],
       }),
     ).toBe(false);
   });

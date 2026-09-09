@@ -4,14 +4,18 @@ import {
   agentLog,
   defineAgent,
   disconnectClient,
+  getPlay,
   pauseRecording,
+  play,
   resetAgentIpcStateForTests,
   resumeRecording,
   sendBinaryToClient,
   sendToClient,
   speak,
   startRecording,
+  stopPlay,
   stopRecording,
+  PLAY_BYTES_MAX_DECODED_LENGTH,
   SESSION_START_INIT_DELAY_MS_ENV,
   SESSION_START_INIT_DELAY_ENABLED_ENV,
 } from "../src/runtime.js";
@@ -1268,6 +1272,234 @@ describe("recording control", () => {
     const result = await stopRecording("peer-1");
     expect(capture.send).not.toHaveBeenCalled();
     expect(result).toMatchObject({ ok: false, reason: "session_ended" });
+    capture.restore();
+  });
+});
+
+describe("play control", () => {
+  const childBundleEnv = process.env.__CHILD_BUNDLE_PATH__;
+
+  beforeEach(() => {
+    resetAgentIpcStateForTests();
+    delete process.env.__CHILD_BUNDLE_PATH__;
+  });
+
+  afterEach(() => {
+    if (childBundleEnv === undefined) {
+      delete process.env.__CHILD_BUNDLE_PATH__;
+    } else {
+      process.env.__CHILD_BUNDLE_PATH__ = childBundleEnv;
+    }
+  });
+
+  it("resolves local_mock when not a forked agent child", async () => {
+    const result = await play({
+      url: "https://cdn.example.com/notify.mp3",
+    });
+    expect(result).toMatchObject({ ok: true, reason: "local_mock" });
+    expect(result.playId).toMatch(/^local-mock-/);
+  });
+
+  it("sends play IPC and awaits matching play_ack with playId", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const ackPromise = play({
+      url: "https://cdn.example.com/notify.mp3",
+      sessionIds: ["peer-1", "peer-2"],
+      volume: 0.8,
+    });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const sent = capture.send.mock.calls[0]?.[0] as {
+      type: string;
+      requestId: string;
+      url: string;
+      sessionIds?: string[];
+      volume?: number;
+    };
+    expect(sent).toEqual(
+      expect.objectContaining({
+        type: "play",
+        url: "https://cdn.example.com/notify.mp3",
+        sessionIds: ["peer-1", "peer-2"],
+        volume: 0.8,
+      }),
+    );
+    expect(typeof sent.requestId).toBe("string");
+
+    capture.emit({
+      type: "play_ack",
+      requestId: sent.requestId,
+      ok: true,
+      playId: "play-abc",
+      reason: "applied",
+    });
+
+    await expect(ackPromise).resolves.toEqual({
+      ok: true,
+      playId: "play-abc",
+      reason: "applied",
+      requestId: sent.requestId,
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+    capture.restore();
+  });
+
+  it("sends play_status and play_stop IPC and awaits matching acks", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    const statusPromise = getPlay("play-abc");
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const statusSent = capture.send.mock.calls[0]?.[0] as {
+      type: string;
+      requestId: string;
+      playId: string;
+    };
+    expect(statusSent).toEqual(
+      expect.objectContaining({
+        type: "play_status",
+        playId: "play-abc",
+      }),
+    );
+
+    capture.emit({
+      type: "play_status_ack",
+      requestId: statusSent.requestId,
+      ok: true,
+      playId: "play-abc",
+      status: "playing",
+      reason: "applied",
+    });
+
+    await expect(statusPromise).resolves.toEqual({
+      ok: true,
+      playId: "play-abc",
+      status: "playing",
+      reason: "applied",
+      requestId: statusSent.requestId,
+    });
+
+    capture.send.mockClear();
+    const stopPromise = stopPlay("play-abc");
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const stopSent = capture.send.mock.calls[0]?.[0] as {
+      type: string;
+      requestId: string;
+      playId: string;
+    };
+    expect(stopSent).toEqual(
+      expect.objectContaining({
+        type: "play_stop",
+        playId: "play-abc",
+      }),
+    );
+
+    capture.emit({
+      type: "play_stop_ack",
+      requestId: stopSent.requestId,
+      ok: true,
+      playId: "play-abc",
+      reason: "applied",
+    });
+
+    await expect(stopPromise).resolves.toEqual({
+      ok: true,
+      playId: "play-abc",
+      reason: "applied",
+      requestId: stopSent.requestId,
+    });
+    capture.restore();
+  });
+
+  it("times out when play_ack is not received", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    vi.useFakeTimers();
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    const ackPromise = play({ url: "https://cdn.example.com/notify.mp3" });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await expect(ackPromise).resolves.toEqual({
+      ok: false,
+      reason: "timeout",
+      requestId: expect.any(String),
+    });
+    vi.useRealTimers();
+    capture.restore();
+  });
+
+  it("rejects oversized inline bytes without sending IPC", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    const oversized = Buffer.alloc(PLAY_BYTES_MAX_DECODED_LENGTH + 1, 1);
+    const result = await play({
+      url: "https://cdn.example.com/notify.mp3",
+      bytes: oversized.toString("base64"),
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: "invalid_payload" });
+    expect(capture.send).not.toHaveBeenCalled();
+    capture.restore();
+  });
+
+  it("rejects empty url without sending IPC", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    const result = await play({ url: "   " });
+    expect(result).toMatchObject({ ok: false, reason: "invalid_payload" });
+    expect(capture.send).not.toHaveBeenCalled();
+    capture.restore();
+  });
+
+  it("rejects play when placement and pose are both set", async () => {
+    const result = await play({
+      url: "https://cdn.example.com/a.wav",
+      placement: "left",
+      pose: {
+        position: { x: 0, y: 0, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    });
+    expect(result).toMatchObject({ ok: false, reason: "invalid_payload" });
+  });
+
+  it("sends placement on play IPC", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    const ackPromise = play({
+      url: "https://cdn.example.com/notify.mp3",
+      placement: "right",
+    });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const sent = capture.send.mock.calls[0]?.[0] as {
+      type: string;
+      placement?: string;
+      requestId: string;
+    };
+    expect(sent).toMatchObject({ type: "play", placement: "right" });
+    capture.emit({
+      type: "play_ack",
+      requestId: sent.requestId,
+      ok: true,
+      playId: "play-1",
+      reason: "applied",
+    });
+    await ackPromise;
     capture.restore();
   });
 });

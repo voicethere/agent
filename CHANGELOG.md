@@ -12,6 +12,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 - **`setTtsPosition`** — MixPlacement or world pose for TTS (passthrough to the runner).
 - **`mix-smoke` DataChannel `play`** — inline clip fixture for voice-data-mix-smoke one-listener vs all-target probes.
 
+## [0.7.2] - 2026-09-07
+
+### Added
+
+- **`mix-smoke` TTS pan DataChannel actions** — `set_tts_pose`, `speak`, and `clear_tts_pose` for E2E positional TTS energy probes (pan vs the listener session id).
+
 ## [0.7.1] - 2026-09-07
 
 ### Added

@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-09-09
+
 ### Added
 
 - **`onUserLanguage`** — convenience handler for spoken-language identification (`user_language` speech events; ISO 639-1).

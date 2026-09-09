@@ -48,6 +48,8 @@ function peerState(sessionId: string): PeerState {
 }
 
 function formatSpeechDetail(speech: SpeechEvent): string {
+  const language = (speech as SpeechEvent & { language?: string }).language;
+  if (language) return language;
   if (speech.text) return `"${speech.text}"`;
   if (speech.error) return speech.error;
   return "";
@@ -60,6 +62,12 @@ function formatSpeechDetail(speech: SpeechEvent): string {
 function handleSpeechEvent(sessionId: string, speech: SpeechEvent): void {
   const state = peerState(sessionId);
   const detail = formatSpeechDetail(speech);
+
+  // Published `@node-webrtc-rust/sdk` may not list `user_language` yet.
+  if ((speech.type as string) === "user_language") {
+    agentLog("info", `[${sessionId}] user_language ${detail}`);
+    return;
+  }
 
   switch (speech.type) {
     // --- User turn (VAD + STT) ---
@@ -168,6 +176,11 @@ defineAgent({
   onUserSpeechFinal({ sessionId, text }) {
     // Replace with LLM / tool calls / business logic
     speak(sessionId, `You said: ${text}`);
+  },
+
+  onUserLanguage({ sessionId, language }) {
+    // Route prompts / TTS voice from the detected ISO 639-1 code
+    agentLog("info", `user_language ${sessionId} ${language}`);
   },
 
   onSessionEnd({ sessionId }) {

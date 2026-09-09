@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- **`onUserLanguage`** — convenience handler for spoken-language identification (`user_language` speech events; ISO 639-1).
+
+### Changed
+
+- **Peer dependency** — `@node-webrtc-rust/sdk` `>=0.9.0` (spoken language identification / `user_language`).
+
 ## [0.7.3] - 2026-09-09
 
 ### Added

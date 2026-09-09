@@ -154,6 +154,15 @@
       "kind": "transducer",
       "approxMb": "~83",
       "note": "Closest official South Asian streaming model; not Hindi-specific."
+    },
+    {
+      "id": "whisper-tiny-lid",
+      "label": "Spoken language ID (Whisper tiny)",
+      "bundle": "sherpa-onnx-whisper-tiny",
+      "language": "multi",
+      "kind": "whisper-lid",
+      "approxMb": "~100",
+      "note": "Whisper multilingual tiny for SpokenLanguageIdentification. Not an STT Zipformer."
     }
   ]
 }

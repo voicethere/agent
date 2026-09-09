@@ -6,11 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-09
+
 ### Added
 
 - **Clip playback APIs** — `play`, `getPlay`, and `stopPlay` (`PlayMessage` IPC; HTTPS URL or small inline `bytes`; optional `sessionIds`, `volume`, `placement` / `pose`).
 - **`setTtsPosition`** — MixPlacement or world pose for TTS (passthrough to the runner).
 - **`mix-smoke` DataChannel `play`** — inline clip fixture for voice-data-mix-smoke one-listener vs all-target probes.
+
+### Changed
+
+- **Dev deps** — `@node-webrtc-rust/{helpers,sdk,signaling}` **0.9.0** (native ClipPlayer / `playAudio`).
 
 ## [0.7.2] - 2026-09-07
 

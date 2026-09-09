@@ -1489,11 +1489,12 @@ describe("play control", () => {
     const sent = capture.send.mock.calls[0]?.[0] as {
       type: string;
       placement?: string;
+      requestId: string;
     };
     expect(sent).toMatchObject({ type: "play", placement: "right" });
     capture.emit({
       type: "play_ack",
-      requestId: (sent as { requestId: string }).requestId,
+      requestId: sent.requestId,
       ok: true,
       playId: "play-1",
       reason: "applied",

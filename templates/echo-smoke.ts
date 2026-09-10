@@ -5,11 +5,11 @@
  */
 import { defineAgent, parseChatText, speak } from "@voicethere/agent";
 
-/** TTS echo prefix — space only (no colon/period) so Piper does not sentence-split the prefix. */
+/** TTS echo prefix with a sentence boundary so Piper does not glue words. */
 export function formatEchoSpeak(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return "";
-  return `echo ${trimmed}`;
+  return `echo. ${trimmed}`;
 }
 
 defineAgent({

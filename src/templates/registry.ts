@@ -10,6 +10,8 @@ export interface AgentTemplateDefinition {
   description: string;
   /** All TypeScript sources for this template (project-relative paths). */
   sourceFiles: string[];
+  /** Extra npm dependencies for customer template workspaces (caret semver specs). */
+  npmDependencies?: Record<string, string>;
 }
 
 export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
@@ -54,6 +56,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
       "game-sync-sim.ts",
       "game-sync-redis.ts",
     ],
+    npmDependencies: { ioredis: "^5.11.1" },
   },
   {
     id: "voice-showcase",
@@ -109,6 +112,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     description:
       "Webhook handler with Redis atomic shared counter plus DataChannel fan-out.",
     sourceFiles: ["webhooks-redis.ts"],
+    npmDependencies: { ioredis: "^5.11.1" },
   },
   {
     id: "echo-smoke",
@@ -145,6 +149,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     description:
       "Redis-backed world buffer sync for redis-sync-smoke (Advanced tier + project Redis).",
     sourceFiles: ["redis-sync/agent.ts", "redis-sync/world-layout.ts"],
+    npmDependencies: { ioredis: "^5.11.1" },
   },
   {
     id: "mix-smoke",

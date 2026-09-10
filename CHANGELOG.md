@@ -6,15 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
-<<<<<<< HEAD
-### Fixed
-
-- **`echo-smoke` template** — keep `echo. ${text}` (sentence boundary before echoed phrase). Hang-up language ID no longer runs a second Whisper job, so dotted TTS is safe again.
-=======
 ### Added
 
 - Template npm `package.json` for dashboard/CLI workspaces (`loadTemplateProjectWorkspace`, `buildCustomerPackageJson`); image-provided dependency strip helper (`stripImageProvidedNpmDependencies`).
->>>>>>> 53c8fc5 (feat(templates): seed npm package.json for dashboard and CLI)
+
+### Fixed
+
+- **`echo-smoke` template** — keep `echo. ${text}` (sentence boundary before echoed phrase). Hang-up language ID no longer runs a second Whisper job, so dotted TTS is safe again.
 
 ## [0.7.6] - 2026-09-10
 

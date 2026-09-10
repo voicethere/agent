@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-09-11
+
 ### Added
 
 - Template npm `package.json` for dashboard/CLI workspaces (`loadTemplateProjectWorkspace`, `buildCustomerPackageJson`); image-provided dependency strip helper (`stripImageProvidedNpmDependencies`).

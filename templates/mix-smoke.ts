@@ -13,7 +13,8 @@
  * - `{ type: "mix", action: "set_tts_pose", clientId, pose }`
  * - `{ type: "mix", action: "speak", clientId, text }`
  * - `{ type: "mix", action: "clear_tts_pose", clientId }`
- * - `{ type: "mix", action: "play", sessionIds?, bytes?, url?, volume? }`
+ * - `{ type: "mix", action: "play", sessionIds?, bytes?, url?, volume? }` — trigger only;
+ *   clip WAV is generated in-template unless bytes/url override.
  *
  * Acks: `{ type: "mix_ack", action, ok: true, statuses?, ... }` or `{ ok: false, error }`.
  * Ignores `ping` / chat strings (voice-control readiness).
@@ -36,6 +37,43 @@ import {
 
 /** E2E fixture marker — rewritten before each fixture upload when needed. */
 export const FIXTURE_MARKER = "mix-smoke-fixture-a";
+
+/** Inline clip: 16 kHz mono s16le — decoded size stays under 64 KiB play cap. */
+export const CLIP_WAV_DURATION_MS = 2000;
+export const CLIP_WAV_AMPLITUDE = 14_000;
+export const INLINE_CLIP_DUMMY_URL = "https://example.com/inline-clip.wav";
+
+/** Loud mono WAV (s16le 16 kHz) for default inline clip play. */
+export function buildMixSmokeInlineClipBase64(
+  durationMs = CLIP_WAV_DURATION_MS,
+  amplitude = CLIP_WAV_AMPLITUDE,
+): string {
+  const sampleRate = 16_000;
+  const channels = 1;
+  const bytesPerSample = 2;
+  const numSamples = Math.floor((sampleRate * durationMs) / 1000);
+  const dataSize = numSamples * channels * bytesPerSample;
+  const buffer = Buffer.alloc(44 + dataSize);
+  buffer.write("RIFF", 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write("WAVE", 8);
+  buffer.write("fmt ", 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(channels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * channels * bytesPerSample, 28);
+  buffer.writeUInt16LE(channels * bytesPerSample, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write("data", 36);
+  buffer.writeUInt32LE(dataSize, 40);
+  for (let i = 0; i < numSamples; i++) {
+    buffer.writeInt16LE(amplitude, 44 + i * 2);
+  }
+  return buffer.toString("base64");
+}
+
+const INLINE_CLIP = buildMixSmokeInlineClipBase64();
 
 export type MixPose = {
   position: { x: number; y: number; z: number };
@@ -212,13 +250,6 @@ export function isMixCommand(message: unknown): message is MixCommand {
         url?: unknown;
         volume?: unknown;
       };
-      const hasBytes =
-        typeof playMsg.bytes === "string" && playMsg.bytes.trim().length > 0;
-      const hasUrl =
-        typeof playMsg.url === "string" && playMsg.url.trim().length > 0;
-      if (!hasBytes && !hasUrl) {
-        return false;
-      }
       if (
         playMsg.bytes !== undefined &&
         (typeof playMsg.bytes !== "string" || playMsg.bytes.trim().length === 0)
@@ -440,14 +471,16 @@ async function handleMixCommand(
       return;
     }
     case "play": {
-      const inlineUrl =
-        command.url?.trim() || "https://example.com/inline-clip.wav";
+      const trimmedBytes = command.bytes?.trim();
+      const trimmedUrl = command.url?.trim();
+      const url = trimmedUrl || INLINE_CLIP_DUMMY_URL;
+      const bytes = trimmedBytes || (!trimmedUrl ? INLINE_CLIP : undefined);
       const result = await play({
-        url: inlineUrl,
+        url,
         ...(command.sessionIds?.length
           ? { sessionIds: command.sessionIds }
           : {}),
-        ...(command.bytes ? { bytes: command.bytes } : {}),
+        ...(bytes ? { bytes } : {}),
         ...(command.volume !== undefined ? { volume: command.volume } : {}),
       });
       if (!result.ok || !result.playId) {

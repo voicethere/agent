@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildMixSmokeInlineClipBase64,
+  CLIP_WAV_DURATION_MS,
   isMixCommand,
   isMixPose,
   type MixPose,
 } from "../templates/mix-smoke.js";
+
+const MAX_PLAY_BYTES = 64 * 1024;
 
 const identityPose: MixPose = {
   position: { x: 0, y: 0, z: 0 },
@@ -129,6 +133,20 @@ describe("mix-smoke command parser", () => {
         type: "mix",
         action: "clear_tts_pose",
         clientId: "peer-1",
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts play with empty payload", () => {
+    expect(isMixCommand({ type: "mix", action: "play" })).toBe(true);
+  });
+
+  it("accepts play with sessionIds only", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "play",
+        sessionIds: ["peer-1"],
       }),
     ).toBe(true);
   });
@@ -325,8 +343,21 @@ describe("mix-smoke command parser", () => {
     ).toBe(false);
   });
 
-  it("rejects play with empty payload", () => {
-    expect(isMixCommand({ type: "mix", action: "play" })).toBe(false);
+  it("rejects play with empty string bytes or url when provided", () => {
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "play",
+        bytes: "",
+      }),
+    ).toBe(false);
+    expect(
+      isMixCommand({
+        type: "mix",
+        action: "play",
+        url: "",
+      }),
+    ).toBe(false);
     expect(
       isMixCommand({
         type: "mix",
@@ -346,6 +377,18 @@ describe("mix-smoke command parser", () => {
         sessionIds: [""],
       }),
     ).toBe(false);
+  });
+});
+
+describe("buildMixSmokeInlineClipBase64", () => {
+  it("produces a clip under 64 KiB at 16 kHz for ~2000 ms", () => {
+    const b64 = buildMixSmokeInlineClipBase64();
+    const decoded = Buffer.from(b64, "base64");
+    expect(decoded.byteLength).toBeLessThan(MAX_PLAY_BYTES);
+    expect(decoded.readUInt32LE(24)).toBe(16_000);
+    const dataSize = decoded.readUInt32LE(40);
+    const durationMs = (dataSize / 2 / 16_000) * 1000;
+    expect(Math.round(durationMs)).toBe(CLIP_WAV_DURATION_MS);
   });
 });
 

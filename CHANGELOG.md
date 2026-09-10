@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-09-10
+
+### Changed
+
+- **`mix-smoke` DataChannel `play`** — trigger only; the template generates a loud 2s inline WAV (optional `bytes` / `url` still override). Avoids oversized SCTP messages when e2e clients used to send the clip on `voice-control`.
+
 ## [0.7.4] - 2026-09-09
 
 ### Added

@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildAgentBundle } from "../build-bundle.js";
+import { buildCustomerPackageJson } from "./package-json.js";
 import {
   AGENT_TEMPLATES,
   type AgentTemplateDefinition,
@@ -22,6 +23,13 @@ export {
   isAgentTemplateId,
   listSeedOnCreateTemplates,
 } from "./registry.js";
+export {
+  IMAGE_PROVIDED_NPM_PACKAGES,
+  buildCustomerPackageJson,
+  stripImageProvidedNpmDependencies,
+  type BuildCustomerPackageJsonOptions,
+  type StripImageProvidedNpmDependenciesResult,
+} from "./package-json.js";
 
 export interface TemplateSourceFile {
   /** Project-relative path within the template tree (e.g. `agent.ts`, `world-layout.ts`). */
@@ -93,6 +101,17 @@ export function loadTemplateWorkspaceSources(id: string): TemplateSourceFile[] {
       content: readFileSync(absolutePath, "utf8"),
     };
   });
+}
+
+/** Workspace sources for dashboard/CLI project seeding — TS sources plus root `package.json`. */
+export function loadTemplateProjectWorkspace(id: string): TemplateSourceFile[] {
+  return [
+    ...loadTemplateWorkspaceSources(id),
+    {
+      path: "package.json",
+      content: buildCustomerPackageJson({ templateId: id }),
+    },
+  ];
 }
 
 function seedBundlePath(id: string): string {

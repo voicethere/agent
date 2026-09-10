@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- **`echo-smoke` and `crash` templates** — speak `echo. ${text}` instead of `echo:${text}` so Piper gets a sentence boundary before the echoed phrase (fixes voice-smoke prefix miss when `echo:One` skipped "echo colon").
+
 ## [0.7.5] - 2026-09-10
 
 ### Changed

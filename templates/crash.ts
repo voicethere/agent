@@ -6,10 +6,18 @@
  * - `{ type: "crash_exit" }` → process.exit(1)
  * - `{ type: "ping", id }` → `{ type: "pong", id }`
  * - `onUserSpeechFinal` text starting with "crash" → throw
- * - other finals → speak(`echo:${text}`)
+ * - other finals → speak(`echo. ${text}`)
  * - onSessionStart → speak("ready") after 1s (voice ready waiter)
  */
 import { defineAgent, sendToClient, speak } from "@voicethere/agent";
+
+/** TTS echo prefix with a sentence boundary so Piper does not glue words. */
+export function formatEchoSpeak(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  // Never glue `echo:` onto the next word; Piper skips "echo colon" on `echo:One`.
+  return `echo. ${trimmed}`;
+}
 
 export const CRASH_AGENT_MESSAGE =
   "e2e crash-agent: intentional handler failure";
@@ -44,7 +52,9 @@ defineAgent({
     if (/^crash\b/i.test(trimmed)) {
       throw new Error(CRASH_AGENT_MESSAGE);
     }
-    speak(sessionId, `echo:${trimmed}`);
+    const echoText = formatEchoSpeak(trimmed);
+    if (!echoText) return;
+    speak(sessionId, echoText);
   },
 
   onDataChannelMessage(ctx) {

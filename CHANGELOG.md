@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- **`echo-smoke` template** — speak `echo ${text}` (space only, no colon/period) so Piper does not sentence-split the prefix. Crash template still uses `echo.` (distinct).
+
 ## [0.7.6] - 2026-09-10
 
 ### Fixed

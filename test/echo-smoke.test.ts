@@ -4,11 +4,11 @@ import { formatEchoSpeak as crashFormatEchoSpeak } from "../templates/crash.js";
 import { formatEchoSpeak } from "../templates/echo-smoke.js";
 
 describe("formatEchoSpeak (echo-smoke)", () => {
-  it('returns "echo. " + trimmed text with sentence boundary', () => {
+  it('returns "echo. " + trimmed text', () => {
     expect(formatEchoSpeak("One, two, three")).toBe("echo. One, two, three");
   });
 
-  it("does not glue echo: onto the next word", () => {
+  it("does not use echo: glued to the payload", () => {
     const spoken = formatEchoSpeak("One, two, three");
     expect(spoken).not.toContain("echo:One");
     expect(spoken).not.toMatch(/^echo:/);
@@ -26,11 +26,14 @@ describe("formatEchoSpeak (echo-smoke)", () => {
 });
 
 describe("formatEchoSpeak (crash)", () => {
-  it("matches echo-smoke helper", () => {
+  it("uses echo. sentence boundary (same as echo-smoke)", () => {
     expect(crashFormatEchoSpeak("One, two, three")).toBe(
       "echo. One, two, three",
     );
     expect(crashFormatEchoSpeak("One, two, three")).not.toContain("echo:One");
+    expect(formatEchoSpeak("One, two, three")).toBe(
+      crashFormatEchoSpeak("One, two, three"),
+    );
   });
 
   it("returns empty string for whitespace-only input", () => {

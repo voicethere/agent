@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- **`echo-smoke` template** — keep `echo. ${text}` (sentence boundary before echoed phrase). Hang-up language ID no longer runs a second Whisper job, so dotted TTS is safe again.
+
 ## [0.7.6] - 2026-09-10
 
 ### Fixed

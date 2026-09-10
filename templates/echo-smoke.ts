@@ -9,7 +9,6 @@ import { defineAgent, parseChatText, speak } from "@voicethere/agent";
 export function formatEchoSpeak(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return "";
-  // Never glue `echo:` onto the next word; Piper skips "echo colon" on `echo:One`.
   return `echo. ${trimmed}`;
 }
 

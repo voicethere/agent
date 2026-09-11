@@ -367,7 +367,7 @@ async function loadWorldFromRedis(): Promise<Float32Array> {
 
 async function saveWorldToRedis(world: Float32Array): Promise<void> {
   if (!redis) return;
-  await redis.setBuffer(REDIS_WORLD_KEY, copyWorldBuffer(world));
+  await redis.set(REDIS_WORLD_KEY, copyWorldBuffer(world));
 }
 
 async function runSimulationTick(): Promise<void> {
@@ -449,7 +449,7 @@ async function ensureRedisWorldInitialized(): Promise<void> {
   const existing = await redis.getBuffer(REDIS_WORLD_KEY);
   if (!existing || existing.byteLength === 0) {
     const empty = createEmptyWorldBuffer();
-    await redis.setBuffer(REDIS_WORLD_KEY, copyWorldBuffer(empty));
+    await redis.set(REDIS_WORLD_KEY, copyWorldBuffer(empty));
   }
 }
 

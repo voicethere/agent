@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-09-11
+
+### Fixed
+
+- **`game-sync` Redis world blob** — use ioredis `set` (not `setBuffer`) for binary world writes so dashboard `code-compile-smoke` typechecks against ioredis 5.11 types.
+
 ## [0.7.7] - 2026-09-11
 
 ### Added

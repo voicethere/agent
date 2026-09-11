@@ -95,9 +95,9 @@
     "@node-webrtc-rust/sdk": ">=0.9.0"
   },
   "devDependencies": {
-    "@node-webrtc-rust/helpers": "0.9.0",
-    "@node-webrtc-rust/sdk": "0.9.0",
-    "@node-webrtc-rust/signaling": "0.9.0",
+    "@node-webrtc-rust/helpers": "0.9.5",
+    "@node-webrtc-rust/sdk": "0.9.5",
+    "@node-webrtc-rust/signaling": "0.9.5",
     "@types/node": "22.20.1",
     "http-server": "14.1.1",
     "ioredis": "5.11.1",

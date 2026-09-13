@@ -5,11 +5,15 @@
  */
 import { defineAgent, parseChatText, speak } from "@voicethere/agent";
 
-/** TTS echo prefix with a sentence boundary so Piper does not glue words. */
+/**
+ * TTS reply prefix with a sentence boundary so Piper does not glue words.
+ * Use a word local streaming STT (Kroko Zipformer) reliably emits a token for;
+ * `echo.` measured ~5% no-token Piper renders (audio intact). `Okay.` does not.
+ */
 export function formatEchoSpeak(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return "";
-  return `echo. ${trimmed}`;
+  return `Okay. ${trimmed}`;
 }
 
 defineAgent({

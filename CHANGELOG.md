@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-09-13
+
 ### Fixed
 
 - **`echo-smoke` / `crash` templates** — TTS reply prefix `Okay.` instead of `echo.` (local STT emits no token for ~5% of Piper `echo.` renders; audio was intact).

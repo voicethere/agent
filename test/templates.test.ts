@@ -41,6 +41,7 @@ describe("agent template registry", () => {
         "positional-tts",
         "recording-consent",
         "redis-sync",
+        "spatial-showcase",
         "voice-showcase",
         "voice-starter",
         "webhooks",
@@ -52,7 +53,7 @@ describe("agent template registry", () => {
   it("filters templates by kind", () => {
     const product = listTemplates({ kind: "product" });
     expect(product.every((template) => template.kind === "product")).toBe(true);
-    expect(product).toHaveLength(9);
+    expect(product).toHaveLength(10);
 
     const e2e = listTemplates({ kind: "e2e" });
     expect(e2e.every((template) => template.kind === "e2e")).toBe(true);
@@ -158,6 +159,7 @@ describe("seed template bundles", () => {
         "echo-dc",
         "game-sync",
         "positional-tts",
+        "spatial-showcase",
         "recording-consent",
         "voice-showcase",
         "voice-starter",

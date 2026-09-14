@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.10] - 2026-09-14
+
+### Added
+
+- **`spatial-showcase` template** — one Voice+Data product template for landing `/showcase` demos. A `{ type: "join", demo }` DataChannel message selects `orbit` (per-listener TTS pose), `soundboard` (positional clips by `clipId` only; agent resolves allowlisted `assetOrigin`), or `proximity` (mix group + `setClientPose`). Caps: 8 room peers, 4 concurrent plays per session.
+
 ## [0.7.9] - 2026-09-13
 
 ### Fixed

@@ -48,13 +48,19 @@ export class ProximityRoom {
     peer.yawDeg = yawDeg;
   }
 
-  snapshot(): RoomPeer[] {
+  memberIds(): string[] {
+    return [...this.members.keys()];
+  }
+
+  /** Per-listener view — `muted` is whether this listener muted the peer (never true for self). */
+  snapshotFor(listenerId: string): RoomPeer[] {
+    const mutesForListener = this.listenerMutes.get(listenerId);
     return [...this.members.entries()].map(([id, pose]) => ({
       id,
       x: pose.x,
       z: pose.z,
       yawDeg: pose.yawDeg,
-      muted: this.isPeerMutedByAnyone(id),
+      muted: id !== listenerId && mutesForListener?.get(id) === true,
     }));
   }
 
@@ -65,15 +71,6 @@ export class ProximityRoom {
       this.listenerMutes.set(listenerId, targets);
     }
     targets.set(targetId, muted);
-  }
-
-  private isPeerMutedByAnyone(targetId: string): boolean {
-    for (const targets of this.listenerMutes.values()) {
-      if (targets.get(targetId)) {
-        return true;
-      }
-    }
-    return false;
   }
 
   clear(): void {

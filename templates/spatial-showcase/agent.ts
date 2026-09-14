@@ -10,7 +10,6 @@
 import {
   addClientToMix,
   agentLog,
-  broadcastToClients,
   clearTtsPose,
   createMixGroup,
   defineAgent,
@@ -30,6 +29,11 @@ import {
 } from "@voicethere/agent";
 
 import { orbitTtsPose, type OrbitOptions } from "./orbit.js";
+import {
+  beginOrbitClock,
+  resetOrbitSession,
+  stopOrbitInterval,
+} from "./orbit-session.js";
 import {
   parseShowcaseMessage,
   poseAt,
@@ -77,7 +81,7 @@ const sessions = new Map<string, SessionState>();
 const proximityRoom = new ProximityRoom();
 
 let showcaseRoomGroupReady: Promise<boolean> | null = null;
-let lastBroadcastRoomSnapshot: string | undefined;
+const lastRoomSnapshotByListener = new Map<string, string>();
 
 function ensureShowcaseRoomGroup(): Promise<boolean> {
   if (!showcaseRoomGroupReady) {
@@ -151,21 +155,11 @@ function defaultSessionState(demo: ShowcaseDemo, assetOrigin?: string): SessionS
   };
 }
 
-function clearOrbitTimer(state: SessionState): void {
-  if (state.orbitTimer) {
-    clearInterval(state.orbitTimer);
-    state.orbitTimer = undefined;
-  }
-  state.orbitStartMs = undefined;
-  state.lastOrbitPoseEmitMs = undefined;
-}
-
 function clearRoomStateTimer(state: SessionState): void {
   if (state.roomStateTimer) {
     clearInterval(state.roomStateTimer);
     state.roomStateTimer = undefined;
   }
-  state.lastRoomSnapshot = undefined;
 }
 
 function clearLoopPad(sessionId: string, state: SessionState, playId: string): void {
@@ -217,8 +211,8 @@ function emitOrbitPose(sessionId: string, state: SessionState): void {
 }
 
 function startOrbitDemo(sessionId: string, state: SessionState): void {
-  state.orbitStartMs = Date.now();
-  clearOrbitTimer(state);
+  stopOrbitInterval(state);
+  beginOrbitClock(state);
   state.orbitTimer = setInterval(() => {
     if (state.orbit.paused || !state.orbitStartMs) {
       return;
@@ -233,19 +227,27 @@ function startOrbitDemo(sessionId: string, state: SessionState): void {
 }
 
 function broadcastRoomStateIfChanged(): void {
-  const snapshot = proximityRoom.snapshot();
-  const memberIds = snapshot.map((peer) => peer.id);
+  const memberIds = proximityRoom.memberIds();
   if (memberIds.length === 0) {
-    lastBroadcastRoomSnapshot = undefined;
+    lastRoomSnapshotByListener.clear();
     return;
   }
 
-  const payload = JSON.stringify(snapshot);
-  if (payload === lastBroadcastRoomSnapshot) {
-    return;
+  for (const listenerId of memberIds) {
+    const peers = proximityRoom.snapshotFor(listenerId);
+    const payload = JSON.stringify(peers);
+    if (lastRoomSnapshotByListener.get(listenerId) === payload) {
+      continue;
+    }
+    lastRoomSnapshotByListener.set(listenerId, payload);
+    sendToClient(listenerId, { type: "room_state", peers });
   }
-  lastBroadcastRoomSnapshot = payload;
-  broadcastToClients({ type: "room_state", peers: snapshot }, memberIds);
+
+  for (const listenerId of [...lastRoomSnapshotByListener.keys()]) {
+    if (!memberIds.includes(listenerId)) {
+      lastRoomSnapshotByListener.delete(listenerId);
+    }
+  }
 }
 
 function startProximityRoomBroadcast(sessionId: string, state: SessionState): void {
@@ -253,7 +255,7 @@ function startProximityRoomBroadcast(sessionId: string, state: SessionState): vo
   state.roomStateTimer = setInterval(() => {
     broadcastRoomStateIfChanged();
   }, ROOM_STATE_TICK_MS);
-  lastBroadcastRoomSnapshot = undefined;
+  lastRoomSnapshotByListener.clear();
   broadcastRoomStateIfChanged();
 }
 
@@ -435,7 +437,7 @@ function teardownSession(sessionId: string): void {
     return;
   }
 
-  clearOrbitTimer(state);
+  resetOrbitSession(state);
   clearRoomStateTimer(state);
   clearAllPlays(sessionId, state);
   void safeMixCall(sessionId, "clearTtsPose", () => clearTtsPose(sessionId));
@@ -567,7 +569,7 @@ async function dispatchMessage(
         ackError(sessionId, "move", "set_pose_failed");
         return;
       }
-      lastBroadcastRoomSnapshot = undefined;
+      lastRoomSnapshotByListener.clear();
       broadcastRoomStateIfChanged();
       ack(sessionId, "move");
       return;
@@ -589,7 +591,7 @@ async function dispatchMessage(
         ackError(sessionId, "mute_peer", "mute_failed");
         return;
       }
-      lastBroadcastRoomSnapshot = undefined;
+      lastRoomSnapshotByListener.clear();
       broadcastRoomStateIfChanged();
       ack(sessionId, "mute_peer");
       return;
@@ -607,7 +609,7 @@ defineAgent({
     sessions.clear();
     proximityRoom.clear();
     showcaseRoomGroupReady = null;
-    lastBroadcastRoomSnapshot = undefined;
+    lastRoomSnapshotByListener.clear();
   },
 
   onSessionStart(ctx) {

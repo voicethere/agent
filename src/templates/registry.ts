@@ -108,6 +108,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
       "spatial-showcase/sounds.ts",
       "spatial-showcase/room.ts",
       "spatial-showcase/orbit.ts",
+      "spatial-showcase/orbit-session.ts",
     ],
   },
   {

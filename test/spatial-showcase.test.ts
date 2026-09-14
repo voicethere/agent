@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  beginOrbitClock,
+  stopOrbitInterval,
+} from "../templates/spatial-showcase/orbit-session.js";
 import { orbitTtsPose } from "../templates/spatial-showcase/orbit.js";
 import {
   MAX_SAY_TEXT_LENGTH,
@@ -200,6 +204,17 @@ describe("orbitTtsPose", () => {
   });
 });
 
+describe("orbit session helpers", () => {
+  it("beginOrbitClock keeps orbitStartMs after stopOrbitInterval", () => {
+    const state = { orbitStartMs: undefined as number | undefined };
+    stopOrbitInterval(state);
+    beginOrbitClock(state);
+    expect(state.orbitStartMs).toBeTypeOf("number");
+    stopOrbitInterval(state);
+    expect(state.orbitStartMs).toBeTypeOf("number");
+  });
+});
+
 describe("ProximityRoom", () => {
   it("allows 8 joins and rejects the 9th", () => {
     const room = new ProximityRoom();
@@ -218,12 +233,27 @@ describe("ProximityRoom", () => {
     expect(room.join("peer-new")).toBe("ok");
   });
 
-  it("snapshot returns poses", () => {
+  it("snapshotFor returns poses", () => {
     const room = new ProximityRoom();
     room.join("a");
     room.setPose("a", 2, 3, 45);
-    expect(room.snapshot()).toEqual([
+    expect(room.snapshotFor("a")).toEqual([
       { id: "a", x: 2, z: 3, yawDeg: 45, muted: false },
     ]);
+  });
+
+  it("snapshotFor muted is per-listener", () => {
+    const room = new ProximityRoom();
+    room.join("a");
+    room.join("b");
+    room.setPeerMuted("a", "b", true);
+
+    const viewA = room.snapshotFor("a");
+    const viewB = room.snapshotFor("b");
+
+    expect(viewA.find((peer) => peer.id === "b")?.muted).toBe(true);
+    expect(viewA.find((peer) => peer.id === "a")?.muted).toBe(false);
+    expect(viewB.find((peer) => peer.id === "b")?.muted).toBe(false);
+    expect(viewB.find((peer) => peer.id === "a")?.muted).toBe(false);
   });
 });

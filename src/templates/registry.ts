@@ -96,6 +96,21 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     sourceFiles: ["positional-tts/agent.ts", "positional-tts/orbit.ts"],
   },
   {
+    id: "spatial-showcase",
+    entry: "spatial-showcase/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    description:
+      "Spatial audio showcase — orbiting TTS, positional clip soundboard, proximity room via DataChannel commands.",
+    sourceFiles: [
+      "spatial-showcase/agent.ts",
+      "spatial-showcase/protocol.ts",
+      "spatial-showcase/sounds.ts",
+      "spatial-showcase/room.ts",
+      "spatial-showcase/orbit.ts",
+    ],
+  },
+  {
     id: "webhooks",
     entry: "webhooks.ts",
     kind: "product",

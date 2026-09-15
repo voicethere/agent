@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.11] - 2026-09-15
+
+### Fixed
+
+- **`spatial-showcase` template** — emit first `orbit_pose` and proximity `room_state` before greeting `speak()` so clients can apply spatial pose on the first TTS chunk (voicethere/agent#85).
+
 ## [0.7.10] - 2026-09-14
 
 ### Added

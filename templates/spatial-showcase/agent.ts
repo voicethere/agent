@@ -143,7 +143,10 @@ async function safeMixCall(
   }
 }
 
-function defaultSessionState(demo: ShowcaseDemo, assetOrigin?: string): SessionState {
+function defaultSessionState(
+  demo: ShowcaseDemo,
+  assetOrigin?: string,
+): SessionState {
   return {
     demo,
     assetOrigin,
@@ -162,7 +165,11 @@ function clearRoomStateTimer(state: SessionState): void {
   }
 }
 
-function clearLoopPad(sessionId: string, state: SessionState, playId: string): void {
+function clearLoopPad(
+  sessionId: string,
+  state: SessionState,
+  playId: string,
+): void {
   const timer = state.loopPollTimers.get(playId);
   if (timer) {
     clearInterval(timer);
@@ -201,7 +208,8 @@ function emitOrbitPose(sessionId: string, state: SessionState): void {
   state.lastOrbitPoseEmitMs = now;
   const elapsedSec = (now - state.orbitStartMs) / 1000;
   const pose = orbitTtsPose(elapsedSec, state.orbit);
-  const angleRad = (2 * Math.PI * elapsedSec) / (state.orbit.periodSec ?? 2 * Math.PI);
+  const angleRad =
+    (2 * Math.PI * elapsedSec) / (state.orbit.periodSec ?? 2 * Math.PI);
   sendToClient(sessionId, {
     type: "orbit_pose",
     angleDeg: (angleRad * 180) / Math.PI,
@@ -223,6 +231,7 @@ function startOrbitDemo(sessionId: string, state: SessionState): void {
     );
     emitOrbitPose(sessionId, state);
   }, ORBIT_TICK_MS);
+  emitOrbitPose(sessionId, state);
   speak(sessionId, "I'll circle around you.");
 }
 
@@ -250,7 +259,10 @@ function broadcastRoomStateIfChanged(): void {
   }
 }
 
-function startProximityRoomBroadcast(sessionId: string, state: SessionState): void {
+function startProximityRoomBroadcast(
+  sessionId: string,
+  state: SessionState,
+): void {
   clearRoomStateTimer(state);
   state.roomStateTimer = setInterval(() => {
     broadcastRoomStateIfChanged();
@@ -421,11 +433,11 @@ async function handleJoin(
         return;
       }
       state.inProximityRoom = true;
+      startProximityRoomBroadcast(sessionId, state);
       speak(sessionId, "Welcome to the proximity room.");
       await safeMixCall(sessionId, "setTtsPose", () =>
         setTtsPose(sessionId, poseAt(0, 0)),
       );
-      startProximityRoomBroadcast(sessionId, state);
       break;
     }
   }

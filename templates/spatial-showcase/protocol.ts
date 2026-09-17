@@ -164,7 +164,9 @@ export function isShowcaseDemo(value: unknown): value is ShowcaseDemo {
   return typeof value === "string" && SHOWCASE_DEMOS.has(value);
 }
 
-export function isShowcaseInbound(message: unknown): message is ShowcaseInbound {
+export function isShowcaseInbound(
+  message: unknown,
+): message is ShowcaseInbound {
   return parseShowcaseMessage(message) !== null;
 }
 

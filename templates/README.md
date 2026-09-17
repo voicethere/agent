@@ -15,10 +15,10 @@ import {
 
 ## Product vs e2e
 
-| Kind        | Dashboard create                                                                                                                             | Prebuilt seed bundle                 | Typical consumer        |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
+| Kind        | Dashboard create                                                                                                                                                 | Prebuilt seed bundle                 | Typical consumer        |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
 | **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `game-sync`, `voice-showcase`, `recording-consent`, `positional-tts`, `spatial-showcase`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
-| **e2e**     | No                                                                                                                                           | No — build from sources at test time | `voicethere/e2e` smokes |
+| **e2e**     | No                                                                                                                                                               | No — build from sources at test time | `voicethere/e2e` smokes |
 
 Product templates always set `seedOnCreate: true`. CI fails if a product template is missing its prebuilt bundle after `npm run build`.
 
@@ -83,17 +83,17 @@ Sources: `positional-tts/agent.ts` (defineAgent wiring), `positional-tts/orbit.t
 
 Spatial audio showcase for `/showcase` — one agent template with three demos selected by `{ type: "join", demo }` on the control DataChannel:
 
-| Demo | Behavior |
-| ---- | -------- |
-| `orbit` | TTS speaker orbits the listener (`setTtsPose`); `{ type: "orbit", action: "set" \| "say" }`; agent emits `{ type: "orbit_pose" }` |
-| `soundboard` | Positional clip pads — browser sends `clipId` only (never URLs); agent resolves against an allowlisted `assetOrigin` |
-| `proximity` | Shared mix room (`createMixGroup` + `setClientPose`); `{ type: "move" }`, `{ type: "mute_peer" }`; `{ type: "room_state" }` broadcast |
+| Demo         | Behavior                                                                                                                                                                   |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `orbit`      | Looping sine tone + TTS orbit the listener (`setPlayPose` + `setTtsPose`); STT echo off; `{ type: "orbit", action: "set" \| "say" }`; agent emits `{ type: "orbit_pose" }` |
+| `soundboard` | Positional clip pads — browser sends `clipId` only (never URLs); agent resolves against an allowlisted `assetOrigin`                                                       |
+| `proximity`  | Shared mix room (`createMixGroup` + `setClientPose`); `{ type: "move" }`, `{ type: "mute_peer" }`; `{ type: "room_state" }` broadcast                                      |
 
 **Protocol:** inbound `join`, `orbit`, `pad`, `pad_stop`, `pad_status`, `move`, `mute_peer`, `leave`, `ping` — outbound `showcase_ack`, `orbit_pose`, `pad_progress`, `room_state`, `room_full`, `error`.
 
 **Limits:** `MAX_ROOM_PEERS = 8`, `MAX_ACTIVE_PLAYS = 4` per session. Clip ids: `chime`, `bell`, `laser`, `impact`, `footsteps`, `rain-loop`, `cafe-loop`, `jingle`.
 
-Sources: `spatial-showcase/agent.ts`, `protocol.ts`, `sounds.ts`, `room.ts`, `orbit.ts`.
+Sources: `spatial-showcase/agent.ts`, `protocol.ts`, `sounds.ts`, `room.ts`, `orbit.ts`, `sine.ts`.
 
 ### `webhooks.ts` (`webhooks`)
 

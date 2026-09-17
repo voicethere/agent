@@ -29,6 +29,7 @@ export type ParentToChildMessage =
   | PlayAckMessage
   | PlayStatusAckMessage
   | PlayStopAckMessage
+  | PlayPoseAckMessage
   | MixControlAckMessage
   | SttControlAckMessage
   | WebhookMessage;
@@ -45,6 +46,7 @@ export type ChildToParentMessage =
   | PlayMessage
   | PlayStatusMessage
   | PlayStopMessage
+  | PlayPoseMessage
   | MixControlMessage
   | SttControlMessage
   | AgentLogMessage
@@ -247,6 +249,14 @@ export interface PlayStopMessage {
   playId: string;
 }
 
+/** Ask the runner parent to update the world pose of a playing clip. */
+export interface PlayPoseMessage {
+  type: "play_pose";
+  requestId: string;
+  playId: string;
+  pose: MixPose;
+}
+
 /** Runner acknowledgement for a {@link PlayMessage}. */
 export interface PlayAckMessage {
   type: "play_ack";
@@ -301,6 +311,22 @@ export interface PlayStopAckMessage {
     | string;
 }
 
+/** Runner acknowledgement for a {@link PlayPoseMessage}. */
+export interface PlayPoseAckMessage {
+  type: "play_pose_ack";
+  requestId: string;
+  ok: boolean;
+  playId: string;
+  reason?:
+    | "applied"
+    | "unsupported"
+    | "not_found"
+    | "invalid_payload"
+    | "local_mock"
+    | "timeout"
+    | string;
+}
+
 /** Result returned by {@link play}. */
 export type PlayResult = {
   ok: boolean;
@@ -320,6 +346,14 @@ export type GetPlayResult = {
 
 /** Result returned by {@link stopPlay}. */
 export type StopPlayResult = {
+  ok: boolean;
+  playId: string;
+  reason?: string;
+  requestId: string;
+};
+
+/** Result returned by {@link setPlayPose}. */
+export type PlayPoseResult = {
   ok: boolean;
   playId: string;
   reason?: string;

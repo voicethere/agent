@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { MAX_ACTIVE_PLAYS } from "../templates/spatial-showcase/agent.js";
 import { PLAY_BYTES_MAX_DECODED_LENGTH } from "../src/runtime.js";
 import {
   beginOrbitClock,
@@ -14,6 +15,12 @@ import {
 import { ProximityRoom } from "../templates/spatial-showcase/room.js";
 import { resolveClipUrl } from "../templates/spatial-showcase/sounds.js";
 import { buildOrbitSineInlineClipBase64 } from "../templates/spatial-showcase/sine.js";
+
+describe("spatial showcase agent limits", () => {
+  it("allows up to twelve concurrent pad plays", () => {
+    expect(MAX_ACTIVE_PLAYS).toBe(12);
+  });
+});
 
 describe("parseShowcaseMessage", () => {
   it("accepts join with demo", () => {

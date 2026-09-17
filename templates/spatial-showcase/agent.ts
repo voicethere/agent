@@ -59,7 +59,7 @@ const ROOM_STATE_TICK_MS = 100;
 const LOOP_PAD_POLL_MS = 250;
 const ORBIT_SINE_POLL_MS = 250;
 const ORBIT_SINE_VOLUME = 0.25;
-const MAX_ACTIVE_PLAYS = 4;
+export const MAX_ACTIVE_PLAYS = 12;
 const SHOWCASE_ROOM_GROUP_ID = "showcase-room";
 
 type LoopPadState = {
@@ -105,11 +105,15 @@ function ensureShowcaseRoomGroup(): Promise<boolean> {
   return showcaseRoomGroupReady;
 }
 
-function ack(
-  sessionId: string,
-  action: string,
-  extra?: { playId?: string },
-): void {
+type PadAckExtra = {
+  playId?: string;
+  clipId?: ShowcaseClipId;
+  x?: number;
+  z?: number;
+  placement?: PlayOptions["placement"];
+};
+
+function ack(sessionId: string, action: string, extra?: PadAckExtra): void {
   sendToClient(sessionId, {
     type: "showcase_ack",
     action,
@@ -118,12 +122,18 @@ function ack(
   });
 }
 
-function ackError(sessionId: string, action: string, error: string): void {
+function ackError(
+  sessionId: string,
+  action: string,
+  error: string,
+  extra?: { clipId?: ShowcaseClipId },
+): void {
   sendToClient(sessionId, {
     type: "showcase_ack",
     action,
     ok: false,
     error,
+    ...(extra?.clipId !== undefined ? { clipId: extra.clipId } : {}),
   });
 }
 
@@ -172,6 +182,19 @@ function clearRoomStateTimer(state: SessionState): void {
   if (state.roomStateTimer) {
     clearInterval(state.roomStateTimer);
     state.roomStateTimer = undefined;
+  }
+}
+
+function stopLoopPadsForClip(
+  sessionId: string,
+  state: SessionState,
+  clipId: ShowcaseClipId,
+): void {
+  for (const [playId, pad] of [...state.loopPads.entries()]) {
+    if (pad.clipId === clipId) {
+      void stopPlay(playId);
+      clearLoopPad(sessionId, state, playId);
+    }
   }
 }
 
@@ -409,6 +432,15 @@ async function startLoopPadPoll(
           clearLoopPad(sessionId, state, playId);
           state.playIds.add(replay.playId);
           state.loopPads.set(replay.playId, pad);
+          ack(sessionId, "pad", {
+            playId: replay.playId,
+            clipId: pad.clipId,
+            x: pad.x,
+            z: pad.z,
+            ...(pad.placement !== undefined
+              ? { placement: pad.placement }
+              : {}),
+          });
           void startLoopPadPoll(sessionId, state, replay.playId, pad);
         }
       } else if (status.status) {
@@ -433,24 +465,27 @@ export async function handlePadPlay(
   volume?: number,
   placement?: PlayOptions["placement"],
 ): Promise<void> {
-  if (state.playIds.size >= MAX_ACTIVE_PLAYS) {
-    ackError(sessionId, "pad", "busy");
-    return;
-  }
-
   const assetOrigin = state.assetOrigin;
   if (!assetOrigin) {
-    ackError(sessionId, "pad", "missing_asset_origin");
+    ackError(sessionId, "pad", "missing_asset_origin", { clipId });
     return;
   }
 
   const url = resolveClipUrl(assetOrigin, clipId);
   if (!url) {
-    ackError(sessionId, "pad", "invalid_asset_origin");
+    ackError(sessionId, "pad", "invalid_asset_origin", { clipId });
     return;
   }
 
   const sound = SHOWCASE_SOUND_FILES[clipId];
+  if (sound.loop) {
+    stopLoopPadsForClip(sessionId, state, clipId);
+  }
+
+  if (state.playIds.size >= MAX_ACTIVE_PLAYS) {
+    ackError(sessionId, "pad", "busy", { clipId });
+    return;
+  }
   const playVolume = volume ?? sound.defaultVolume;
   const options: PlayOptions = {
     url,
@@ -461,12 +496,18 @@ export async function handlePadPlay(
 
   const result = await play(options);
   if (!result.ok || !result.playId) {
-    ackError(sessionId, "pad", result.reason ?? "play_failed");
+    ackError(sessionId, "pad", result.reason ?? "play_failed", { clipId });
     return;
   }
 
   state.playIds.add(result.playId);
-  ack(sessionId, "pad", { playId: result.playId });
+  ack(sessionId, "pad", {
+    playId: result.playId,
+    clipId,
+    x,
+    z,
+    ...(placement !== undefined ? { placement } : {}),
+  });
 
   if (sound.loop) {
     const pad: LoopPadState = {

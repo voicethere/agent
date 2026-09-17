@@ -6,6 +6,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.12] - 2026-09-17
+
+### Added
+
+- **`setPlayPose`** — world pose for an active clip play (`PlayPoseMessage` IPC; `PlayPoseResult` ack).
+- **`spatial-showcase` orbit demo** — looping 440 Hz sine via `play` + `setPlayPose`; greeting and Say-it TTS via `setTtsPose`; STT echo off on orbit join (voicethere/agent#87). Requires `@node-webrtc-rust/helpers` **0.9.9** (`setPlayPose`, no mix drain on pose updates).
+
+### Fixed
+
+- **`spatial-showcase` soundboard pads** — pad acks include `clipId`, `x`, and `z`; loop replay re-acks on restart; stop same-clip loop before `MAX_ACTIVE_PLAYS` (12); invalid `clipId` rejected (voicethere/agent#88).
+
+### Changed
+
+- **Dev deps** — `@node-webrtc-rust/{helpers,sdk,signaling}` **0.9.9**.
+
 ## [0.7.11] - 2026-09-15
 
 ### Fixed

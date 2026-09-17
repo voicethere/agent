@@ -1,6 +1,7 @@
 /** Inline orbit sine clip — 16 kHz mono s16le, decoded size under 64 KiB play cap. */
 
-export const ORBIT_SINE_DURATION_MS = 1000;
+/** 2 s keeps loop-restart gaps (250 ms poll) infrequent; 16 kHz mono still fits under 64 KiB. */
+export const ORBIT_SINE_DURATION_MS = 2000;
 export const ORBIT_SINE_FREQUENCY_HZ = 440;
 export const ORBIT_SINE_AMPLITUDE = 8000;
 export const ORBIT_SINE_INLINE_URL =

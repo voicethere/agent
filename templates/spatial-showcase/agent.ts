@@ -1,5 +1,5 @@
 /**
- * Spatial audio showcase — orbit TTS, positional soundboard, proximity room.
+ * Spatial audio showcase — orbiting sine + TTS, positional soundboard, proximity room.
  *
  * Browser joins with `{ type: "join", demo, assetOrigin? }` then sends demo-specific
  * commands. Clip URLs are resolved server-side from clipId + allowlisted assetOrigin.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { PLAY_BYTES_MAX_DECODED_LENGTH } from "../src/runtime.js";
 import {
   beginOrbitClock,
   stopOrbitInterval,
@@ -12,6 +13,7 @@ import {
 } from "../templates/spatial-showcase/protocol.js";
 import { ProximityRoom } from "../templates/spatial-showcase/room.js";
 import { resolveClipUrl } from "../templates/spatial-showcase/sounds.js";
+import { buildOrbitSineInlineClipBase64 } from "../templates/spatial-showcase/sine.js";
 
 describe("parseShowcaseMessage", () => {
   it("accepts join with demo", () => {
@@ -114,9 +116,7 @@ describe("parseShowcaseMessage", () => {
         z: 0,
       }),
     ).toBeNull();
-    expect(
-      parseShowcaseMessage({ type: "move", x: 0, z: -6 }),
-    ).toBeNull();
+    expect(parseShowcaseMessage({ type: "move", x: 0, z: -6 })).toBeNull();
   });
 
   it("rejects unknown clipId", () => {
@@ -181,6 +181,21 @@ describe("poseAt", () => {
     const pose = poseAt(0, 0, 90);
     expect(pose.orientation.y).toBeCloseTo(Math.sin(Math.PI / 4));
     expect(pose.orientation.w).toBeCloseTo(Math.cos(Math.PI / 4));
+  });
+});
+
+describe("buildOrbitSineInlineClipBase64", () => {
+  it("builds a valid RIFF WAV under the play bytes cap with non-zero sine samples", () => {
+    const base64 = buildOrbitSineInlineClipBase64();
+    const bytes = Buffer.from(base64, "base64");
+    expect(bytes.length).toBeLessThan(PLAY_BYTES_MAX_DECODED_LENGTH);
+    expect(bytes.subarray(0, 4).toString("ascii")).toBe("RIFF");
+    expect(bytes.subarray(8, 12).toString("ascii")).toBe("WAVE");
+    const dataSize = bytes.readUInt32LE(40);
+    expect(dataSize).toBeGreaterThan(0);
+    const samples = bytes.subarray(44, 44 + Math.min(dataSize, 200));
+    const hasNonZero = [...samples].some((byte) => byte !== 0);
+    expect(hasNonZero).toBe(true);
   });
 });
 

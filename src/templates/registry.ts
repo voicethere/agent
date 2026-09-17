@@ -101,7 +101,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     description:
-      "Spatial audio showcase — orbiting TTS, positional clip soundboard, proximity room via DataChannel commands.",
+      "Spatial audio showcase — orbiting sine + TTS, positional clip soundboard, proximity room via DataChannel commands.",
     sourceFiles: [
       "spatial-showcase/agent.ts",
       "spatial-showcase/protocol.ts",
@@ -109,6 +109,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
       "spatial-showcase/room.ts",
       "spatial-showcase/orbit.ts",
       "spatial-showcase/orbit-session.ts",
+      "spatial-showcase/sine.ts",
     ],
   },
   {

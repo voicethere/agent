@@ -15,6 +15,8 @@ import type {
   MixPose,
   ParentToChildMessage,
   PlayAckMessage,
+  PlayPoseAckMessage,
+  PlayPoseResult,
   PlayResult,
   PlayStatusAckMessage,
   PlayStopAckMessage,
@@ -175,6 +177,12 @@ function isPlayStopAckMessage(value: unknown): value is PlayStopAckMessage {
   return msg.type === "play_stop_ack" && typeof msg.requestId === "string";
 }
 
+function isPlayPoseAckMessage(value: unknown): value is PlayPoseAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return msg.type === "play_pose_ack" && typeof msg.requestId === "string";
+}
+
 function isRecordingControlAckMessage(
   value: unknown,
 ): value is RecordingControlAckMessage {
@@ -258,6 +266,7 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "play_ack" ||
     msg.type === "play_status_ack" ||
     msg.type === "play_stop_ack" ||
+    msg.type === "play_pose_ack" ||
     msg.type === "mix_control_ack" ||
     msg.type === "stt_control_ack" ||
     msg.type === "webhook"
@@ -272,6 +281,7 @@ type SessionScopedParentMessage = Exclude<
   | PlayAckMessage
   | PlayStatusAckMessage
   | PlayStopAckMessage
+  | PlayPoseAckMessage
   | MixControlAckMessage
   | SttControlAckMessage
 >;
@@ -331,9 +341,16 @@ type PendingPlayStopAck = {
   timer: ReturnType<typeof setTimeout>;
 };
 
+type PendingPlayPoseAck = {
+  playId: string;
+  resolve: (result: PlayPoseResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
 const pendingPlayAcks = new Map<string, PendingPlayAck>();
 const pendingPlayStatusAcks = new Map<string, PendingPlayStatusAck>();
 const pendingPlayStopAcks = new Map<string, PendingPlayStopAck>();
+const pendingPlayPoseAcks = new Map<string, PendingPlayPoseAck>();
 
 const MIX_CONTROL_ACK_TIMEOUT_MS = 5000;
 const STT_CONTROL_ACK_TIMEOUT_MS = 5000;
@@ -403,6 +420,19 @@ function handlePlayStopAck(message: PlayStopAckMessage): void {
   });
 }
 
+function handlePlayPoseAck(message: PlayPoseAckMessage): void {
+  const pending = pendingPlayPoseAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingPlayPoseAcks.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    playId: message.playId,
+    reason: message.reason,
+    requestId: message.requestId,
+  });
+}
+
 function clearPendingPlayAcks(reason: string): void {
   for (const [requestId, pending] of pendingPlayAcks) {
     clearTimeout(pending.timer);
@@ -422,6 +452,16 @@ function clearPendingPlayAcks(reason: string): void {
   for (const [requestId, pending] of pendingPlayStopAcks) {
     clearTimeout(pending.timer);
     pendingPlayStopAcks.delete(requestId);
+    pending.resolve({
+      ok: false,
+      playId: pending.playId,
+      reason,
+      requestId,
+    });
+  }
+  for (const [requestId, pending] of pendingPlayPoseAcks) {
+    clearTimeout(pending.timer);
+    pendingPlayPoseAcks.delete(requestId);
     pending.resolve({
       ok: false,
       playId: pending.playId,
@@ -617,7 +657,8 @@ function sendParentMessage(message: unknown): void {
   if (
     msgType === "play" ||
     msgType === "play_status" ||
-    msgType === "play_stop"
+    msgType === "play_stop" ||
+    msgType === "play_pose"
   ) {
     process.send?.(message as never);
     return;
@@ -863,6 +904,10 @@ export function defineAgent(handlers: AgentHandlers): void {
     }
     if (isPlayStopAckMessage(message)) {
       handlePlayStopAck(message);
+      return;
+    }
+    if (isPlayPoseAckMessage(message)) {
+      handlePlayPoseAck(message);
       return;
     }
     if (isMixControlAckMessage(message)) {
@@ -1581,6 +1626,50 @@ export function getPlay(playId: string): Promise<GetPlayResult> {
 /** Stop a play job started by {@link play}. */
 export function stopPlay(playId: string): Promise<StopPlayResult> {
   return sendPlayStop(playId);
+}
+
+async function sendPlayPose(
+  playId: string,
+  pose: MixPose,
+): Promise<PlayPoseResult> {
+  const requestId = randomUUID();
+
+  if (!playId?.trim() || !pose) {
+    return {
+      ok: false,
+      playId: playId ?? "",
+      reason: "invalid_payload",
+      requestId,
+    };
+  }
+
+  if (!isVoicethereAgentChild()) {
+    return { ok: true, playId, reason: "local_mock", requestId };
+  }
+
+  return new Promise<PlayPoseResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingPlayPoseAcks.delete(requestId);
+      resolve({ ok: false, playId, reason: "timeout", requestId });
+    }, PLAY_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingPlayPoseAcks.set(requestId, { playId, resolve, timer });
+
+    sendParentMessage({
+      type: "play_pose",
+      requestId,
+      playId,
+      pose,
+    });
+  });
+}
+
+/** Update the world pose of a clip started by {@link play} without restarting playback. */
+export function setPlayPose(
+  playId: string,
+  pose: MixPose,
+): Promise<PlayPoseResult> {
+  return sendPlayPose(playId, pose);
 }
 
 /** Send a JSON payload to the browser peer via the runner parent. */

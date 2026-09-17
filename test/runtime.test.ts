@@ -11,6 +11,7 @@ import {
   resumeRecording,
   sendBinaryToClient,
   sendToClient,
+  setPlayPose,
   speak,
   startRecording,
   stopPlay,
@@ -1493,6 +1494,48 @@ describe("play control", () => {
       playId: "play-abc",
       reason: "applied",
       requestId: stopSent.requestId,
+    });
+    capture.restore();
+  });
+
+  it("sends play_pose IPC and awaits matching play_pose_ack", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    const pose = {
+      position: { x: 2, y: 0, z: 0 },
+      orientation: { x: 0, y: 0, z: 0, w: 1 },
+    };
+    const posePromise = setPlayPose("play-abc", pose);
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const poseSent = capture.send.mock.calls[0]?.[0] as {
+      type: string;
+      requestId: string;
+      playId: string;
+      pose: typeof pose;
+    };
+    expect(poseSent).toEqual(
+      expect.objectContaining({
+        type: "play_pose",
+        playId: "play-abc",
+        pose,
+      }),
+    );
+
+    capture.emit({
+      type: "play_pose_ack",
+      requestId: poseSent.requestId,
+      ok: true,
+      playId: "play-abc",
+      reason: "applied",
+    });
+
+    await expect(posePromise).resolves.toEqual({
+      ok: true,
+      playId: "play-abc",
+      reason: "applied",
+      requestId: poseSent.requestId,
     });
     capture.restore();
   });

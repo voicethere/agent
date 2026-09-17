@@ -1,5 +1,5 @@
 /**
- * Spatial audio showcase — orbit TTS, positional soundboard, proximity room.
+ * Spatial audio showcase — orbiting sine + TTS, positional soundboard, proximity room.
  *
  * Browser joins with `{ type: "join", demo, assetOrigin? }` then sends demo-specific
  * commands. Clip URLs are resolved server-side from clipId + allowlisted assetOrigin.
@@ -21,7 +21,9 @@ import {
   sendToClient,
   setClientPose,
   setListenerMute,
+  setPlayPose,
   setPositionalMixing,
+  setSttEnabled,
   setTtsPose,
   speak,
   stopPlay,
@@ -46,11 +48,17 @@ import {
   SHOWCASE_SOUND_FILES,
   type ShowcaseClipId,
 } from "./sounds.js";
+import {
+  buildOrbitSineInlineClipBase64,
+  ORBIT_SINE_INLINE_URL,
+} from "./sine.js";
 
 const ORBIT_TICK_MS = 50;
 const ORBIT_POSE_EMIT_MS = 100;
 const ROOM_STATE_TICK_MS = 100;
 const LOOP_PAD_POLL_MS = 250;
+const ORBIT_SINE_POLL_MS = 250;
+const ORBIT_SINE_VOLUME = 0.25;
 const MAX_ACTIVE_PLAYS = 4;
 const SHOWCASE_ROOM_GROUP_ID = "showcase-room";
 
@@ -73,6 +81,8 @@ type SessionState = {
   playIds: Set<string>;
   loopPads: Map<string, LoopPadState>;
   loopPollTimers: Map<string, ReturnType<typeof setInterval>>;
+  orbitSinePlayId?: string;
+  orbitSinePollTimer?: ReturnType<typeof setInterval>;
   inProximityRoom: boolean;
   lastOrbitPoseEmitMs?: number;
 };
@@ -194,6 +204,87 @@ function clearAllPlays(sessionId: string, state: SessionState): void {
   state.loopPollTimers.clear();
 }
 
+function currentOrbitPose(state: SessionState) {
+  if (!state.orbitStartMs) {
+    return orbitTtsPose(0, state.orbit);
+  }
+  const elapsedSec = (Date.now() - state.orbitStartMs) / 1000;
+  return orbitTtsPose(elapsedSec, state.orbit);
+}
+
+function clearOrbitSinePoll(state: SessionState): void {
+  if (state.orbitSinePollTimer) {
+    clearInterval(state.orbitSinePollTimer);
+    state.orbitSinePollTimer = undefined;
+  }
+}
+
+async function stopOrbitSine(state: SessionState): Promise<void> {
+  clearOrbitSinePoll(state);
+  const playId = state.orbitSinePlayId;
+  state.orbitSinePlayId = undefined;
+  if (playId) {
+    await stopPlay(playId);
+  }
+}
+
+function startOrbitSineLoopPoll(sessionId: string, state: SessionState): void {
+  clearOrbitSinePoll(state);
+  const playId = state.orbitSinePlayId;
+  if (!playId) {
+    return;
+  }
+
+  state.orbitSinePollTimer = setInterval(() => {
+    void (async () => {
+      if (!state.orbitSinePlayId) {
+        clearOrbitSinePoll(state);
+        return;
+      }
+      const status = await getPlay(state.orbitSinePlayId);
+      if (!status.ok) {
+        return;
+      }
+      if (status.status === "ended") {
+        const replay = await play({
+          url: ORBIT_SINE_INLINE_URL,
+          bytes: buildOrbitSineInlineClipBase64(),
+          sessionIds: [sessionId],
+          volume: ORBIT_SINE_VOLUME,
+          pose: currentOrbitPose(state),
+        });
+        if (replay.ok && replay.playId) {
+          state.orbitSinePlayId = replay.playId;
+        }
+      }
+    })();
+  }, ORBIT_SINE_POLL_MS);
+}
+
+async function startOrbitSinePlay(
+  sessionId: string,
+  state: SessionState,
+): Promise<void> {
+  await stopOrbitSine(state);
+  const result = await play({
+    url: ORBIT_SINE_INLINE_URL,
+    bytes: buildOrbitSineInlineClipBase64(),
+    sessionIds: [sessionId],
+    volume: ORBIT_SINE_VOLUME,
+    pose: currentOrbitPose(state),
+  });
+  if (!result.ok || !result.playId) {
+    agentLog(
+      "warn",
+      `spatial-showcase orbit sine play failed: ${result.reason ?? "play_failed"}`,
+      sessionId,
+    );
+    return;
+  }
+  state.orbitSinePlayId = result.playId;
+  startOrbitSineLoopPoll(sessionId, state);
+}
+
 function emitOrbitPose(sessionId: string, state: SessionState): void {
   if (!state.orbitStartMs) {
     return;
@@ -221,13 +312,19 @@ function emitOrbitPose(sessionId: string, state: SessionState): void {
 function startOrbitDemo(sessionId: string, state: SessionState): void {
   stopOrbitInterval(state);
   beginOrbitClock(state);
+  void startOrbitSinePlay(sessionId, state);
   state.orbitTimer = setInterval(() => {
     if (state.orbit.paused || !state.orbitStartMs) {
       return;
     }
-    const elapsedSec = (Date.now() - state.orbitStartMs) / 1000;
+    const pose = currentOrbitPose(state);
+    if (state.orbitSinePlayId) {
+      void safeMixCall(sessionId, "setPlayPose", () =>
+        setPlayPose(state.orbitSinePlayId!, pose),
+      );
+    }
     void safeMixCall(sessionId, "setTtsPose", () =>
-      setTtsPose(sessionId, orbitTtsPose(elapsedSec, state.orbit)),
+      setTtsPose(sessionId, pose),
     );
     emitOrbitPose(sessionId, state);
   }, ORBIT_TICK_MS);
@@ -406,9 +503,13 @@ async function handleJoin(
   ack(sessionId, "join");
 
   switch (demo) {
-    case "orbit":
+    case "orbit": {
+      void safeMixCall(sessionId, "setSttEnabled", () =>
+        setSttEnabled({ enabled: false, sessionId }),
+      );
       startOrbitDemo(sessionId, state);
       break;
+    }
     case "soundboard":
       break;
     case "proximity": {
@@ -451,8 +552,12 @@ function teardownSession(sessionId: string): void {
 
   resetOrbitSession(state);
   clearRoomStateTimer(state);
+  void stopOrbitSine(state);
   clearAllPlays(sessionId, state);
   void safeMixCall(sessionId, "clearTtsPose", () => clearTtsPose(sessionId));
+  void safeMixCall(sessionId, "setSttEnabled", () =>
+    setSttEnabled({ enabled: true, sessionId }),
+  );
 
   if (state.inProximityRoom) {
     proximityRoom.leave(sessionId);
@@ -639,14 +744,6 @@ defineAgent({
       action: "hello",
       ok: true,
     });
-  },
-
-  onUserSpeechFinal({ sessionId, text }) {
-    const state = sessions.get(sessionId);
-    if (!state || state.demo !== "orbit") {
-      return;
-    }
-    speak(sessionId, `You said: ${text}`);
   },
 
   onDataChannelMessage(ctx) {

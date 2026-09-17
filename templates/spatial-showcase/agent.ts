@@ -44,6 +44,7 @@ import {
 } from "./protocol.js";
 import { ProximityRoom } from "./room.js";
 import {
+  isShowcaseClipId,
   resolveClipUrl,
   SHOWCASE_SOUND_FILES,
   type ShowcaseClipId,
@@ -668,6 +669,10 @@ async function dispatchMessage(
     case "pad": {
       if (state.demo !== "soundboard") {
         ackError(sessionId, "pad", "wrong_demo");
+        return;
+      }
+      if (!isShowcaseClipId(message.clipId)) {
+        ackError(sessionId, "pad", "invalid_clip_id");
         return;
       }
       await handlePadPlay(

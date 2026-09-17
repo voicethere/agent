@@ -91,7 +91,7 @@ Spatial audio showcase for `/showcase` — one agent template with three demos s
 
 **Protocol:** inbound `join`, `orbit`, `pad`, `pad_stop`, `pad_status`, `move`, `mute_peer`, `leave`, `ping` — outbound `showcase_ack`, `orbit_pose`, `pad_progress`, `room_state`, `room_full`, `error`.
 
-**Limits:** `MAX_ROOM_PEERS = 8`, `MAX_ACTIVE_PLAYS = 4` per session. Clip ids: `chime`, `bell`, `laser`, `impact`, `footsteps`, `rain-loop`, `cafe-loop`, `jingle`.
+**Limits:** `MAX_ROOM_PEERS = 8`, `MAX_ACTIVE_PLAYS = 12` per session. Clip ids: `chime`, `bell`, `laser`, `impact`, `footsteps`, `rain-loop`, `cafe-loop`, `jingle`.
 
 Sources: `spatial-showcase/agent.ts`, `protocol.ts`, `sounds.ts`, `room.ts`, `orbit.ts`, `sine.ts`.
 

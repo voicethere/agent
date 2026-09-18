@@ -51,7 +51,9 @@ import {
 } from "./sounds.js";
 import {
   buildOrbitSineInlineClipBase64,
+  ORBIT_SINE_DURATION_MS,
   ORBIT_SINE_INLINE_URL,
+  orbitSineClipDurationMs,
 } from "./sine.js";
 
 const ORBIT_TICK_MS = 50;
@@ -59,6 +61,7 @@ const ORBIT_POSE_EMIT_MS = 100;
 const ROOM_STATE_TICK_MS = 100;
 const LOOP_PAD_POLL_MS = 250;
 const ORBIT_SINE_POLL_MS = 250;
+const ORBIT_SINE_GAPLESS_LEAD_MS = 200;
 const ORBIT_SINE_VOLUME = 0.25;
 export const MAX_ACTIVE_PLAYS = 12;
 const SHOWCASE_ROOM_GROUP_ID = "showcase-room";
@@ -84,6 +87,11 @@ type SessionState = {
   loopPollTimers: Map<string, ReturnType<typeof setInterval>>;
   orbitSinePlayId?: string;
   orbitSinePollTimer?: ReturnType<typeof setInterval>;
+  orbitSineRestartTimer?: ReturnType<typeof setTimeout>;
+  orbitSineFrequencyHz: number;
+  orbitSineEnabled: boolean;
+  orbitSinePhaseRad: number;
+  orbitManualPose?: { x: number; z: number };
   inProximityRoom: boolean;
   lastOrbitPoseEmitMs?: number;
 };
@@ -175,6 +183,9 @@ function defaultSessionState(
     playIds: new Set(),
     loopPads: new Map(),
     loopPollTimers: new Map(),
+    orbitSineFrequencyHz: 440,
+    orbitSineEnabled: true,
+    orbitSinePhaseRad: 0,
     inProximityRoom: false,
   };
 }
@@ -229,11 +240,46 @@ function clearAllPlays(sessionId: string, state: SessionState): void {
 }
 
 function currentOrbitPose(state: SessionState) {
+  if (state.orbitManualPose) {
+    const elevation = state.orbit.elevation ?? 0;
+    return {
+      position: {
+        x: state.orbitManualPose.x,
+        y: elevation,
+        z: state.orbitManualPose.z,
+      },
+      orientation: { x: 0, y: 0, z: 0, w: 1 },
+    };
+  }
   if (!state.orbitStartMs) {
     return orbitTtsPose(0, state.orbit);
   }
   const elapsedSec = (Date.now() - state.orbitStartMs) / 1000;
   return orbitTtsPose(elapsedSec, state.orbit);
+}
+
+function orbitPoseFromXz(
+  state: SessionState,
+  x: number,
+  z: number,
+): ReturnType<typeof orbitTtsPose> {
+  const elevation = state.orbit.elevation ?? 0;
+  return {
+    position: { x, y: elevation, z },
+    orientation: { x: 0, y: 0, z: 0, w: 1 },
+  };
+}
+
+function syncOrbitClockFromManualPose(state: SessionState): void {
+  const manual = state.orbitManualPose;
+  if (!manual) {
+    return;
+  }
+  const periodSec = state.orbit.periodSec ?? 2 * Math.PI;
+  const angleRad = Math.atan2(manual.z, manual.x);
+  const elapsedSec = (angleRad * periodSec) / (2 * Math.PI);
+  state.orbitStartMs = Date.now() - elapsedSec * 1000;
+  state.orbitManualPose = undefined;
 }
 
 function clearOrbitSinePoll(state: SessionState): void {
@@ -243,8 +289,16 @@ function clearOrbitSinePoll(state: SessionState): void {
   }
 }
 
+function clearOrbitSineRestartTimer(state: SessionState): void {
+  if (state.orbitSineRestartTimer) {
+    clearTimeout(state.orbitSineRestartTimer);
+    state.orbitSineRestartTimer = undefined;
+  }
+}
+
 async function stopOrbitSine(state: SessionState): Promise<void> {
   clearOrbitSinePoll(state);
+  clearOrbitSineRestartTimer(state);
   const playId = state.orbitSinePlayId;
   state.orbitSinePlayId = undefined;
   if (playId) {
@@ -252,7 +306,68 @@ async function stopOrbitSine(state: SessionState): Promise<void> {
   }
 }
 
+function orbitSineClipBytes(state: SessionState): string {
+  return buildOrbitSineInlineClipBase64(
+    ORBIT_SINE_DURATION_MS,
+    state.orbitSineFrequencyHz,
+    undefined,
+    state.orbitSinePhaseRad,
+  );
+}
+
+function orbitSineClipDuration(state: SessionState): number {
+  return orbitSineClipDurationMs(
+    ORBIT_SINE_DURATION_MS,
+    state.orbitSineFrequencyHz,
+  );
+}
+
+function scheduleOrbitSineGaplessRestart(
+  sessionId: string,
+  state: SessionState,
+): void {
+  clearOrbitSineRestartTimer(state);
+  const durationMs = orbitSineClipDuration(state);
+  const delayMs = Math.max(0, durationMs - ORBIT_SINE_GAPLESS_LEAD_MS);
+  state.orbitSineRestartTimer = setTimeout(() => {
+    state.orbitSineRestartTimer = undefined;
+    void restartOrbitSineGapless(sessionId, state);
+  }, delayMs);
+}
+
+async function restartOrbitSineGapless(
+  sessionId: string,
+  state: SessionState,
+): Promise<void> {
+  if (!state.orbitSineEnabled || !state.orbitSinePlayId) {
+    return;
+  }
+  const previousPlayId = state.orbitSinePlayId;
+  const result = await play({
+    url: ORBIT_SINE_INLINE_URL,
+    bytes: orbitSineClipBytes(state),
+    sessionIds: [sessionId],
+    volume: ORBIT_SINE_VOLUME,
+    pose: currentOrbitPose(state),
+  });
+  if (!result.ok || !result.playId) {
+    agentLog(
+      "warn",
+      `spatial-showcase orbit sine gapless restart failed: ${result.reason ?? "play_failed"}`,
+      sessionId,
+    );
+    startOrbitSineLoopPoll(sessionId, state);
+    return;
+  }
+  state.orbitSinePlayId = result.playId;
+  void stopPlay(previousPlayId);
+  scheduleOrbitSineGaplessRestart(sessionId, state);
+}
+
 function startOrbitSineLoopPoll(sessionId: string, state: SessionState): void {
+  if (state.orbitSineRestartTimer) {
+    return;
+  }
   clearOrbitSinePoll(state);
   const playId = state.orbitSinePlayId;
   if (!playId) {
@@ -261,7 +376,7 @@ function startOrbitSineLoopPoll(sessionId: string, state: SessionState): void {
 
   state.orbitSinePollTimer = setInterval(() => {
     void (async () => {
-      if (!state.orbitSinePlayId) {
+      if (!state.orbitSinePlayId || state.orbitSineRestartTimer) {
         clearOrbitSinePoll(state);
         return;
       }
@@ -270,16 +385,7 @@ function startOrbitSineLoopPoll(sessionId: string, state: SessionState): void {
         return;
       }
       if (status.status === "ended") {
-        const replay = await play({
-          url: ORBIT_SINE_INLINE_URL,
-          bytes: buildOrbitSineInlineClipBase64(),
-          sessionIds: [sessionId],
-          volume: ORBIT_SINE_VOLUME,
-          pose: currentOrbitPose(state),
-        });
-        if (replay.ok && replay.playId) {
-          state.orbitSinePlayId = replay.playId;
-        }
+        await restartOrbitSineGapless(sessionId, state);
       }
     })();
   }, ORBIT_SINE_POLL_MS);
@@ -289,10 +395,13 @@ async function startOrbitSinePlay(
   sessionId: string,
   state: SessionState,
 ): Promise<void> {
+  if (!state.orbitSineEnabled) {
+    return;
+  }
   await stopOrbitSine(state);
   const result = await play({
     url: ORBIT_SINE_INLINE_URL,
-    bytes: buildOrbitSineInlineClipBase64(),
+    bytes: orbitSineClipBytes(state),
     sessionIds: [sessionId],
     volume: ORBIT_SINE_VOLUME,
     pose: currentOrbitPose(state),
@@ -306,11 +415,12 @@ async function startOrbitSinePlay(
     return;
   }
   state.orbitSinePlayId = result.playId;
+  scheduleOrbitSineGaplessRestart(sessionId, state);
   startOrbitSineLoopPoll(sessionId, state);
 }
 
 function emitOrbitPose(sessionId: string, state: SessionState): void {
-  if (!state.orbitStartMs) {
+  if (!state.orbitStartMs && !state.orbitManualPose) {
     return;
   }
   const now = Date.now();
@@ -321,10 +431,12 @@ function emitOrbitPose(sessionId: string, state: SessionState): void {
     return;
   }
   state.lastOrbitPoseEmitMs = now;
-  const elapsedSec = (now - state.orbitStartMs) / 1000;
-  const pose = orbitTtsPose(elapsedSec, state.orbit);
-  const angleRad =
-    (2 * Math.PI * elapsedSec) / (state.orbit.periodSec ?? 2 * Math.PI);
+  const pose = currentOrbitPose(state);
+  const angleRad = state.orbitManualPose
+    ? Math.atan2(state.orbitManualPose.z, state.orbitManualPose.x)
+    : (2 * Math.PI * (now - state.orbitStartMs!)) /
+      1000 /
+      (state.orbit.periodSec ?? 2 * Math.PI);
   sendToClient(sessionId, {
     type: "orbit_pose",
     angleDeg: (angleRad * 180) / Math.PI,
@@ -333,12 +445,28 @@ function emitOrbitPose(sessionId: string, state: SessionState): void {
   });
 }
 
+function emitOrbitPlacePose(
+  sessionId: string,
+  state: SessionState,
+  x: number,
+  z: number,
+): void {
+  state.lastOrbitPoseEmitMs = Date.now();
+  const angleRad = Math.atan2(z, x);
+  sendToClient(sessionId, {
+    type: "orbit_pose",
+    angleDeg: (angleRad * 180) / Math.PI,
+    x,
+    z,
+  });
+}
+
 function startOrbitDemo(sessionId: string, state: SessionState): void {
   stopOrbitInterval(state);
   beginOrbitClock(state);
   void startOrbitSinePlay(sessionId, state);
   state.orbitTimer = setInterval(() => {
-    if (state.orbit.paused || !state.orbitStartMs) {
+    if (state.orbit.paused || (!state.orbitStartMs && !state.orbitManualPose)) {
       return;
     }
     const pose = currentOrbitPose(state);
@@ -657,11 +785,50 @@ async function dispatchMessage(
           state.orbit.elevation = message.elevation;
         }
         if (message.paused !== undefined) {
+          if (message.paused === false && state.orbitManualPose) {
+            syncOrbitClockFromManualPose(state);
+          }
           state.orbit.paused = message.paused;
+        }
+        if (message.frequencyHz !== undefined) {
+          state.orbitSineFrequencyHz = message.frequencyHz;
+          if (state.orbitSineEnabled && state.orbitSinePlayId) {
+            void startOrbitSinePlay(sessionId, state);
+          }
+        }
+        if (message.sinePlaying !== undefined) {
+          state.orbitSineEnabled = message.sinePlaying;
+          if (message.sinePlaying) {
+            if (!state.orbitSinePlayId) {
+              void startOrbitSinePlay(sessionId, state);
+            }
+          } else {
+            void stopOrbitSine(state);
+          }
         }
         ack(sessionId, "orbit_set");
         return;
       }
+      if (message.action === "place") {
+        state.orbit.paused = true;
+        state.orbitManualPose = { x: message.x, z: message.z };
+        const pose = orbitPoseFromXz(state, message.x, message.z);
+        if (state.orbitSinePlayId) {
+          void safeMixCall(sessionId, "setPlayPose", () =>
+            setPlayPose(state.orbitSinePlayId!, pose),
+          );
+        }
+        void safeMixCall(sessionId, "setTtsPose", () =>
+          setTtsPose(sessionId, pose),
+        );
+        emitOrbitPlacePose(sessionId, state, message.x, message.z);
+        ack(sessionId, "orbit_place");
+        return;
+      }
+      sendToClient(sessionId, {
+        type: "orbit_say_status",
+        status: "playing",
+      });
       speak(sessionId, message.text);
       ack(sessionId, "orbit_say");
       return;
@@ -798,6 +965,24 @@ defineAgent({
       return;
     }
     void dispatchMessage(ctx.sessionId, message);
+  },
+
+  onSpeechEvent(ctx, event) {
+    const state = sessions.get(ctx.sessionId);
+    if (!state || state.demo !== "orbit") {
+      return;
+    }
+    if (event.type === "agent_speaking_start") {
+      sendToClient(ctx.sessionId, {
+        type: "orbit_say_status",
+        status: "playing",
+      });
+    } else if (event.type === "agent_speaking_end") {
+      sendToClient(ctx.sessionId, {
+        type: "orbit_say_status",
+        status: "ended",
+      });
+    }
   },
 
   onSessionEnd({ sessionId }) {

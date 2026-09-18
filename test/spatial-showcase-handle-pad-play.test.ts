@@ -50,6 +50,9 @@ type PadSessionState = {
     }
   >;
   loopPollTimers: Map<string, ReturnType<typeof setInterval>>;
+  orbitSineFrequencyHz: number;
+  orbitSineEnabled: boolean;
+  orbitSinePhaseRad: number;
   inProximityRoom: boolean;
 };
 
@@ -64,6 +67,9 @@ function createPadSessionState(
     playIds: new Set<string>(),
     loopPads: new Map(),
     loopPollTimers: new Map(),
+    orbitSineFrequencyHz: 440,
+    orbitSineEnabled: true,
+    orbitSinePhaseRad: 0,
     inProximityRoom: false,
   };
 

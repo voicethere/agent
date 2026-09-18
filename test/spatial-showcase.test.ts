@@ -9,12 +9,18 @@ import {
 import { orbitTtsPose } from "../templates/spatial-showcase/orbit.js";
 import {
   MAX_SAY_TEXT_LENGTH,
+  ORBIT_SINE_MAX_FREQUENCY_HZ,
+  ORBIT_SINE_MIN_FREQUENCY_HZ,
   parseShowcaseMessage,
   poseAt,
 } from "../templates/spatial-showcase/protocol.js";
 import { ProximityRoom } from "../templates/spatial-showcase/room.js";
 import { resolveClipUrl } from "../templates/spatial-showcase/sounds.js";
-import { buildOrbitSineInlineClipBase64 } from "../templates/spatial-showcase/sine.js";
+import {
+  buildOrbitSineInlineClipBase64,
+  ORBIT_SINE_SAMPLE_RATE,
+  orbitSineSampleCount,
+} from "../templates/spatial-showcase/sine.js";
 
 describe("spatial showcase agent limits", () => {
   it("allows up to twelve concurrent pad plays", () => {
@@ -56,8 +62,64 @@ describe("parseShowcaseMessage", () => {
       paused: true,
     });
     expect(
+      parseShowcaseMessage({
+        type: "orbit",
+        action: "set",
+        frequencyHz: 880,
+        sinePlaying: false,
+      }),
+    ).toEqual({
+      type: "orbit",
+      action: "set",
+      frequencyHz: 880,
+      sinePlaying: false,
+    });
+    expect(
+      parseShowcaseMessage({ type: "orbit", action: "place", x: 1.5, z: -2 }),
+    ).toEqual({ type: "orbit", action: "place", x: 1.5, z: -2 });
+    expect(
       parseShowcaseMessage({ type: "orbit", action: "say", text: "hello" }),
     ).toEqual({ type: "orbit", action: "say", text: "hello" });
+  });
+
+  it("rejects invalid orbit frequency and out-of-range place", () => {
+    expect(
+      parseShowcaseMessage({
+        type: "orbit",
+        action: "set",
+        frequencyHz: ORBIT_SINE_MIN_FREQUENCY_HZ - 1,
+      }),
+    ).toBeNull();
+    expect(
+      parseShowcaseMessage({
+        type: "orbit",
+        action: "set",
+        frequencyHz: ORBIT_SINE_MAX_FREQUENCY_HZ + 1,
+      }),
+    ).toBeNull();
+    expect(
+      parseShowcaseMessage({
+        type: "orbit",
+        action: "set",
+        frequencyHz: Number.NaN,
+      }),
+    ).toBeNull();
+    expect(
+      parseShowcaseMessage({
+        type: "orbit",
+        action: "place",
+        x: 6,
+        z: 0,
+      }),
+    ).toBeNull();
+    expect(
+      parseShowcaseMessage({
+        type: "orbit",
+        action: "place",
+        x: 0,
+        z: -6,
+      }),
+    ).toBeNull();
   });
 
   it("accepts pad with clipId and clamps volume", () => {
@@ -203,6 +265,60 @@ describe("buildOrbitSineInlineClipBase64", () => {
     const samples = bytes.subarray(44, 44 + Math.min(dataSize, 200));
     const hasNonZero = [...samples].some((byte) => byte !== 0);
     expect(hasNonZero).toBe(true);
+  });
+
+  it("snaps sample count to an integer number of cycles", () => {
+    const frequencyHz = 333;
+    const numSamples = orbitSineSampleCount(2000, frequencyHz);
+    const cycles = (frequencyHz * numSamples) / ORBIT_SINE_SAMPLE_RATE;
+    expect(Number.isInteger(cycles)).toBe(true);
+    expect(cycles).toBeGreaterThan(0);
+  });
+
+  it("starts at a zero crossing and loops after an integer number of cycles", () => {
+    const frequencyHz = 440;
+    const numSamples = orbitSineSampleCount(2000, frequencyHz);
+    const base64 = buildOrbitSineInlineClipBase64(2000, frequencyHz, 8000, 0);
+    const bytes = Buffer.from(base64, "base64");
+    const first = bytes.readInt16LE(44);
+    expect(first).toBe(0);
+    const cycles = (frequencyHz * numSamples) / ORBIT_SINE_SAMPLE_RATE;
+    expect(Number.isInteger(cycles)).toBe(true);
+    const loopSample = Math.round(
+      8000 *
+        Math.sin(
+          (2 * Math.PI * frequencyHz * numSamples) / ORBIT_SINE_SAMPLE_RATE,
+        ),
+    );
+    expect(loopSample).toBe(first);
+  });
+
+  it("honors phaseRad at the first sample", () => {
+    const phaseRad = Math.PI / 4;
+    const amplitude = 8000;
+    const base64 = buildOrbitSineInlineClipBase64(
+      2000,
+      440,
+      amplitude,
+      phaseRad,
+    );
+    const bytes = Buffer.from(base64, "base64");
+    const first = bytes.readInt16LE(44);
+    expect(first).toBe(Math.round(amplitude * Math.sin(phaseRad)));
+  });
+});
+
+describe("orbit manual pose resume", () => {
+  it("maps atan2(z, x) to orbit pose for clock sync", () => {
+    const periodSec = 2 * Math.PI;
+    const radius = 2;
+    const x = 0;
+    const z = radius;
+    const angleRad = Math.atan2(z, x);
+    const elapsedSec = (angleRad * periodSec) / (2 * Math.PI);
+    const pose = orbitTtsPose(elapsedSec, { radius, periodSec });
+    expect(pose.position.x).toBeCloseTo(x);
+    expect(pose.position.z).toBeCloseTo(z);
   });
 });
 

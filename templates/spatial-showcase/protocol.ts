@@ -8,6 +8,8 @@ const SHOWCASE_DEMOS = new Set<string>(["orbit", "soundboard", "proximity"]);
 
 export const MAX_SAY_TEXT_LENGTH = 200;
 export const MAX_XZ = 5;
+export const ORBIT_SINE_MIN_FREQUENCY_HZ = 110;
+export const ORBIT_SINE_MAX_FREQUENCY_HZ = 1760;
 
 export type ShowcaseJoinMessage = {
   type: "join";
@@ -22,12 +24,21 @@ export type ShowcaseOrbitSetMessage = {
   periodSec?: number;
   elevation?: number;
   paused?: boolean;
+  frequencyHz?: number;
+  sinePlaying?: boolean;
 };
 
 export type ShowcaseOrbitSayMessage = {
   type: "orbit";
   action: "say";
   text: string;
+};
+
+export type ShowcaseOrbitPlaceMessage = {
+  type: "orbit";
+  action: "place";
+  x: number;
+  z: number;
 };
 
 export type ShowcasePadMessage = {
@@ -74,6 +85,7 @@ export type ShowcaseInbound =
   | ShowcaseJoinMessage
   | ShowcaseOrbitSetMessage
   | ShowcaseOrbitSayMessage
+  | ShowcaseOrbitPlaceMessage
   | ShowcasePadMessage
   | ShowcasePadStopMessage
   | ShowcasePadStatusMessage
@@ -96,6 +108,11 @@ export type ShowcaseOrbitPose = {
   angleDeg: number;
   x: number;
   z: number;
+};
+
+export type ShowcaseOrbitSayStatus = {
+  type: "orbit_say_status";
+  status: "playing" | "ended";
 };
 
 export type ShowcasePadProgress = {
@@ -127,6 +144,7 @@ export type ShowcaseError = {
 export type ShowcaseOutbound =
   | ShowcaseAck
   | ShowcaseOrbitPose
+  | ShowcaseOrbitSayStatus
   | ShowcasePadProgress
   | ShowcaseRoomState
   | ShowcaseRoomFull
@@ -142,6 +160,12 @@ function clampVolume(value: number): number {
 
 function isInXzRange(value: number): boolean {
   return value >= -MAX_XZ && value <= MAX_XZ;
+}
+
+function isOrbitSineFrequencyHz(value: number): boolean {
+  return (
+    value >= ORBIT_SINE_MIN_FREQUENCY_HZ && value <= ORBIT_SINE_MAX_FREQUENCY_HZ
+  );
 }
 
 function isMixPlacement(value: unknown): value is MixPlacement {
@@ -221,6 +245,19 @@ export function parseShowcaseMessage(message: unknown): ShowcaseInbound | null {
         if (set.paused !== undefined && typeof set.paused !== "boolean") {
           return null;
         }
+        if (
+          set.frequencyHz !== undefined &&
+          (!isFiniteNumber(set.frequencyHz) ||
+            !isOrbitSineFrequencyHz(set.frequencyHz))
+        ) {
+          return null;
+        }
+        if (
+          set.sinePlaying !== undefined &&
+          typeof set.sinePlaying !== "boolean"
+        ) {
+          return null;
+        }
         return {
           type: "orbit",
           action: "set",
@@ -228,7 +265,23 @@ export function parseShowcaseMessage(message: unknown): ShowcaseInbound | null {
           ...(set.periodSec !== undefined ? { periodSec: set.periodSec } : {}),
           ...(set.elevation !== undefined ? { elevation: set.elevation } : {}),
           ...(set.paused !== undefined ? { paused: set.paused } : {}),
+          ...(set.frequencyHz !== undefined
+            ? { frequencyHz: set.frequencyHz }
+            : {}),
+          ...(set.sinePlaying !== undefined
+            ? { sinePlaying: set.sinePlaying }
+            : {}),
         };
+      }
+      if (orbit.action === "place") {
+        const place = message as ShowcaseOrbitPlaceMessage;
+        if (!isFiniteNumber(place.x) || !isInXzRange(place.x)) {
+          return null;
+        }
+        if (!isFiniteNumber(place.z) || !isInXzRange(place.z)) {
+          return null;
+        }
+        return { type: "orbit", action: "place", x: place.x, z: place.z };
       }
       if (orbit.action === "say") {
         const say = message as ShowcaseOrbitSayMessage;

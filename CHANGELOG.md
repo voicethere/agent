@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.7.13] - 2026-09-19
+
+### Added
+
+- **`spatial-showcase` orbit** — per-session sine frequency, start/stop playback vs orbit cycle, drag-to-place (`orbit` `action: "place"`), gapless clip restart, and `orbit_say_status` while TTS plays (voicethere/agent#90).
+- **`spatial-showcase` soundboard** — `pad_move` repositions an active play via `setPlayPose` (voicethere/agent#91).
+
 ## [0.7.12] - 2026-09-17
 
 ### Added

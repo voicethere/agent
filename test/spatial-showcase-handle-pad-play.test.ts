@@ -4,6 +4,7 @@ import type { ShowcaseClipId } from "../templates/spatial-showcase/sounds.js";
 
 const playMock = vi.fn();
 const stopPlayMock = vi.fn();
+const setPlayPoseMock = vi.fn();
 const sendToClientMock = vi.fn();
 
 vi.mock("@voicethere/agent", () => ({
@@ -20,14 +21,16 @@ vi.mock("@voicethere/agent", () => ({
   sendToClient: (...args: unknown[]) => sendToClientMock(...args),
   setClientPose: vi.fn(),
   setListenerMute: vi.fn(),
+  setPlayPose: (...args: unknown[]) => setPlayPoseMock(...args),
   setPositionalMixing: vi.fn(),
   setTtsPose: vi.fn(),
   speak: vi.fn(),
   stopPlay: (...args: unknown[]) => stopPlayMock(...args),
 }));
 
-const { handlePadPlay, MAX_ACTIVE_PLAYS } =
+const { handlePadMove, handlePadPlay, MAX_ACTIVE_PLAYS } =
   await import("../templates/spatial-showcase/agent.js");
+const { poseAt } = await import("../templates/spatial-showcase/protocol.js");
 
 type PadSessionState = {
   demo: "soundboard";
@@ -46,6 +49,7 @@ type PadSessionState = {
       volume: number;
       x: number;
       z: number;
+      placement?: string;
       loop: boolean;
     }
   >;
@@ -99,13 +103,67 @@ function lastPadAck() {
   return padAcks.at(-1);
 }
 
+function lastPadMoveAck() {
+  const padMoveAcks = sendToClientMock.mock.calls
+    .map((call) => call[1])
+    .filter(
+      (payload) =>
+        payload?.type === "showcase_ack" && payload.action === "pad_move",
+    );
+  return padMoveAcks.at(-1);
+}
+
+describe("handlePadMove", () => {
+  beforeEach(() => {
+    setPlayPoseMock.mockReset();
+    sendToClientMock.mockReset();
+    setPlayPoseMock.mockResolvedValue({ ok: true, playId: "play-0" });
+  });
+
+  it("calls setPlayPose with poseAt coords and updates loop pad x/z", async () => {
+    const state = createPadSessionState(1, "rain-loop");
+    state.loopPads.get("play-0")!.placement = "center";
+    state.loopPads.get("play-0")!.x = 0;
+    state.loopPads.get("play-0")!.z = 0;
+
+    await handlePadMove("session-1", state, "play-0", 2, -1);
+
+    expect(setPlayPoseMock).toHaveBeenCalledWith("play-0", poseAt(2, -1));
+    expect(state.loopPads.get("play-0")).toMatchObject({
+      x: 2,
+      z: -1,
+    });
+    expect(state.loopPads.get("play-0")?.placement).toBeUndefined();
+    expect(lastPadMoveAck()).toMatchObject({
+      ok: true,
+      playId: "play-0",
+      x: 2,
+      z: -1,
+    });
+  });
+
+  it("does not call setPlayPose for unknown playId", async () => {
+    const state = createPadSessionState(0);
+
+    await handlePadMove("session-1", state, "missing-play", 1, 1);
+
+    expect(setPlayPoseMock).not.toHaveBeenCalled();
+    expect(lastPadMoveAck()).toMatchObject({
+      ok: false,
+      error: "unknown_play",
+    });
+  });
+});
+
 describe("handlePadPlay capacity", () => {
   beforeEach(() => {
     playMock.mockReset();
     stopPlayMock.mockReset();
+    setPlayPoseMock.mockReset();
     sendToClientMock.mockReset();
     playMock.mockResolvedValue({ ok: true, playId: "play-new" });
     stopPlayMock.mockResolvedValue({ ok: true });
+    setPlayPoseMock.mockResolvedValue({ ok: true, playId: "play-0" });
   });
 
   it("rejects new one-shot plays when already at MAX_ACTIVE_PLAYS", async () => {

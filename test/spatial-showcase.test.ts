@@ -140,6 +140,49 @@ describe("parseShowcaseMessage", () => {
     });
   });
 
+  it("accepts pad_move with playId and in-range x/z", () => {
+    expect(
+      parseShowcaseMessage({
+        type: "pad_move",
+        playId: "play-1",
+        x: 2,
+        z: -1,
+      }),
+    ).toEqual({
+      type: "pad_move",
+      playId: "play-1",
+      x: 2,
+      z: -1,
+    });
+  });
+
+  it("rejects pad_move without playId or out-of-range x/z", () => {
+    expect(
+      parseShowcaseMessage({
+        type: "pad_move",
+        playId: "",
+        x: 0,
+        z: 0,
+      }),
+    ).toBeNull();
+    expect(
+      parseShowcaseMessage({
+        type: "pad_move",
+        playId: "play-1",
+        x: 6,
+        z: 0,
+      }),
+    ).toBeNull();
+    expect(
+      parseShowcaseMessage({
+        type: "pad_move",
+        playId: "play-1",
+        x: 0,
+        z: -6,
+      }),
+    ).toBeNull();
+  });
+
   it("accepts move, mute_peer, leave, ping", () => {
     expect(parseShowcaseMessage({ type: "move", x: 0, z: 1 })).toEqual({
       type: "move",

@@ -13,7 +13,7 @@
  * Build:
  *   npx @voicethere/agent build --entry templates/redis-sync/agent.ts --outfile dist/agent.js
  */
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import {
   agentLog,
   broadCastBinaryToClients,
@@ -30,26 +30,8 @@ import {
   REDIS_WORLD_KEY,
   WORLD_BYTE_LENGTH,
   writePeerSlot,
+  LUA_PATCH_PEER_SLOT,
 } from "./world-layout.js";
-
-/** Atomic splice of one peer slot (16 bytes) into the world blob. */
-const LUA_PATCH_PEER_SLOT = `
-local key = KEYS[1]
-local offset = tonumber(ARGV[1])
-local slot = ARGV[2]
-local size = tonumber(ARGV[3])
-local world = redis.call('GET', key)
-if not world then
-  world = string.rep(string.char(0), size)
-elseif #world < size then
-  world = world .. string.rep(string.char(0), size - #world)
-elseif #world > size then
-  world = string.sub(world, 1, size)
-end
-world = string.sub(world, 1, offset) .. slot .. string.sub(world, offset + #slot + 1)
-redis.call('SET', key, world)
-return size
-`;
 
 const WORLD_BROADCAST_HZ = 20;
 const WORLD_BROADCAST_INTERVAL_MS = Math.floor(1000 / WORLD_BROADCAST_HZ);

@@ -388,8 +388,19 @@ For iterative work: `npx @voicethere/agent build` then `npx @voicethere/agent ve
 npm run build           # compile SDK + example bundle (repo dev)
 npm run build:lib       # compile SDK only (tsc → dist/)
 npm run verify:local    # repo dev: build example + static verify
+npm run test            # vitest (Redis Lua tests skip without a server)
 npm run test:ci         # typecheck + vitest
+npm run test:redis      # Lua + game-sync Redis agent tests (needs Redis)
 ```
+
+World-sync coverage: JSON / binary / game-sync / redis-sync handler tests always run in memory. Lua allocate/release/slot-patch and the game-sync Redis agent path run against a real Redis when available:
+
+1. `AGENT_TEST_REDIS_URL` or `REDIS_URL` (db defaults to 15 if omitted)
+2. `redis://127.0.0.1:6379/15` if a server is already up
+3. `redis-server` on PATH (ephemeral port)
+4. `docker run redis:7-alpine` (disable with `AGENT_TEST_REDIS_DOCKER=0`)
+
+CI starts a Redis service and sets `AGENT_TEST_REDIS_URL`. Mini-redis is only a PING mock for sandbox allow-net tests — it cannot run `EVAL`.
 
 Customer project:
 

@@ -1,6 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parsePoseMessage } from "../templates/world-sync/agent.js";
 import {
   decodePoseBuffer,
   decodePoseInto,
@@ -10,6 +9,17 @@ import {
   POSE_BYTE_LENGTH,
   WorldSnapshotBuffer,
 } from "../templates/world-sync-binary/protocol.js";
+import {
+  clearAgentIpc,
+  clientPayloads,
+  emitJson,
+  endSession,
+  silenceAgentIpc,
+  startSession,
+} from "./helpers/agent-ipc.js";
+
+const ipc = silenceAgentIpc();
+const { parsePoseMessage } = await import("../templates/world-sync/agent.js");
 
 describe("world-sync JSON poses", () => {
   it("parses type pose messages", () => {
@@ -122,5 +132,73 @@ describe("world-sync-binary pose buffers", () => {
     const bad = new Float32Array([1, Number.NaN, 3]);
     expect(decodePoseInto(bad.buffer, dest)).toBe(false);
     expect([...dest]).toEqual([7, 7, 7]);
+  });
+});
+
+describe("world-sync JSON agent handlers", () => {
+  const sessions: string[] = [];
+
+  beforeEach(() => {
+    clearAgentIpc(ipc.send);
+    sessions.length = 0;
+  });
+
+  afterEach(async () => {
+    for (const sessionId of sessions.splice(0)) {
+      await endSession(sessionId);
+    }
+  });
+
+  async function join(sessionId: string): Promise<void> {
+    sessions.push(sessionId);
+    await startSession(ipc.send, sessionId);
+  }
+
+  it("broadcasts origin poses to every peer on join", async () => {
+    await join("json-a");
+    await join("json-b");
+
+    await vi.waitFor(() => {
+      const payloads = clientPayloads(ipc.send, "json-a");
+      expect(payloads).toContainEqual({
+        type: "world",
+        poses: {
+          "json-a": { x: 0, y: 0, z: 0 },
+          "json-b": { x: 0, y: 0, z: 0 },
+        },
+      });
+    });
+  });
+
+  it("fans a pose update out as JSON world snapshots", async () => {
+    await join("json-pose-a");
+    await join("json-pose-b");
+    emitJson("json-pose-a", { type: "pose", x: 3, y: 4, z: 5 });
+
+    await vi.waitFor(() => {
+      const world = {
+        type: "world",
+        poses: {
+          "json-pose-a": { x: 3, y: 4, z: 5 },
+          "json-pose-b": { x: 0, y: 0, z: 0 },
+        },
+      };
+      expect(clientPayloads(ipc.send, "json-pose-a")).toContainEqual(world);
+      expect(clientPayloads(ipc.send, "json-pose-b")).toContainEqual(world);
+    });
+  });
+
+  it("drops a leaving peer from the next world snapshot", async () => {
+    await join("json-leave-a");
+    await join("json-leave-b");
+    await endSession("json-leave-b");
+    sessions.splice(sessions.indexOf("json-leave-b"), 1);
+
+    await vi.waitFor(() => {
+      expect(clientPayloads(ipc.send, "json-leave-a")).toContainEqual({
+        type: "world",
+        poses: { "json-leave-a": { x: 0, y: 0, z: 0 } },
+      });
+    });
   });
 });

@@ -56,6 +56,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:ci": "npm run typecheck && npm run build && npm run test && node scripts/ci/verify-package-exports.mjs",
+    "test:redis": "vitest run test/redis-lua.test.ts test/game-sync-redis-agent.test.ts",
     "verify:local": "npm run build && node ./dist/cli.js verify --no-build --bundle ./dist/agent.js",
     "verify:local:only": "node ./dist/cli.js verify --no-build --bundle ./dist/agent.js",
     "live-test:models": "bash ./scripts/select-sherpa-models.sh",

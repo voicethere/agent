@@ -121,7 +121,13 @@ describe("agent template registry", () => {
   it("loads game-sync multi-file sources with Redis world buffer", () => {
     const sources = loadTemplateSources("game-sync");
     expect(sources.map((source) => source.path).sort()).toEqual(
-      ["agent.ts", "protocol.ts", "redis.ts", "sim.ts", "world-layout.ts"].sort(),
+      [
+        "agent.ts",
+        "protocol.ts",
+        "redis.ts",
+        "sim.ts",
+        "world-layout.ts",
+      ].sort(),
     );
     const content = sources.map((source) => source.content).join("\n");
     expect(content).toContain("AGENT_REDIS_URL");

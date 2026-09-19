@@ -11,19 +11,15 @@
  *   npx @voicethere/agent build --entry templates/webhooks-redis/agent.ts --outfile dist/agent.js
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 
-import {
-  agentLog,
-  broadcastToClients,
-  defineAgent,
-} from "@voicethere/agent";
+import { agentLog, broadcastToClients, defineAgent } from "@voicethere/agent";
 
 const WEBHOOK_SIGNATURE_HEADER = "x-agent-webhook-signature";
 const REDIS_COUNTER_KEY = "agent:webhook:event_count";
 
 /** Atomic increment — safe under concurrent webhook delivery on one pod. */
-const LUA_INCREMENT_COUNTER = `
+export const LUA_INCREMENT_COUNTER = `
 local key = KEYS[1]
 local n = redis.call('INCR', key)
 return n
@@ -114,7 +110,11 @@ defineAgent({
 
     let eventCount: number | null = null;
     if (redis) {
-      const result = await redis.eval(LUA_INCREMENT_COUNTER, 1, REDIS_COUNTER_KEY);
+      const result = await redis.eval(
+        LUA_INCREMENT_COUNTER,
+        1,
+        REDIS_COUNTER_KEY,
+      );
       eventCount = typeof result === "number" ? result : Number(result);
     }
 

@@ -12,6 +12,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 - **World sync templates** — `world-sync` (JSON `onDataChannelMessage`, one in-memory agent, no Redis) and `world-sync-binary` (`onDataChannelBinary` + `sendBinaryToClient` with 12-byte `ArrayBuffer` poses). `game-sync` remains the Redis + binary snapshot starter. Binary templates reuse one pose/snapshot/`Float32Array` world buffer (no per-tick `ArrayBuffer.slice` copies).
 - **Per-template folders** — every template now lives in `templates/<id>/` with a `README.md` and `agent.ts` entry (`game-sync` files moved out of the templates root).
+- **World-sync tests** — JSON / binary / game-sync / redis-sync agent handler coverage plus Lua tests against real Redis (`AGENT_TEST_REDIS_URL`, localhost:6379, or spawned `redis-server`). Mini-redis remains the sandbox PING mock only.
 - **`broadCastBinaryToClients`** is now exported from `@voicethere/agent` — wraps the payload once and fans the same `Buffer` view out to every session.
 
 ### Changed

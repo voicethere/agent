@@ -32,7 +32,7 @@
  * Build:
  *   npx @voicethere/agent build --entry templates/game-sync/agent.ts
  */
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import {
   agentLog,
   broadCastBinaryToClients,

@@ -20,6 +20,25 @@ export const PEER_FIELD_ACTIVE = 3;
 
 export const REDIS_WORLD_KEY = "e2e:redis-sync:world";
 
+/** Atomic splice of one peer slot (16 bytes) into the world blob. */
+export const LUA_PATCH_PEER_SLOT = `
+local key = KEYS[1]
+local offset = tonumber(ARGV[1])
+local slot = ARGV[2]
+local size = tonumber(ARGV[3])
+local world = redis.call('GET', key)
+if not world then
+  world = string.rep(string.char(0), size)
+elseif #world < size then
+  world = world .. string.rep(string.char(0), size - #world)
+elseif #world > size then
+  world = string.sub(world, 1, size)
+end
+world = string.sub(world, 1, offset) .. slot .. string.sub(world, offset + #slot + 1)
+redis.call('SET', key, world)
+return size
+`;
+
 export type PeerSlot = {
   clientIndex: number;
   x: number;

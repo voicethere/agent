@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 
 import { AGENT_TEMPLATES } from "../src/templates/index.js";
 
-const templatesDir = join(dirname(fileURLToPath(import.meta.url)), "..", "templates");
+const templatesDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "templates",
+);
 
 describe("template folders", () => {
   it("keeps each registered template in its own folder with a README", () => {

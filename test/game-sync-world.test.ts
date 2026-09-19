@@ -196,6 +196,18 @@ describe("game-sync simulation", () => {
     expect(world[5]).toBeGreaterThan(0);
   });
 
+  it("simulateWorldStep separates overlapping objects and exchanges velocity", () => {
+    const world = createEmptyWorldBuffer();
+    writeObjectSlot(world, 0, 1, 200, 200, 0, 1, 80, 0, 0, 0);
+    writeObjectSlot(world, 1, 2, 230, 200, 0, 1, -80, 0, 0, 0);
+
+    simulateWorldStep(world, 1 / 60, [1, 2]);
+
+    expect(world[1]).toBeLessThan(world[OBJECT_STRIDE + 1]!);
+    expect(world[5]).toBeLessThan(0);
+    expect(world[OBJECT_STRIDE + 5]).toBeGreaterThan(0);
+  });
+
   it("collectActiveObjectIdsInto fills a reusable Int32Array and returns the count", () => {
     const world = createEmptyWorldBuffer();
     writeObjectSlot(world, 0, 1, 100, 100, 0, 1, 0, 0, 0, 0);

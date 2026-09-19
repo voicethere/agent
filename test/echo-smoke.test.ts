@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { formatEchoSpeak as crashFormatEchoSpeak } from "../templates/crash.js";
-import { formatEchoSpeak } from "../templates/echo-smoke.js";
+import { formatEchoSpeak as crashFormatEchoSpeak } from "../templates/crash/agent.js";
+import { formatEchoSpeak } from "../templates/echo-smoke/agent.js";
 
 describe("formatEchoSpeak (echo-smoke)", () => {
   it('returns "Okay. " + trimmed text', () => {

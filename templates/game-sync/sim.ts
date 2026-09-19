@@ -1,7 +1,7 @@
 /**
  * Server-authoritative game-sync physics step (pure Float32Array, no Redis).
  */
-import { objectIdToSlot } from "./game-sync-world-layout.js";
+import { objectIdToSlot } from "./world-layout.js";
 
 export const BOARD_WIDTH = 1280;
 export const BOARD_HEIGHT = 720;
@@ -9,12 +9,19 @@ export const OBJECT_RADIUS = 25;
 export const COLLISION_RESTITUTION = 1.0;
 export const OBJECT_STRIDE = 9;
 
+/**
+ * Advance every active object by `dtSec`. `activeObjectIds` may be a plain
+ * array or a persistent Int32Array; `count` limits how many leading entries
+ * are live so the caller can reuse one typed array across ticks.
+ */
 export function simulateWorldStep(
   worldState: Float32Array,
   dtSec: number,
-  activeObjectIds: number[],
+  activeObjectIds: ArrayLike<number>,
+  count: number = activeObjectIds.length,
 ): void {
-  for (const objectId of activeObjectIds) {
+  for (let i = 0; i < count; i += 1) {
+    const objectId = activeObjectIds[i] ?? 0;
     const slot = objectIdToSlot(objectId);
     const start = slot * OBJECT_STRIDE;
     if (start < 0 || start + OBJECT_STRIDE > worldState.length) continue;
@@ -42,13 +49,13 @@ export function simulateWorldStep(
     worldState[start + 6] = vy;
   }
 
-  for (let i = 0; i < activeObjectIds.length; i += 1) {
-    const aId = activeObjectIds[i];
+  for (let i = 0; i < count; i += 1) {
+    const aId = activeObjectIds[i] ?? 0;
     const aSlot = objectIdToSlot(aId);
     const aStart = aSlot * OBJECT_STRIDE;
     if (aStart < 0 || aStart + OBJECT_STRIDE > worldState.length) continue;
-    for (let j = i + 1; j < activeObjectIds.length; j += 1) {
-      const bId = activeObjectIds[j];
+    for (let j = i + 1; j < count; j += 1) {
+      const bId = activeObjectIds[j] ?? 0;
       const bSlot = objectIdToSlot(bId);
       const bStart = bSlot * OBJECT_STRIDE;
       if (bStart < 0 || bStart + OBJECT_STRIDE > worldState.length) continue;

@@ -1677,13 +1677,23 @@ export function sendToClient(sessionId: string, payload: unknown): void {
   sendParentMessage({ type: "send_to_client", sessionId, payload });
 }
 
+/**
+ * Wrap outbound bytes as a Buffer without copying. `Buffer.from(typedArray)`
+ * clones; viewing the same ArrayBuffer keeps hot paths (world snapshots) zero-copy.
+ */
+function asOutboundBuffer(data: Buffer | Uint8Array): Buffer {
+  return Buffer.isBuffer(data)
+    ? data
+    : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+}
+
 /** Send raw bytes to the browser peer via the runner parent. */
 export function sendBinaryToClient(
   sessionId: string,
   data: Buffer | Uint8Array,
   channel: DataChannelKind = "sync",
 ): void {
-  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  const buffer = asOutboundBuffer(data);
   sendParentMessage({
     type: "send_binary_to_client",
     sessionId,
@@ -1705,7 +1715,7 @@ export function broadCastBinaryToClients(
   sessionIds: readonly string[],
   channel: DataChannelKind = "sync",
 ): void {
-  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  const buffer = asOutboundBuffer(data);
   for (const sessionId of sessionIds) {
     sendParentMessage({
       type: "send_binary_to_client",

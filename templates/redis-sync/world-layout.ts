@@ -20,6 +20,25 @@ export const PEER_FIELD_ACTIVE = 3;
 
 export const REDIS_WORLD_KEY = "e2e:redis-sync:world";
 
+/** Atomic splice of one peer slot (16 bytes) into the world blob. */
+export const LUA_PATCH_PEER_SLOT = `
+local key = KEYS[1]
+local offset = tonumber(ARGV[1])
+local slot = ARGV[2]
+local size = tonumber(ARGV[3])
+local world = redis.call('GET', key)
+if not world then
+  world = string.rep(string.char(0), size)
+elseif #world < size then
+  world = world .. string.rep(string.char(0), size - #world)
+elseif #world > size then
+  world = string.sub(world, 1, size)
+end
+world = string.sub(world, 1, offset) .. slot .. string.sub(world, offset + #slot + 1)
+redis.call('SET', key, world)
+return size
+`;
+
 export type PeerSlot = {
   clientIndex: number;
   x: number;
@@ -71,46 +90,49 @@ export function readPeerSlot(
 }
 
 /**
- * Decode a Redis / Node Buffer (or any Uint8Array) into a world Float32Array.
+ * Copy Redis / Node Buffer bytes into `dest` (default: a new world).
  *
- * Node Buffer pools often hand out views whose `byteOffset` is not a multiple of
- * 4. `new Float32Array(buf.buffer, buf.byteOffset, …)` then throws:
- *   "start offset of Float32Array should be a multiple of 4"
- * Copy via `ArrayBuffer.slice` so the view always starts at offset 0.
+ * Node Buffer pools can have `byteOffset` not divisible by 4, so we copy via
+ * a Uint8Array view onto `dest` instead of slicing a new ArrayBuffer.
  */
 export function normalizeWorldBuffer(
   raw: Uint8Array | null | undefined,
+  dest: Float32Array = createEmptyWorldBuffer(),
 ): Float32Array {
-  if (!raw || raw.byteLength === 0) {
-    return createEmptyWorldBuffer();
-  }
-  const bytes = Math.floor(raw.byteLength / 4) * 4;
-  if (bytes === 0) {
-    return createEmptyWorldBuffer();
-  }
-  const aligned = raw.buffer.slice(raw.byteOffset, raw.byteOffset + bytes);
-  const decoded = new Float32Array(aligned);
-  if (decoded.length === WORLD_FLOAT_COUNT) {
-    return decoded;
-  }
-  const normalized = createEmptyWorldBuffer();
-  normalized.set(
-    decoded.subarray(0, Math.min(decoded.length, WORLD_FLOAT_COUNT)),
+  const destBytes = new Uint8Array(
+    dest.buffer,
+    dest.byteOffset,
+    dest.byteLength,
   );
-  return normalized;
-}
-
-export function decodeWorldBuffer(data: ArrayBuffer): Float32Array {
-  const view = new Float32Array(data);
-  if (view.length === WORLD_FLOAT_COUNT) {
-    return view;
+  if (!raw || raw.byteLength === 0) {
+    destBytes.fill(0);
+    return dest;
   }
-  const normalized = createEmptyWorldBuffer();
-  normalized.set(view.subarray(0, Math.min(view.length, WORLD_FLOAT_COUNT)));
-  return normalized;
+  const byteCount = Math.min(
+    Math.floor(raw.byteLength / 4) * 4,
+    destBytes.byteLength,
+  );
+  if (byteCount > 0) {
+    destBytes.set(raw.subarray(0, byteCount));
+  }
+  if (byteCount < destBytes.byteLength) {
+    destBytes.fill(0, byteCount);
+  }
+  return dest;
 }
 
+export function decodeWorldBuffer(
+  data: ArrayBuffer,
+  dest: Float32Array = createEmptyWorldBuffer(),
+): Float32Array {
+  return normalizeWorldBuffer(new Uint8Array(data), dest);
+}
+
+/** Same backing ArrayBuffer when the world is a standalone Float32Array. */
 export function worldBufferToArrayBuffer(world: Float32Array): ArrayBuffer {
+  if (world.byteOffset === 0 && world.byteLength === world.buffer.byteLength) {
+    return world.buffer as ArrayBuffer;
+  }
   return world.buffer.slice(
     world.byteOffset,
     world.byteOffset + world.byteLength,

@@ -1,20 +1,25 @@
 /**
- * Echo debug agent — relays speech events and chat replies over the data channel.
+ * Full echo agent — speaks and chats back "you said: …" for voice and text.
  *
  * Build:
  *   npm install @voicethere/agent
- *   npx @voicethere/agent build --entry templates/echo-dc.ts
+ *   npx @voicethere/agent build --entry templates/echo/agent.ts
  */
 import {
   agentLog,
   defineAgent,
   parseChatText,
   sendToClient,
+  speak,
   type SpeechEvent,
 } from "@voicethere/agent";
 
 const echoPrefix =
   (process.env.AGENT_ECHO_PREFIX ?? "you said:").trim() || "you said:";
+
+function formatEcho(text: string): string {
+  return `${echoPrefix} ${text}`.trim();
+}
 
 defineAgent({
   onSessionStart({ sessionId }) {
@@ -23,7 +28,7 @@ defineAgent({
       event: "session_start",
       sessionId,
     });
-    agentLog("info", `echo-dc session_start ${sessionId}`);
+    agentLog("info", `echo session_start ${sessionId}`);
   },
 
   onSpeechEvent({ sessionId }, event: SpeechEvent) {
@@ -35,13 +40,18 @@ defineAgent({
     });
   },
 
+  onUserSpeechFinal({ sessionId, text }) {
+    const reply = formatEcho(text);
+    speak(sessionId, reply);
+    sendToClient(sessionId, { type: "chat_reply", text: reply });
+  },
+
   onDataChannelMessage(ctx) {
     const text = parseChatText(ctx.message);
     if (!text) return;
-    sendToClient(ctx.sessionId, {
-      type: "chat_reply",
-      text: `${echoPrefix} ${text}`,
-    });
+    const reply = formatEcho(text);
+    sendToClient(ctx.sessionId, { type: "chat_reply", text: reply });
+    speak(ctx.sessionId, reply);
   },
 
   onSessionEnd({ sessionId }) {
@@ -50,6 +60,6 @@ defineAgent({
       event: "session_end",
       sessionId,
     });
-    agentLog("info", `echo-dc session_end ${sessionId}`);
+    agentLog("info", `echo session_end ${sessionId}`);
   },
 });

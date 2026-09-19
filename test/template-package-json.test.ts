@@ -20,7 +20,11 @@ const agentVersion = (
   }
 ).version;
 
-const IO_REDIS_TEMPLATES = ["game-sync", "webhooks-redis", "redis-sync"] as const;
+const IO_REDIS_TEMPLATES = [
+  "game-sync",
+  "webhooks-redis",
+  "redis-sync",
+] as const;
 
 describe("loadTemplateProjectWorkspace", () => {
   const productSeedTemplates = AGENT_TEMPLATES.filter(
@@ -58,9 +62,7 @@ describe("loadTemplateProjectWorkspace", () => {
       expect(parsed.name).toBe(`voicethere-${template.id}`);
       expect(parsed.private).toBe(true);
       expect(parsed.type).toBe("module");
-      expect(parsed.dependencies["@voicethere/agent"]).toBe(
-        `^${agentVersion}`,
-      );
+      expect(parsed.dependencies["@voicethere/agent"]).toBe(`^${agentVersion}`);
       expect(parsed.scripts.build).toContain(template.entry);
       expect(parsed.scripts.verify).toContain(template.entry);
       expect(parsed.scripts.upload).toBe("voicethere build upload");

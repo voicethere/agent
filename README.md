@@ -178,7 +178,7 @@ defineAgent({
 
 On plans that include project Redis, the runner injects **`AGENT_REDIS_URL`** into the child environment and grants scoped `--allow-net` for that host. Add **`ioredis`** as a dependency of your agent, bundle it with the CLI, and open the client in **`onAgentStart`** so it is ready before any `onSessionStart` / session IPC.
 
-For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in project settings. The runner forwards the exact request bytes on process-wide **`onWebhook`** IPC (not session-queued). Verify HMAC on `ctx.body` before `JSON.parse` — VoiceThere does not verify signatures in the SDK. See [`templates/webhooks.ts`](./templates/webhooks.ts).
+For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in project settings. The runner forwards the exact request bytes on process-wide **`onWebhook`** IPC (not session-queued). Verify HMAC on `ctx.body` before `JSON.parse` — VoiceThere does not verify signatures in the SDK. See [`templates/webhooks/agent.ts`](./templates/webhooks/agent.ts).
 
 | Export                                                                    | Purpose                                                                                                                        |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -221,7 +221,7 @@ Forwarded from the runner voice pipeline as SDK `SpeechEvent` payloads on `speec
 | `vad_triggered`, `stt_stream_*`, `user_stt_*` | Low-level pipeline hooks                                |
 | `error`                                       | Vendor or pipeline failure                              |
 
-Copy [`templates/agent.ts`](./templates/agent.ts) as a starting point — exhaustive `switch` over speech event types with per-peer state stubs and `agentLog` tracing.
+Copy [`templates/voice-starter/agent.ts`](./templates/voice-starter/agent.ts) as a starting point — exhaustive `switch` over speech event types with per-peer state stubs and `agentLog` tracing.
 
 ## Multiplayer / shared state
 
@@ -233,7 +233,7 @@ The runtime processes parent IPC **in order per `sessionId`** while different se
 
 For isolated voice agents (default), leave **`shared_child_per_session`** disabled — each session gets its own child process.
 
-See [`templates/game-sync.ts`](./templates/game-sync.ts) for a data-only authoritative server example (60Hz server-side movement + collisions, client render-only).
+See [`templates/game-sync/agent.ts`](./templates/game-sync/agent.ts) for a data-only authoritative server example (60Hz server-side movement + collisions, client render-only). Start simpler with [`templates/world-sync`](./templates/world-sync) (JSON) or [`templates/world-sync-binary`](./templates/world-sync-binary) (`ArrayBuffer` poses).
 
 ### Game servers + parent/child IPC payload size guidance
 
@@ -388,8 +388,19 @@ For iterative work: `npx @voicethere/agent build` then `npx @voicethere/agent ve
 npm run build           # compile SDK + example bundle (repo dev)
 npm run build:lib       # compile SDK only (tsc → dist/)
 npm run verify:local    # repo dev: build example + static verify
+npm run test            # vitest (Redis Lua tests skip without a server)
 npm run test:ci         # typecheck + vitest
+npm run test:redis      # Lua + game-sync Redis agent tests (needs Redis)
 ```
+
+World-sync coverage: JSON / binary / game-sync / redis-sync handler tests always run in memory. Lua allocate/release/slot-patch and the game-sync Redis agent path run against a real Redis when available:
+
+1. `AGENT_TEST_REDIS_URL` or `REDIS_URL` (db defaults to 15 if omitted)
+2. `redis://127.0.0.1:6379/15` if a server is already up
+3. `redis-server` on PATH (ephemeral port)
+4. `docker run redis:7-alpine` (disable with `AGENT_TEST_REDIS_DOCKER=0`)
+
+CI starts a Redis service and sets `AGENT_TEST_REDIS_URL`. Mini-redis is only a PING mock for sandbox allow-net tests — it cannot run `EVAL`.
 
 Customer project:
 

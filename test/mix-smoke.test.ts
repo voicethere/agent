@@ -6,7 +6,7 @@ import {
   isMixCommand,
   isMixPose,
   type MixPose,
-} from "../templates/mix-smoke.js";
+} from "../templates/mix-smoke/agent.js";
 
 const MAX_PLAY_BYTES = 64 * 1024;
 

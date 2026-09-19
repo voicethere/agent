@@ -92,6 +92,7 @@ export {
   setPlayPose,
   isRecordingAvailable,
   broadcastToClients,
+  broadCastBinaryToClients,
   type AgentHandlers,
   type AgentErrorContext,
   type AgentStartContext,

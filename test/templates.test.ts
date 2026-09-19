@@ -17,7 +17,7 @@ import {
 import {
   isAllowlistedEnvProbeKey,
   resolveEnvProbeValue,
-} from "../templates/game-sync-smoke.js";
+} from "../templates/game-sync-smoke/agent.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
@@ -46,6 +46,8 @@ describe("agent template registry", () => {
         "voice-starter",
         "webhooks",
         "webhooks-redis",
+        "world-sync",
+        "world-sync-binary",
       ].sort(),
     );
   });
@@ -53,7 +55,7 @@ describe("agent template registry", () => {
   it("filters templates by kind", () => {
     const product = listTemplates({ kind: "product" });
     expect(product.every((template) => template.kind === "product")).toBe(true);
-    expect(product).toHaveLength(10);
+    expect(product).toHaveLength(12);
 
     const e2e = listTemplates({ kind: "e2e" });
     expect(e2e.every((template) => template.kind === "e2e")).toBe(true);
@@ -120,11 +122,11 @@ describe("agent template registry", () => {
     const sources = loadTemplateSources("game-sync");
     expect(sources.map((source) => source.path).sort()).toEqual(
       [
-        "game-sync-protocol.ts",
-        "game-sync-redis.ts",
-        "game-sync-sim.ts",
-        "game-sync-world-layout.ts",
-        "game-sync.ts",
+        "agent.ts",
+        "protocol.ts",
+        "redis.ts",
+        "sim.ts",
+        "world-layout.ts",
       ].sort(),
     );
     const content = sources.map((source) => source.content).join("\n");
@@ -142,10 +144,10 @@ describe("loadTemplateWorkspaceSources", () => {
     expect(sources.map((source) => source.path)).not.toContain("agent.ts");
   });
 
-  it("returns echo.ts for echo template", () => {
+  it("returns echo/agent.ts for echo template", () => {
     const sources = loadTemplateWorkspaceSources("echo");
     expect(sources).toHaveLength(1);
-    expect(sources[0]?.path).toBe("echo.ts");
+    expect(sources[0]?.path).toBe("echo/agent.ts");
   });
 });
 
@@ -165,6 +167,8 @@ describe("seed template bundles", () => {
         "voice-starter",
         "webhooks",
         "webhooks-redis",
+        "world-sync",
+        "world-sync-binary",
       ].sort(),
     );
   });

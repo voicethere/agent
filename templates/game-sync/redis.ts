@@ -1,24 +1,15 @@
 /**
  * Redis Lua scripts and helpers for game-sync world buffer.
  */
-import { MAX_LIVE_OBJECTS } from "./game-sync-protocol.js";
+import { MAX_LIVE_OBJECTS } from "./protocol.js";
 import {
-  objectIdHeaderBytes,
+  OBJECT_ID_HEADERS_BLOB,
   OBJECT_SLOT_BYTE_LENGTH,
   WORLD_BYTE_LENGTH,
   REDIS_WORLD_KEY,
-} from "./game-sync-world-layout.js";
+} from "./world-layout.js";
 
-/** Concatenated 4-byte float32 headers for objectId 1..MAX_LIVE_OBJECTS. */
-export function buildObjectIdHeadersBlob(): Buffer {
-  const parts: Buffer[] = [];
-  for (let objectId = 1; objectId <= MAX_LIVE_OBJECTS; objectId += 1) {
-    parts.push(objectIdHeaderBytes(objectId));
-  }
-  return Buffer.concat(parts);
-}
-
-export const OBJECT_ID_HEADERS_BLOB = buildObjectIdHeadersBlob();
+export { OBJECT_ID_HEADERS_BLOB };
 
 /**
  * Atomic allocate: find first empty slot, enforce global live cap, write 9-float record.

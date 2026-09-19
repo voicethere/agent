@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { MixPlacement } from "@voicethere/agent";
+
 import type { ShowcaseClipId } from "../templates/spatial-showcase/sounds.js";
 
 const playMock = vi.fn();
@@ -49,7 +51,7 @@ type PadSessionState = {
       volume: number;
       x: number;
       z: number;
-      placement?: string;
+      placement?: MixPlacement;
       loop: boolean;
     }
   >;

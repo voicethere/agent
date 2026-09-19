@@ -50,7 +50,7 @@ Three product templates cover positional / world sync, from JSON to Redis:
 | Id                   | Channel                         | State                         |
 | -------------------- | ------------------------------- | ----------------------------- |
 | `world-sync`         | `onDataChannelMessage` (JSON)   | One agent, in-memory, no Redis |
-| `world-sync-binary`  | `onDataChannelBinary` + `sendBinaryToClient` (`ArrayBuffer`) | One agent, in-memory, no Redis |
+| `world-sync-binary`  | `onDataChannelBinary` + `broadCastBinaryToClients` (`ArrayBuffer`) | One agent, in-memory, no Redis |
 | `game-sync`          | JSON control + binary world snapshots | Redis when `AGENT_REDIS_URL` is set |
 
 See each folder README for the wire format.

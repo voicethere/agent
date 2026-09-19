@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   agentLog,
+  broadCastBinaryToClients,
   defineAgent,
   disconnectClient,
   getPlay,
@@ -1694,6 +1695,33 @@ describe("sendBinaryToClient", () => {
       data: Buffer.from(payload),
       channel: "sync",
     });
+  });
+
+  it("wraps a Uint8Array view without copying its bytes", () => {
+    resetAgentIpcStateForTests();
+    sendMock = installProcessSendMock();
+    const backing = new Uint8Array(16);
+    const view = backing.subarray(4, 10);
+    view.set([1, 2, 3, 4, 5, 6]);
+    sendBinaryToClient("peer-1", view, "sync");
+    const sent = sendMock.send.mock.calls[0]?.[0] as { data: Buffer };
+    expect(sent.data.buffer).toBe(backing.buffer);
+    expect(sent.data.byteOffset).toBe(4);
+    expect(sent.data.byteLength).toBe(6);
+    expect([...sent.data]).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("broadCastBinaryToClients shares one Buffer view across sessions", () => {
+    resetAgentIpcStateForTests();
+    sendMock = installProcessSendMock();
+    const payload = Uint8Array.of(7, 8, 9);
+    broadCastBinaryToClients(payload, ["a", "b"], "sync");
+    const calls = sendMock.send.mock.calls.map(
+      (call) => call[0] as { sessionId: string; data: Buffer },
+    );
+    expect(calls.map((call) => call.sessionId)).toEqual(["a", "b"]);
+    expect(calls[0]?.data).toBe(calls[1]?.data);
+    expect(calls[0]?.data.buffer).toBe(payload.buffer);
   });
 });
 

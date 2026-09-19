@@ -51,7 +51,13 @@ const WORLD_BROADCAST_INTERVAL_MS = Math.floor(1000 / WORLD_BROADCAST_HZ);
 
 const connectedSessions = new Set<string>();
 const sessionClientIndex = new Map<string, number>();
-let localWorld = createEmptyWorldBuffer();
+/** The one world buffer: Redis GETs copy into it, every broadcast sends this view. */
+const localWorld = createEmptyWorldBuffer();
+const localWorldBytes = Buffer.from(
+  localWorld.buffer,
+  localWorld.byteOffset,
+  localWorld.byteLength,
+);
 let redis: Redis | null = null;
 let broadcastTimer: NodeJS.Timeout | null = null;
 
@@ -97,10 +103,6 @@ const PEER_SLOT_BUF = Buffer.from(
   PEER_SLOT.byteLength,
 );
 
-function worldAsSendBuffer(world: Float32Array): Buffer {
-  return Buffer.from(world.buffer, world.byteOffset, world.byteLength);
-}
-
 function encodePeerSlot(
   clientIndex: number,
   x: number,
@@ -114,11 +116,8 @@ function encodePeerSlot(
   return PEER_SLOT_BUF;
 }
 
-function broadcastWorldBuffer(
-  world: Float32Array,
-  targetSessionId?: string,
-): void {
-  const payload = worldAsSendBuffer(world);
+function broadcastWorldBuffer(targetSessionId?: string): void {
+  const payload = localWorldBytes;
   if (targetSessionId) {
     try {
       sendBinaryToClient(targetSessionId, payload, "sync");
@@ -141,19 +140,18 @@ function broadcastWorldBuffer(
   }
 }
 
-async function loadWorldFromRedis(): Promise<Float32Array> {
-  if (!redis) {
-    return localWorld;
-  }
+/** Copy the Redis blob into `localWorld` in place; the GET reply is the only allocation. */
+async function loadWorldFromRedis(): Promise<void> {
+  if (!redis) return;
   const raw = await redis.getBuffer(REDIS_WORLD_KEY);
-  return normalizeWorldBuffer(raw, localWorld);
+  normalizeWorldBuffer(raw, localWorld);
 }
 
 async function broadcastWorldFromRedis(
   targetSessionId?: string,
 ): Promise<void> {
-  const world = await loadWorldFromRedis();
-  broadcastWorldBuffer(world, targetSessionId);
+  await loadWorldFromRedis();
+  broadcastWorldBuffer(targetSessionId);
 }
 
 function startBroadcastLoopIfNeeded(): void {

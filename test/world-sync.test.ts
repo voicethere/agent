@@ -53,7 +53,11 @@ describe("world-sync-binary pose buffers", () => {
   it("reads a pose from a view into a larger buffer without copying", () => {
     const larger = new Uint8Array(24);
     larger.set(encodePoseBuffer({ x: 4, y: 5, z: 6 }), 8);
-    expect(decodePoseBuffer(larger.subarray(8, 20))).toEqual({ x: 4, y: 5, z: 6 });
+    expect(decodePoseBuffer(larger.subarray(8, 20))).toEqual({
+      x: 4,
+      y: 5,
+      z: 6,
+    });
   });
 
   it("rejects short buffers", () => {
@@ -98,6 +102,25 @@ describe("world-sync-binary pose buffers", () => {
     xyz[0] = 9;
     const again = snapshot.encodePacked(ids, xyz, 2);
     expect(again.buffer).toBe(encoded.buffer);
+    expect(again).toBe(encoded);
     expect(decodeWorldSnapshot(again)[0]?.pose.x).toBe(9);
+  });
+
+  it("returns a fresh view only when the encoded length changes", () => {
+    const snapshot = new WorldSnapshotBuffer();
+    const xyz = new Float32Array([1, 2, 3, 4, 5, 6]);
+    const two = snapshot.encodePacked(["p1", "p2"], xyz, 2);
+    const one = snapshot.encodePacked(["p1", "p2"], xyz, 1);
+    expect(one).not.toBe(two);
+    expect(one.buffer).toBe(two.buffer);
+    expect(one.byteLength).toBeLessThan(two.byteLength);
+    expect(snapshot.bytesView()).toBe(one);
+  });
+
+  it("decodePoseInto rejects non-finite floats without touching dest", () => {
+    const dest = new Float32Array([7, 7, 7]);
+    const bad = new Float32Array([1, Number.NaN, 3]);
+    expect(decodePoseInto(bad.buffer, dest)).toBe(false);
+    expect([...dest]).toEqual([7, 7, 7]);
   });
 });

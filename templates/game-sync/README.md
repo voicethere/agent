@@ -2,7 +2,7 @@
 
 Authoritative multi-object world sync for games and simulations. Live objects are capped at **25**. Clients register over JSON; the agent simulates at 60 Hz and broadcasts a **binary** `Float32Array` world snapshot with `sendBinaryToClient`.
 
-When `AGENT_REDIS_URL` is set (Project Redis), the world blob lives at `game-sync:world` and is shared across runner workers. Redis GET bytes are copied into the same in-memory `Float32Array`; broadcasts wrap that array (no extra world copies). Without Redis, state is per-worker in memory.
+When `AGENT_REDIS_URL` is set (Project Redis), the world blob lives at `game-sync:world` and is shared across runner workers. Redis GET bytes are copied into the one in-memory `Float32Array` (the GET reply is the only per-tick allocation); sim, broadcast, and Redis `SET` all use one persistent `Buffer` view of that array. Without Redis, state is per-worker in memory.
 
 This is the most advanced world-sync starter: Redis + binary snapshots + server-side physics.
 

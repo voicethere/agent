@@ -3,12 +3,13 @@
  *
  * Clients send an ArrayBuffer of 3 float32 values `[x, y, z]` on the sync
  * DataChannel. Poses live in one Float32Array; the outbound snapshot is one
- * growable buffer rewritten in place (no per-tick copies).
+ * growable buffer rewritten in place and fanned out as a single Buffer view
+ * (no per-tick or per-peer copies).
  *
  * Build:
  *   npx @voicethere/agent build --entry templates/world-sync-binary/agent.ts --outfile dist/agent.js
  */
-import { defineAgent, sendBinaryToClient } from "@voicethere/agent";
+import { broadCastBinaryToClients, defineAgent } from "@voicethere/agent";
 
 import {
   decodePoseInto,
@@ -69,13 +70,13 @@ function removePeer(sessionId: string): void {
   }
   indexBySession.delete(sessionId);
   peerCount -= 1;
+  sessionIds.length = peerCount;
 }
 
 function broadcastWorld(): void {
+  // sessionIds.length === peerCount, so one Buffer view is shared by every send.
   const payload = snapshot.encodePacked(sessionIds, xyz, peerCount);
-  for (let i = 0; i < peerCount; i += 1) {
-    sendBinaryToClient(sessionIds[i]!, payload, "sync");
-  }
+  broadCastBinaryToClients(payload, sessionIds, "sync");
 }
 
 export default defineAgent({

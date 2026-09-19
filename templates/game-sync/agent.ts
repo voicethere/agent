@@ -70,7 +70,6 @@ import {
   markSlotFree,
   normalizeWorldBuffer,
   objectIdToSlot,
-  OBJECT_SLOT_BYTE_LENGTH,
   planRedisSimTick,
   REDIS_SIM_LOCK_KEY,
   REDIS_WORLD_KEY,
@@ -90,7 +89,13 @@ const objectOwners = new Map<number, string>();
 const sessionObjects = new Map<string, Set<number>>();
 const freeSlots: number[] = [];
 
-let worldState = createEmptyWorldBuffer();
+/** The one world buffer: Redis loads copy into it, sim/broadcast/SET read from it. */
+const worldState = createEmptyWorldBuffer();
+const worldStateBytes = Buffer.from(
+  worldState.buffer,
+  worldState.byteOffset,
+  worldState.byteLength,
+);
 let redis: Redis | null = null;
 let broadcastTimer: NodeJS.Timeout | null = null;
 let worldMutationChain: Promise<void> = Promise.resolve();
@@ -264,7 +269,7 @@ async function registerObjectInRedis(
   }
 
   attachObjectToSession(sessionId, objectId);
-  worldState = await loadWorldFromRedis();
+  await loadWorldFromRedis();
   return objectId;
 }
 
@@ -286,7 +291,7 @@ async function releaseObjectInRedis(objectId: number): Promise<boolean> {
     REDIS_EVAL_KEYS.headers,
   );
   if (Number(released) === 1) {
-    worldState = await loadWorldFromRedis();
+    await loadWorldFromRedis();
   }
   return Number(released) === 1;
 }
@@ -350,29 +355,26 @@ function notifyObjectReleased(objectId: number, ownerSessionId: string): void {
   }
 }
 
-function worldAsSendBuffer(world: Float32Array): Buffer {
-  return Buffer.from(world.buffer, world.byteOffset, world.byteLength);
-}
-
-function broadcastWorldBuffer(world: Float32Array): void {
+function broadcastWorldBuffer(): void {
   if (connectedSessions.size === 0) return;
-  const payload = worldAsSendBuffer(world);
   for (const sessionId of connectedSessions) {
-    sendBinaryToClient(sessionId, payload, "sync");
+    sendBinaryToClient(sessionId, worldStateBytes, "sync");
   }
 }
 
-async function loadWorldFromRedis(): Promise<Float32Array> {
-  if (!redis) {
-    return worldState;
-  }
-  const raw = await redis.getBuffer(REDIS_WORLD_KEY);
-  return normalizeWorldBuffer(raw, worldState);
-}
-
-async function saveWorldToRedis(world: Float32Array): Promise<void> {
+/**
+ * Copy the Redis blob into `worldState` in place (the GET reply is the only
+ * per-tick allocation; it is a fresh socket Buffer we cannot avoid).
+ */
+async function loadWorldFromRedis(): Promise<void> {
   if (!redis) return;
-  await redis.set(REDIS_WORLD_KEY, worldAsSendBuffer(world));
+  const raw = await redis.getBuffer(REDIS_WORLD_KEY);
+  normalizeWorldBuffer(raw, worldState);
+}
+
+async function saveWorldToRedis(): Promise<void> {
+  if (!redis) return;
+  await redis.set(REDIS_WORLD_KEY, worldStateBytes);
 }
 
 async function runSimulationTick(): Promise<void> {
@@ -387,19 +389,17 @@ async function runSimulationTick(): Promise<void> {
     await withWorldMutation(async () => {
       simulateWorldStep(worldState, dt, collectActiveObjectIds(worldState));
     });
-    broadcastWorldBuffer(worldState);
+    broadcastWorldBuffer();
     return;
   }
 
   await withWorldMutation(async () => {
     const lockResult = await withRedisSimLock(
       async () => {
-        const world = await loadWorldFromRedis();
-        const activeObjectIds = collectActiveObjectIds(world);
-        simulateWorldStep(world, dt, activeObjectIds);
-        await saveWorldToRedis(world);
-        worldState = world;
-        broadcastWorldBuffer(world);
+        await loadWorldFromRedis();
+        simulateWorldStep(worldState, dt, collectActiveObjectIds(worldState));
+        await saveWorldToRedis();
+        broadcastWorldBuffer();
         return true;
       },
       { retryUntilAcquired: false },
@@ -411,9 +411,8 @@ async function runSimulationTick(): Promise<void> {
         connectedSessions,
       });
       if (plan === "relay") {
-        const world = await loadWorldFromRedis();
-        worldState = world;
-        broadcastWorldBuffer(world);
+        await loadWorldFromRedis();
+        broadcastWorldBuffer();
       }
     }
   });
@@ -453,7 +452,7 @@ async function ensureRedisWorldInitialized(): Promise<void> {
   if (!redis) return;
   const existing = await redis.getBuffer(REDIS_WORLD_KEY);
   if (!existing || existing.byteLength === 0) {
-    await redis.set(REDIS_WORLD_KEY, worldAsSendBuffer(worldState));
+    await redis.set(REDIS_WORLD_KEY, worldStateBytes);
   }
 }
 
@@ -474,7 +473,7 @@ defineAgent({
     });
     await redis.connect();
     await ensureRedisWorldInitialized();
-    worldState = await loadWorldFromRedis();
+    await loadWorldFromRedis();
     startBroadcastLoopIfNeeded();
     agentLog("info", "game-sync agent connected to project Redis world buffer");
   },
@@ -482,9 +481,7 @@ defineAgent({
   async onClientJoin({ sessionId }) {
     connectedSessions.add(sessionId);
     startBroadcastLoopIfNeeded();
-    if (redis) {
-      worldState = await loadWorldFromRedis();
-    }
+    await loadWorldFromRedis();
     sendToClient(sessionId, {
       type: "world_snapshot",
       objects: liveWorldSnapshot(worldState, objectOwners),

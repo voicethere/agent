@@ -12,8 +12,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 - **World sync templates** — `world-sync` (JSON `onDataChannelMessage`, one in-memory agent, no Redis) and `world-sync-binary` (`onDataChannelBinary` + `sendBinaryToClient` with 12-byte `ArrayBuffer` poses). `game-sync` remains the Redis + binary snapshot starter. Binary templates reuse one pose/snapshot/`Float32Array` world buffer (no per-tick `ArrayBuffer.slice` copies).
 - **Per-template folders** — every template now lives in `templates/<id>/` with a `README.md` and `agent.ts` entry (`game-sync` files moved out of the templates root).
+- **`broadCastBinaryToClients`** is now exported from `@voicethere/agent` — wraps the payload once and fans the same `Buffer` view out to every session.
 
 ### Changed
+
+- **Zero-copy `sendBinaryToClient`** — passing a `Uint8Array` (or any typed-array view) no longer clones the bytes via `Buffer.from(typedArray)`; the runtime wraps the same `ArrayBuffer` with `Buffer.from(buffer, byteOffset, byteLength)`. `Buffer` inputs are forwarded as-is.
 
 - **Breaking (0.x):** template source paths. `templates/echo.ts` is now `templates/echo/agent.ts`; `templates/game-sync.ts` is `templates/game-sync/agent.ts`; `templates/agent.ts` is `templates/voice-starter/agent.ts`. Update local `build --entry` flags and GitHub permalinks.
 

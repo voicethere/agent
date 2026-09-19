@@ -74,10 +74,14 @@ export function decodePoseBuffer(
   const x = view.getFloat32(0, true);
   const y = view.getFloat32(4, true);
   const z = view.getFloat32(8, true);
-  if (![x, y, z].every(Number.isFinite)) {
+  if (!isFinitePose(x, y, z)) {
     return null;
   }
   return { x, y, z };
+}
+
+function isFinitePose(x: number, y: number, z: number): boolean {
+  return Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z);
 }
 
 /** Write xyz from an inbound frame into a persistent Float32Array (no copy). */
@@ -96,7 +100,7 @@ export function decodePoseInto(
   const x = view.getFloat32(0, true);
   const y = view.getFloat32(4, true);
   const z = view.getFloat32(8, true);
-  if (![x, y, z].every(Number.isFinite)) {
+  if (!isFinitePose(x, y, z)) {
     return false;
   }
   dest[floatOffset] = x;
@@ -120,19 +124,34 @@ export class WorldSnapshotBuffer {
   private bytes: Uint8Array;
   private view: DataView;
   private used = 0;
+  private out: Uint8Array;
 
   constructor(capacity = 256) {
     this.bytes = new Uint8Array(capacity);
-    this.view = new DataView(this.bytes.buffer, this.bytes.byteOffset, this.bytes.byteLength);
+    this.view = new DataView(
+      this.bytes.buffer,
+      this.bytes.byteOffset,
+      this.bytes.byteLength,
+    );
+    this.out = this.bytes.subarray(0, 0);
   }
 
   get byteLength(): number {
     return this.used;
   }
 
-  /** View of the last encoded snapshot (same backing buffer, length = used). */
+  /**
+   * View of the last encoded snapshot (same backing buffer, length = used).
+   * The view object is reused while the encoded length is unchanged.
+   */
   bytesView(): Uint8Array {
-    return this.bytes.subarray(0, this.used);
+    if (
+      this.out.byteLength !== this.used ||
+      this.out.buffer !== this.bytes.buffer
+    ) {
+      this.out = this.bytes.subarray(0, this.used);
+    }
+    return this.out;
   }
 
   encode(entries: Iterable<WorldPoseEntry>): Uint8Array {
@@ -145,7 +164,13 @@ export class WorldSnapshotBuffer {
     this.view.setUint32(0, list.length, true);
     let offset = 4;
     for (const entry of list) {
-      offset = this.writePeer(offset, entry.sessionId, entry.pose.x, entry.pose.y, entry.pose.z);
+      offset = this.writePeer(
+        offset,
+        entry.sessionId,
+        entry.pose.x,
+        entry.pose.y,
+        entry.pose.z,
+      );
     }
     this.used = offset;
     return this.bytesView();
@@ -184,7 +209,10 @@ export class WorldSnapshotBuffer {
     y: number,
     z: number,
   ): number {
-    const { written } = encoder.encodeInto(sessionId, this.bytes.subarray(offset + 2));
+    const { written } = encoder.encodeInto(
+      sessionId,
+      this.bytes.subarray(offset + 2),
+    );
     this.view.setUint16(offset, written, true);
     offset += 2 + written;
     this.view.setFloat32(offset, x, true);
@@ -244,7 +272,7 @@ export function decodeWorldSnapshot(
     const y = view.getFloat32(offset + 4, true);
     const z = view.getFloat32(offset + 8, true);
     offset += POSE_BYTE_LENGTH;
-    if (![x, y, z].every(Number.isFinite)) {
+    if (!isFinitePose(x, y, z)) {
       continue;
     }
     entries.push({ sessionId, pose: { x, y, z } });

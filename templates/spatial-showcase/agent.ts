@@ -652,6 +652,34 @@ export async function handlePadPlay(
   }
 }
 
+export async function handlePadMove(
+  sessionId: string,
+  state: SessionState,
+  playId: string,
+  x: number,
+  z: number,
+): Promise<void> {
+  if (!state.playIds.has(playId)) {
+    ackError(sessionId, "pad_move", "unknown_play");
+    return;
+  }
+
+  const poseResult = await setPlayPose(playId, poseAt(x, z));
+  if (!poseResult.ok) {
+    ackError(sessionId, "pad_move", poseResult.reason ?? "set_pose_failed");
+    return;
+  }
+
+  const loopPad = state.loopPads.get(playId);
+  if (loopPad) {
+    loopPad.x = x;
+    loopPad.z = z;
+    delete loopPad.placement;
+  }
+
+  ack(sessionId, "pad_move", { playId, x, z });
+}
+
 async function handleJoin(
   sessionId: string,
   demo: ShowcaseDemo,
@@ -883,6 +911,20 @@ async function dispatchMessage(
       } else {
         ack(sessionId, "pad_status");
       }
+      return;
+    }
+    case "pad_move": {
+      if (state.demo !== "soundboard") {
+        ackError(sessionId, "pad_move", "wrong_demo");
+        return;
+      }
+      await handlePadMove(
+        sessionId,
+        state,
+        message.playId,
+        message.x,
+        message.z,
+      );
       return;
     }
     case "move": {

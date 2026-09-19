@@ -60,6 +60,13 @@ export type ShowcasePadStatusMessage = {
   playId: string;
 };
 
+export type ShowcasePadMoveMessage = {
+  type: "pad_move";
+  playId: string;
+  x: number;
+  z: number;
+};
+
 export type ShowcaseMoveMessage = {
   type: "move";
   x: number;
@@ -89,6 +96,7 @@ export type ShowcaseInbound =
   | ShowcasePadMessage
   | ShowcasePadStopMessage
   | ShowcasePadStatusMessage
+  | ShowcasePadMoveMessage
   | ShowcaseMoveMessage
   | ShowcaseMutePeerMessage
   | ShowcaseLeaveMessage
@@ -339,6 +347,24 @@ export function parseShowcaseMessage(message: unknown): ShowcaseInbound | null {
         return null;
       }
       return { type: "pad_status", playId: status.playId.trim() };
+    }
+    case "pad_move": {
+      const padMove = message as ShowcasePadMoveMessage;
+      if (!isNonEmptyString(padMove.playId)) {
+        return null;
+      }
+      if (!isFiniteNumber(padMove.x) || !isInXzRange(padMove.x)) {
+        return null;
+      }
+      if (!isFiniteNumber(padMove.z) || !isInXzRange(padMove.z)) {
+        return null;
+      }
+      return {
+        type: "pad_move",
+        playId: padMove.playId.trim(),
+        x: padMove.x,
+        z: padMove.z,
+      };
     }
     case "move": {
       const move = message as ShowcaseMoveMessage;

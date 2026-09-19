@@ -13,6 +13,9 @@ import {
   findFirstEmptySlot,
   liveWorldSnapshot,
   markSlotFree,
+  normalizeWorldBuffer,
+  objectIdHeaderBytes,
+  OBJECT_STRIDE,
   planRedisSimTick,
   preserveEmptySlots,
   readSlotObjectId,
@@ -189,5 +192,41 @@ describe("game-sync simulation", () => {
 
     expect(world[1]).toBeGreaterThanOrEqual(OBJECT_RADIUS);
     expect(world[5]).toBeGreaterThan(0);
+  });
+});
+
+describe("game-sync world buffer reuse", () => {
+  it("normalizeWorldBuffer writes into the destination array", () => {
+    const dest = createEmptyWorldBuffer();
+    writeObjectSlot(dest, 0, 1, 10, 20, 0, 1, 0, 0, 0, 0);
+    const raw = Buffer.from(
+      new Uint8Array(dest.buffer, dest.byteOffset, dest.byteLength),
+    );
+    dest.fill(0);
+    const result = normalizeWorldBuffer(raw, dest);
+    expect(result).toBe(dest);
+    expect(readSlotObjectId(dest, 0)).toBe(1);
+    expect(dest[1]).toBe(10);
+    expect(dest[2]).toBe(20);
+  });
+
+  it("normalizeWorldBuffer copies an unaligned Redis view into dest", () => {
+    const aligned = createEmptyWorldBuffer();
+    writeObjectSlot(aligned, 1, 2, 3, 4, 0, 1, 0, 0, 0, 0);
+    const padded = Buffer.concat([Buffer.from([0xff]), Buffer.from(aligned.buffer)]);
+    const unaligned = padded.subarray(1);
+    expect(unaligned.byteOffset % 4).not.toBe(0);
+    const dest = createEmptyWorldBuffer();
+    normalizeWorldBuffer(unaligned, dest);
+    expect(readSlotObjectId(dest, 1)).toBe(2);
+    expect(dest[OBJECT_STRIDE + 1]).toBe(3);
+  });
+
+  it("objectIdHeaderBytes is a view into the shared headers blob", () => {
+    const first = objectIdHeaderBytes(1);
+    const again = objectIdHeaderBytes(1);
+    expect(first.buffer).toBe(again.buffer);
+    expect(first.readFloatLE(0)).toBe(1);
+    expect(objectIdHeaderBytes(2).readFloatLE(0)).toBe(2);
   });
 });

@@ -21,6 +21,7 @@ import {
   normalizeWorldBuffer,
   peerSlotOffset,
   PEER_SLOT_BYTE_LENGTH,
+  PEER_STRIDE,
   REDIS_WORLD_KEY,
   WORLD_BYTE_LENGTH,
   writePeerSlot,
@@ -89,7 +90,14 @@ function parsePositionMessage(
   };
 }
 
-function copyWorldBuffer(world: Float32Array): Buffer {
+const PEER_SLOT = new Float32Array(PEER_STRIDE);
+const PEER_SLOT_BUF = Buffer.from(
+  PEER_SLOT.buffer,
+  PEER_SLOT.byteOffset,
+  PEER_SLOT.byteLength,
+);
+
+function worldAsSendBuffer(world: Float32Array): Buffer {
   return Buffer.from(world.buffer, world.byteOffset, world.byteLength);
 }
 
@@ -99,15 +107,18 @@ function encodePeerSlot(
   y: number,
   active: number,
 ): Buffer {
-  const floats = new Float32Array([clientIndex, x, y, active]);
-  return Buffer.from(floats.buffer, floats.byteOffset, floats.byteLength);
+  PEER_SLOT[0] = clientIndex;
+  PEER_SLOT[1] = x;
+  PEER_SLOT[2] = y;
+  PEER_SLOT[3] = active;
+  return PEER_SLOT_BUF;
 }
 
 function broadcastWorldBuffer(
   world: Float32Array,
   targetSessionId?: string,
 ): void {
-  const payload = copyWorldBuffer(world);
+  const payload = worldAsSendBuffer(world);
   if (targetSessionId) {
     try {
       sendBinaryToClient(targetSessionId, payload, "sync");
@@ -132,10 +143,10 @@ function broadcastWorldBuffer(
 
 async function loadWorldFromRedis(): Promise<Float32Array> {
   if (!redis) {
-    return new Float32Array(localWorld);
+    return localWorld;
   }
   const raw = await redis.getBuffer(REDIS_WORLD_KEY);
-  return normalizeWorldBuffer(raw);
+  return normalizeWorldBuffer(raw, localWorld);
 }
 
 async function broadcastWorldFromRedis(

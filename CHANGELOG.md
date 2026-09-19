@@ -10,7 +10,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Added
 
-- **World sync templates** — `world-sync` (JSON `onDataChannelMessage`, one in-memory agent, no Redis) and `world-sync-binary` (`onDataChannelBinary` + `sendBinaryToClient` with 12-byte `ArrayBuffer` poses). `game-sync` remains the Redis + binary snapshot starter.
+- **World sync templates** — `world-sync` (JSON `onDataChannelMessage`, one in-memory agent, no Redis) and `world-sync-binary` (`onDataChannelBinary` + `sendBinaryToClient` with 12-byte `ArrayBuffer` poses). `game-sync` remains the Redis + binary snapshot starter. Binary templates reuse one pose/snapshot/`Float32Array` world buffer (no per-tick `ArrayBuffer.slice` copies).
 - **Per-template folders** — every template now lives in `templates/<id>/` with a `README.md` and `agent.ts` entry (`game-sync` files moved out of the templates root).
 
 ### Changed

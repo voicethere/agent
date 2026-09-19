@@ -151,18 +151,23 @@ function randomVelocity(): number {
   return (Math.random() < 0.5 ? -1 : 1) * rand(MIN_SPEED, MAX_SPEED);
 }
 
+const INITIAL_TAIL = new Float32Array(8);
+const INITIAL_TAIL_BUF = Buffer.from(
+  INITIAL_TAIL.buffer,
+  INITIAL_TAIL.byteOffset,
+  INITIAL_TAIL.byteLength,
+);
+
 function randomInitialTail(): Buffer {
-  const floats = new Float32Array([
-    rand(OBJECT_RADIUS, BOARD_WIDTH - OBJECT_RADIUS),
-    rand(OBJECT_RADIUS, BOARD_HEIGHT - OBJECT_RADIUS),
-    0,
-    1,
-    randomVelocity(),
-    randomVelocity(),
-    0,
-    0,
-  ]);
-  return Buffer.from(floats.buffer, floats.byteOffset, floats.byteLength);
+  INITIAL_TAIL[0] = rand(OBJECT_RADIUS, BOARD_WIDTH - OBJECT_RADIUS);
+  INITIAL_TAIL[1] = rand(OBJECT_RADIUS, BOARD_HEIGHT - OBJECT_RADIUS);
+  INITIAL_TAIL[2] = 0;
+  INITIAL_TAIL[3] = 1;
+  INITIAL_TAIL[4] = randomVelocity();
+  INITIAL_TAIL[5] = randomVelocity();
+  INITIAL_TAIL[6] = 0;
+  INITIAL_TAIL[7] = 0;
+  return INITIAL_TAIL_BUF;
 }
 
 function attachObjectToSession(sessionId: string, objectId: number): void {
@@ -345,13 +350,13 @@ function notifyObjectReleased(objectId: number, ownerSessionId: string): void {
   }
 }
 
-function copyWorldBuffer(world: Float32Array): Buffer {
+function worldAsSendBuffer(world: Float32Array): Buffer {
   return Buffer.from(world.buffer, world.byteOffset, world.byteLength);
 }
 
 function broadcastWorldBuffer(world: Float32Array): void {
   if (connectedSessions.size === 0) return;
-  const payload = copyWorldBuffer(world);
+  const payload = worldAsSendBuffer(world);
   for (const sessionId of connectedSessions) {
     sendBinaryToClient(sessionId, payload, "sync");
   }
@@ -359,15 +364,15 @@ function broadcastWorldBuffer(world: Float32Array): void {
 
 async function loadWorldFromRedis(): Promise<Float32Array> {
   if (!redis) {
-    return new Float32Array(worldState);
+    return worldState;
   }
   const raw = await redis.getBuffer(REDIS_WORLD_KEY);
-  return normalizeWorldBuffer(raw);
+  return normalizeWorldBuffer(raw, worldState);
 }
 
 async function saveWorldToRedis(world: Float32Array): Promise<void> {
   if (!redis) return;
-  await redis.set(REDIS_WORLD_KEY, copyWorldBuffer(world));
+  await redis.set(REDIS_WORLD_KEY, worldAsSendBuffer(world));
 }
 
 async function runSimulationTick(): Promise<void> {
@@ -448,8 +453,7 @@ async function ensureRedisWorldInitialized(): Promise<void> {
   if (!redis) return;
   const existing = await redis.getBuffer(REDIS_WORLD_KEY);
   if (!existing || existing.byteLength === 0) {
-    const empty = createEmptyWorldBuffer();
-    await redis.set(REDIS_WORLD_KEY, copyWorldBuffer(empty));
+    await redis.set(REDIS_WORLD_KEY, worldAsSendBuffer(worldState));
   }
 }
 
@@ -461,7 +465,6 @@ defineAgent({
         "warn",
         "AGENT_REDIS_URL unset — game-sync uses per-worker in-memory world only",
       );
-      worldState = createEmptyWorldBuffer();
       return;
     }
 

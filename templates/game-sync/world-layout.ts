@@ -74,6 +74,14 @@ export function markSlotFree(world: Float32Array, slot: number): void {
   }
 }
 
+const OBJECT_SLOT_SCRATCH = new Float32Array(OBJECT_STRIDE);
+const OBJECT_SLOT_SCRATCH_BUF = Buffer.from(
+  OBJECT_SLOT_SCRATCH.buffer,
+  OBJECT_SLOT_SCRATCH.byteOffset,
+  OBJECT_SLOT_BYTE_LENGTH,
+);
+
+/** Shared 9-float slot buffer (overwritten on the next call). */
 export function encodeObjectSlot(
   objectId: number,
   posX: number,
@@ -85,18 +93,16 @@ export function encodeObjectSlot(
   dirZ: number,
   dirW: number,
 ): Buffer {
-  const floats = new Float32Array([
-    objectId,
-    posX,
-    posY,
-    posZ,
-    posW,
-    dirX,
-    dirY,
-    dirZ,
-    dirW,
-  ]);
-  return Buffer.from(floats.buffer, floats.byteOffset, floats.byteLength);
+  OBJECT_SLOT_SCRATCH[0] = objectId;
+  OBJECT_SLOT_SCRATCH[1] = posX;
+  OBJECT_SLOT_SCRATCH[2] = posY;
+  OBJECT_SLOT_SCRATCH[3] = posZ;
+  OBJECT_SLOT_SCRATCH[4] = posW;
+  OBJECT_SLOT_SCRATCH[5] = dirX;
+  OBJECT_SLOT_SCRATCH[6] = dirY;
+  OBJECT_SLOT_SCRATCH[7] = dirZ;
+  OBJECT_SLOT_SCRATCH[8] = dirW;
+  return OBJECT_SLOT_SCRATCH_BUF;
 }
 
 export function writeObjectSlot(
@@ -208,32 +214,41 @@ export function clampSimulationDtSec(
 }
 
 /**
- * Decode a Redis / Node Buffer into a fixed-size world Float32Array.
+ * Copy Redis / Node Buffer bytes into `dest` (default: a new world).
+ *
+ * Node Buffer pools can have `byteOffset` not divisible by 4, so we copy via
+ * a Uint8Array view onto `dest` instead of slicing a new ArrayBuffer.
  */
 export function normalizeWorldBuffer(
   raw: Uint8Array | null | undefined,
+  dest: Float32Array = createEmptyWorldBuffer(),
 ): Float32Array {
+  const destBytes = new Uint8Array(dest.buffer, dest.byteOffset, dest.byteLength);
   if (!raw || raw.byteLength === 0) {
-    return createEmptyWorldBuffer();
+    destBytes.fill(0);
+    return dest;
   }
-  const bytes = Math.floor(raw.byteLength / 4) * 4;
-  if (bytes === 0) {
-    return createEmptyWorldBuffer();
+  const byteCount = Math.min(Math.floor(raw.byteLength / 4) * 4, destBytes.byteLength);
+  if (byteCount > 0) {
+    destBytes.set(raw.subarray(0, byteCount));
   }
-  const aligned = raw.buffer.slice(raw.byteOffset, raw.byteOffset + bytes);
-  const decoded = new Float32Array(aligned);
-  if (decoded.length === WORLD_FLOAT_COUNT) {
-    return decoded;
+  if (byteCount < destBytes.byteLength) {
+    destBytes.fill(0, byteCount);
   }
-  const normalized = createEmptyWorldBuffer();
-  normalized.set(
-    decoded.subarray(0, Math.min(decoded.length, WORLD_FLOAT_COUNT)),
-  );
-  return normalized;
+  return dest;
 }
 
-/** Float32 objectId bytes for Lua slot header splice (objectId 1..MAX_LIVE_OBJECTS). */
+/** Concatenated float32 objectId headers (1..MAX_LIVE_OBJECTS), one allocation. */
+export const OBJECT_ID_HEADERS_BLOB = (() => {
+  const blob = Buffer.alloc(MAX_LIVE_OBJECTS * 4);
+  for (let objectId = 1; objectId <= MAX_LIVE_OBJECTS; objectId += 1) {
+    blob.writeFloatLE(objectId, (objectId - 1) * 4);
+  }
+  return blob;
+})();
+
+/** View into {@link OBJECT_ID_HEADERS_BLOB} for Lua slot header splice. */
 export function objectIdHeaderBytes(objectId: number): Buffer {
-  const header = new Float32Array([objectId]);
-  return Buffer.from(header.buffer, header.byteOffset, 4);
+  const index = objectId - 1;
+  return OBJECT_ID_HEADERS_BLOB.subarray(index * 4, index * 4 + 4);
 }

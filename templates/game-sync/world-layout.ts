@@ -5,7 +5,7 @@
  * Slot layout: [objectId, posX, posY, posZ, posW, dirX, dirY, dirZ, dirW]
  * Empty slot: objectId === 0
  */
-import { MAX_LIVE_OBJECTS } from "./game-sync-protocol.js";
+import { MAX_LIVE_OBJECTS } from "./protocol.js";
 
 export const OBJECT_STRIDE = 9;
 export const WORLD_FLOAT_COUNT = MAX_LIVE_OBJECTS * OBJECT_STRIDE;

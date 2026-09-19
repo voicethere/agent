@@ -30,7 +30,7 @@
  * - 60Hz world-state broadcast while the sim loop runs (no-op send when 0 sessions)
  *
  * Build:
- *   npx @voicethere/agent build --entry templates/game-sync.ts
+ *   npx @voicethere/agent build --entry templates/game-sync/agent.ts
  */
 import Redis from "ioredis";
 import {
@@ -48,18 +48,18 @@ import {
   resolveRemoveTarget,
   REGISTER_NACK_REASON_WORLD_FULL,
   UNREGISTER_NACK_REASON_NOT_FOUND,
-} from "./game-sync-protocol.js";
+} from "./protocol.js";
 import {
   LUA_ALLOCATE_OBJECT,
   LUA_RELEASE_OBJECT,
   REDIS_EVAL_KEYS,
-} from "./game-sync-redis.js";
+} from "./redis.js";
 import {
   BOARD_HEIGHT,
   BOARD_WIDTH,
   OBJECT_RADIUS,
   simulateWorldStep,
-} from "./game-sync-sim.js";
+} from "./sim.js";
 import {
   clampSimulationDtSec,
   collectActiveObjectIds,
@@ -76,7 +76,7 @@ import {
   REDIS_WORLD_KEY,
   slotToObjectId,
   writeObjectSlot,
-} from "./game-sync-world-layout.js";
+} from "./world-layout.js";
 
 const BROADCAST_HZ = 60;
 const BROADCAST_INTERVAL_MS = Math.floor(1000 / BROADCAST_HZ);
@@ -587,5 +587,5 @@ export {
   readSlotObjectId,
   slotToObjectId,
   writeObjectSlot,
-} from "./game-sync-world-layout.js";
-export { simulateWorldStep } from "./game-sync-sim.js";
+} from "./world-layout.js";
+export { simulateWorldStep } from "./sim.js";

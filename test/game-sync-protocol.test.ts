@@ -7,7 +7,7 @@ import {
   REGISTER_NACK_REASON_WORLD_FULL,
   resolveRemoveTarget,
   UNREGISTER_NACK_REASON_NOT_FOUND,
-} from "../templates/game-sync-protocol.js";
+} from "../templates/game-sync/protocol.js";
 
 describe("game-sync-protocol", () => {
   it("exports MAX_LIVE_OBJECTS = 25", () => {

@@ -1,7 +1,7 @@
 /**
  * Server-authoritative game-sync physics step (pure Float32Array, no Redis).
  */
-import { objectIdToSlot } from "./game-sync-world-layout.js";
+import { objectIdToSlot } from "./world-layout.js";
 
 export const BOARD_WIDTH = 1280;
 export const BOARD_HEIGHT = 720;

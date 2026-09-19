@@ -1,0 +1,21 @@
+# game-sync
+
+Authoritative multi-object world sync for games and simulations. Live objects are capped at **25**. Clients register over JSON; the agent simulates at 60 Hz and broadcasts a **binary** `Float32Array` world snapshot with `sendBinaryToClient`.
+
+When `AGENT_REDIS_URL` is set (Project Redis), the world blob lives at `game-sync:world` and is shared across runner workers. Without Redis, state is per-worker in memory.
+
+This is the most advanced world-sync starter: Redis + binary snapshots + server-side physics.
+
+## Build
+
+```bash
+npx @voicethere/agent build --entry templates/game-sync/agent.ts --outfile dist/agent.js
+```
+
+## Sources
+
+- `agent.ts` — `defineAgent` wiring, register/unregister, sim loop
+- `protocol.ts` — JSON control messages
+- `world-layout.ts` — Float32Array slot layout
+- `sim.ts` — wall bounce + collisions
+- `redis.ts` — Lua allocate/release

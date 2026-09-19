@@ -6,6 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-19
+
+### Added
+
+- **World sync templates** — `world-sync` (JSON `onDataChannelMessage`, one in-memory agent, no Redis) and `world-sync-binary` (`onDataChannelBinary` + `sendBinaryToClient` with 12-byte `ArrayBuffer` poses). `game-sync` remains the Redis + binary snapshot starter.
+- **Per-template folders** — every template now lives in `templates/<id>/` with a `README.md` and `agent.ts` entry (`game-sync` files moved out of the templates root).
+
+### Changed
+
+- **Breaking (0.x):** template source paths. `templates/echo.ts` is now `templates/echo/agent.ts`; `templates/game-sync.ts` is `templates/game-sync/agent.ts`; `templates/agent.ts` is `templates/voice-starter/agent.ts`. Update local `build --entry` flags and GitHub permalinks.
+
 ## [0.7.13] - 2026-09-19
 
 ### Added

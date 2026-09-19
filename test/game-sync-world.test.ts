@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_LIVE_OBJECTS } from "../templates/game-sync-protocol.js";
+import { MAX_LIVE_OBJECTS } from "../templates/game-sync/protocol.js";
 import {
   simulateWorldStep,
   OBJECT_RADIUS,
-} from "../templates/game-sync-sim.js";
+} from "../templates/game-sync/sim.js";
 import {
   clampSimulationDtSec,
   countLiveObjects,
@@ -18,7 +18,7 @@ import {
   readSlotObjectId,
   slotToObjectId,
   writeObjectSlot,
-} from "../templates/game-sync-world-layout.js";
+} from "../templates/game-sync/world-layout.js";
 
 function registerInMemory(world: Float32Array, slot: number): number {
   const objectId = slotToObjectId(slot);

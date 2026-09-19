@@ -14,7 +14,12 @@
  *   npx @voicethere/agent build --entry templates/redis-sync/agent.ts --outfile dist/agent.js
  */
 import Redis from "ioredis";
-import { agentLog, defineAgent, sendBinaryToClient } from "@voicethere/agent";
+import {
+  agentLog,
+  broadCastBinaryToClients,
+  defineAgent,
+  sendBinaryToClient,
+} from "@voicethere/agent";
 
 import {
   createEmptyWorldBuffer,
@@ -50,6 +55,8 @@ const WORLD_BROADCAST_HZ = 20;
 const WORLD_BROADCAST_INTERVAL_MS = Math.floor(1000 / WORLD_BROADCAST_HZ);
 
 const connectedSessions = new Set<string>();
+/** Same members as connectedSessions; array form for the per-tick broadcast. */
+const connectedSessionList: string[] = [];
 const sessionClientIndex = new Map<string, number>();
 /** The one world buffer: Redis GETs copy into it, every broadcast sends this view. */
 const localWorld = createEmptyWorldBuffer();
@@ -130,13 +137,13 @@ function broadcastWorldBuffer(targetSessionId?: string): void {
     }
     return;
   }
-  for (const sessionId of connectedSessions) {
-    try {
-      sendBinaryToClient(sessionId, payload, "sync");
-    } catch (error: unknown) {
-      const detail = error instanceof Error ? error.message : String(error);
-      agentLog("error", `world send failed session=${sessionId}: ${detail}`);
-    }
+  if (connectedSessionList.length === 0) return;
+  try {
+    // payload is already a Buffer: forwarded as-is, one call, no Set iterator.
+    broadCastBinaryToClients(payload, connectedSessionList, "sync");
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    agentLog("error", `world broadcast send failed: ${detail}`);
   }
 }
 
@@ -154,16 +161,20 @@ async function broadcastWorldFromRedis(
   broadcastWorldBuffer(targetSessionId);
 }
 
+function logBroadcastError(error: unknown): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  agentLog("error", `world broadcast failed: ${detail}`);
+}
+
+function onBroadcastTick(): void {
+  void broadcastWorldFromRedis().catch(logBroadcastError);
+}
+
 function startBroadcastLoopIfNeeded(): void {
   if (broadcastTimer || connectedSessions.size === 0) {
     return;
   }
-  broadcastTimer = setInterval(() => {
-    void broadcastWorldFromRedis().catch((error: unknown) => {
-      const detail = error instanceof Error ? error.message : String(error);
-      agentLog("error", `world broadcast failed: ${detail}`);
-    });
-  }, WORLD_BROADCAST_INTERVAL_MS);
+  broadcastTimer = setInterval(onBroadcastTick, WORLD_BROADCAST_INTERVAL_MS);
   agentLog("info", `world loop started (${WORLD_BROADCAST_HZ}Hz)`);
 }
 
@@ -227,13 +238,21 @@ defineAgent({
   },
 
   async onClientJoin({ sessionId }) {
-    connectedSessions.add(sessionId);
+    if (!connectedSessions.has(sessionId)) {
+      connectedSessions.add(sessionId);
+      connectedSessionList.push(sessionId);
+    }
     startBroadcastLoopIfNeeded();
     await broadcastWorldFromRedis(sessionId);
   },
 
   async onClientLeave({ sessionId }) {
-    connectedSessions.delete(sessionId);
+    if (connectedSessions.delete(sessionId)) {
+      const index = connectedSessionList.indexOf(sessionId);
+      if (index !== -1) {
+        connectedSessionList.splice(index, 1);
+      }
+    }
     const clientIndex = sessionClientIndex.get(sessionId);
     sessionClientIndex.delete(sessionId);
     stopBroadcastLoopIfNeeded();

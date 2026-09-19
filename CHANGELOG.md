@@ -17,6 +17,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 ### Changed
 
 - **Zero-copy `sendBinaryToClient`** — passing a `Uint8Array` (or any typed-array view) no longer clones the bytes via `Buffer.from(typedArray)`; the runtime wraps the same `ArrayBuffer` with `Buffer.from(buffer, byteOffset, byteLength)`. `Buffer` inputs are forwarded as-is.
+- **Allocation-free `game-sync` tick** — `collectActiveObjectIdsInto` fills a reusable `Int32Array`; `simulateWorldStep` accepts any `ArrayLike<number>` plus a `count` (plain arrays still work). Tick bodies are stable module functions; `dt` is measured when the step runs inside the mutation chain, not when it is scheduled. `game-sync` / `redis-sync` broadcast via one `broadCastBinaryToClients` call over a live session array.
 
 - **Breaking (0.x):** template source paths. `templates/echo.ts` is now `templates/echo/agent.ts`; `templates/game-sync.ts` is `templates/game-sync/agent.ts`; `templates/agent.ts` is `templates/voice-starter/agent.ts`. Update local `build --entry` flags and GitHub permalinks.
 

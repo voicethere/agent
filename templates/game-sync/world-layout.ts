@@ -168,6 +168,26 @@ export function collectActiveObjectIds(world: Float32Array): number[] {
   return ids;
 }
 
+/**
+ * Allocation-free variant for the sim loop: writes live object ids into `dest`
+ * (capacity >= MAX_LIVE_OBJECTS) and returns how many were written.
+ */
+export function collectActiveObjectIdsInto(
+  world: Float32Array,
+  dest: Int32Array,
+): number {
+  let count = 0;
+  const limit = Math.min(MAX_LIVE_OBJECTS, dest.length);
+  for (let slot = 0; slot < MAX_LIVE_OBJECTS && count < limit; slot += 1) {
+    const objectId = readSlotObjectId(world, slot);
+    if (objectId !== 0) {
+      dest[count] = objectId;
+      count += 1;
+    }
+  }
+  return count;
+}
+
 export interface LiveWorldObjectInfo {
   objectId: number;
   ownerSessionId: string;
@@ -223,12 +243,19 @@ export function normalizeWorldBuffer(
   raw: Uint8Array | null | undefined,
   dest: Float32Array = createEmptyWorldBuffer(),
 ): Float32Array {
-  const destBytes = new Uint8Array(dest.buffer, dest.byteOffset, dest.byteLength);
+  const destBytes = new Uint8Array(
+    dest.buffer,
+    dest.byteOffset,
+    dest.byteLength,
+  );
   if (!raw || raw.byteLength === 0) {
     destBytes.fill(0);
     return dest;
   }
-  const byteCount = Math.min(Math.floor(raw.byteLength / 4) * 4, destBytes.byteLength);
+  const byteCount = Math.min(
+    Math.floor(raw.byteLength / 4) * 4,
+    destBytes.byteLength,
+  );
   if (byteCount > 0) {
     destBytes.set(raw.subarray(0, byteCount));
   }

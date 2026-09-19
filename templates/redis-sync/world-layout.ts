@@ -80,12 +80,19 @@ export function normalizeWorldBuffer(
   raw: Uint8Array | null | undefined,
   dest: Float32Array = createEmptyWorldBuffer(),
 ): Float32Array {
-  const destBytes = new Uint8Array(dest.buffer, dest.byteOffset, dest.byteLength);
+  const destBytes = new Uint8Array(
+    dest.buffer,
+    dest.byteOffset,
+    dest.byteLength,
+  );
   if (!raw || raw.byteLength === 0) {
     destBytes.fill(0);
     return dest;
   }
-  const byteCount = Math.min(Math.floor(raw.byteLength / 4) * 4, destBytes.byteLength);
+  const byteCount = Math.min(
+    Math.floor(raw.byteLength / 4) * 4,
+    destBytes.byteLength,
+  );
   if (byteCount > 0) {
     destBytes.set(raw.subarray(0, byteCount));
   }

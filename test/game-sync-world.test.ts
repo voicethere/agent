@@ -7,6 +7,8 @@ import {
 } from "../templates/game-sync/sim.js";
 import {
   clampSimulationDtSec,
+  collectActiveObjectIds,
+  collectActiveObjectIdsInto,
   countLiveObjects,
   commitSimulatedWorld,
   createEmptyWorldBuffer,
@@ -193,6 +195,35 @@ describe("game-sync simulation", () => {
     expect(world[1]).toBeGreaterThanOrEqual(OBJECT_RADIUS);
     expect(world[5]).toBeGreaterThan(0);
   });
+
+  it("collectActiveObjectIdsInto fills a reusable Int32Array and returns the count", () => {
+    const world = createEmptyWorldBuffer();
+    writeObjectSlot(world, 0, 1, 100, 100, 0, 1, 0, 0, 0, 0);
+    writeObjectSlot(world, 3, 4, 300, 300, 0, 1, 0, 0, 0, 0);
+    const ids = new Int32Array(MAX_LIVE_OBJECTS);
+    ids.fill(99);
+
+    const count = collectActiveObjectIdsInto(world, ids);
+
+    expect(count).toBe(2);
+    expect([...ids.subarray(0, count)]).toEqual([1, 4]);
+    expect(ids[2]).toBe(99);
+    expect([...ids.subarray(0, count)]).toEqual(collectActiveObjectIds(world));
+  });
+
+  it("simulateWorldStep only reads the first `count` ids of a typed array", () => {
+    const world = createEmptyWorldBuffer();
+    writeObjectSlot(world, 0, 1, 100, 100, 0, 1, 100, 0, 0, 0);
+    writeObjectSlot(world, 1, 2, 500, 500, 0, 1, 100, 0, 0, 0);
+    const ids = new Int32Array(MAX_LIVE_OBJECTS);
+    ids[0] = 1;
+    ids[1] = 2; // stale tail entry from a previous tick; must be ignored
+
+    simulateWorldStep(world, 1, ids, 1);
+
+    expect(world[1]).toBe(200);
+    expect(world[OBJECT_STRIDE + 1]).toBe(500);
+  });
 });
 
 describe("game-sync world buffer reuse", () => {
@@ -213,7 +244,10 @@ describe("game-sync world buffer reuse", () => {
   it("normalizeWorldBuffer copies an unaligned Redis view into dest", () => {
     const aligned = createEmptyWorldBuffer();
     writeObjectSlot(aligned, 1, 2, 3, 4, 0, 1, 0, 0, 0, 0);
-    const padded = Buffer.concat([Buffer.from([0xff]), Buffer.from(aligned.buffer)]);
+    const padded = Buffer.concat([
+      Buffer.from([0xff]),
+      Buffer.from(aligned.buffer),
+    ]);
     const unaligned = padded.subarray(1);
     expect(unaligned.byteOffset % 4).not.toBe(0);
     const dest = createEmptyWorldBuffer();

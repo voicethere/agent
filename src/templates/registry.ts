@@ -182,7 +182,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "e2e",
     seedOnCreate: false,
     description:
-      "Redis-backed world buffer sync for redis-sync-smoke (Advanced tier + project Redis).",
+      "Redis-backed world buffer sync for redis-sync-smoke — binary 12-byte position frames + project Redis.",
     sourceFiles: ["redis-sync/agent.ts", "redis-sync/world-layout.ts"],
     npmDependencies: { ioredis: "^5.11.1" },
   },

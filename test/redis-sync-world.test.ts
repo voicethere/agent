@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   clearPeerSlot,
   createEmptyWorldBuffer,
+  decodePositionBuffer,
   decodeWorldBuffer,
+  encodePositionInto,
   normalizeWorldBuffer,
+  POSITION_BYTE_LENGTH,
   readPeerSlot,
   WORLD_BYTE_LENGTH,
   worldBufferToArrayBuffer,
@@ -58,5 +61,44 @@ describe("redis-sync world layout", () => {
     );
     expect(decoded).toBe(dest);
     expect(readPeerSlot(dest, 0)?.x).toBe(1);
+  });
+
+  it("round-trips a 12-byte inbound position frame", () => {
+    const dest = new Float32Array(3);
+    encodePositionInto(dest, 7, 1.5, -2);
+    expect(dest.byteLength).toBe(POSITION_BYTE_LENGTH);
+    expect(decodePositionBuffer(dest)).toEqual({
+      clientIndex: 7,
+      x: 1.5,
+      y: -2,
+    });
+    const buf = Buffer.from(dest.buffer, dest.byteOffset, dest.byteLength);
+    expect(decodePositionBuffer(buf)).toEqual({
+      clientIndex: 7,
+      x: 1.5,
+      y: -2,
+    });
+  });
+
+  it("decodePositionBuffer rejects short, null, or non-finite frames", () => {
+    expect(decodePositionBuffer(null)).toBeNull();
+    expect(decodePositionBuffer(new Float32Array(2))).toBeNull();
+    expect(
+      decodePositionBuffer(new Float32Array([Number.NaN, 1, 2])),
+    ).toBeNull();
+    expect(decodePositionBuffer(new Float32Array([-1, 1, 2]))).toBeNull();
+  });
+
+  it("decodePositionBuffer reads a typed-array view with byteOffset", () => {
+    const padded = new Float32Array(6);
+    padded[3] = 4;
+    padded[4] = 10;
+    padded[5] = 20;
+    const view = new Float32Array(padded.buffer, 12, 3);
+    expect(decodePositionBuffer(view)).toEqual({
+      clientIndex: 4,
+      x: 10,
+      y: 20,
+    });
   });
 });

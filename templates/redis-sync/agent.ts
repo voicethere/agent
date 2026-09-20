@@ -2,10 +2,11 @@
  * Redis-backed world buffer sync for redis-sync-smoke (Advanced tier + project Redis).
  *
  * Game-style layout: one Float32Array world blob in Redis (`e2e:redis-sync:world`).
- * Each client owns a fixed slot and publishes `{ type: "position", clientIndex, x, y }`.
- * Each runner pod runs its own broadcast loop: one Redis GET per tick, then binary
- * fan-out on voicethere-sync to all local sessions (no pub/sub). Clients patch
- * out of sync; the 20Hz server tick is the authoritative sync path.
+ * Each client owns a fixed slot and publishes a 12-byte `ArrayBuffer`
+ * `Float32Array([clientIndex, x, y])` on the sync DataChannel. Each runner pod
+ * runs its own broadcast loop: one Redis GET per tick, then binary fan-out on
+ * voicethere-sync to all local sessions (no pub/sub). Clients patch out of sync;
+ * the 20Hz server tick is the authoritative sync path.
  *
  * Slot writes use a Lua read-modify-write so concurrent patches from many sessions
  * cannot clobber each other (WATCH/MULTI lost slots under 30-way connect storms).
@@ -23,6 +24,7 @@ import {
 
 import {
   createEmptyWorldBuffer,
+  decodePositionBuffer,
   normalizeWorldBuffer,
   peerSlotOffset,
   PEER_SLOT_BYTE_LENGTH,
@@ -49,41 +51,6 @@ const localWorldBytes = Buffer.from(
 );
 let redis: Redis | null = null;
 let broadcastTimer: NodeJS.Timeout | null = null;
-
-function parsePositionMessage(
-  message: unknown,
-): { clientIndex: number; x: number; y: number } | null {
-  if (!message || typeof message !== "object") {
-    return null;
-  }
-  const record = message as {
-    type?: unknown;
-    clientIndex?: unknown;
-    x?: unknown;
-    y?: unknown;
-  };
-  if (record.type !== "position") {
-    return null;
-  }
-  if (
-    typeof record.clientIndex !== "number" ||
-    !Number.isFinite(record.clientIndex) ||
-    record.clientIndex < 0
-  ) {
-    return null;
-  }
-  if (typeof record.x !== "number" || !Number.isFinite(record.x)) {
-    return null;
-  }
-  if (typeof record.y !== "number" || !Number.isFinite(record.y)) {
-    return null;
-  }
-  return {
-    clientIndex: record.clientIndex,
-    x: record.x,
-    y: record.y,
-  };
-}
 
 const PEER_SLOT = new Float32Array(PEER_STRIDE);
 const PEER_SLOT_BUF = Buffer.from(
@@ -249,8 +216,8 @@ defineAgent({
     }
   },
 
-  async onDataChannelMessage(ctx) {
-    const position = parsePositionMessage(ctx.message);
+  async onDataChannelBinary(ctx) {
+    const position = decodePositionBuffer(ctx.rawBinary);
     if (!position) {
       return;
     }

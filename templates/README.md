@@ -83,7 +83,7 @@ These mirror former `e2e/fixtures/*` sources. E2E resolves entries from the pack
 | `echo-smoke`      | `echo-smoke/agent.ts`                          | voice-smoke, agent-smoke, cli-smoke           |
 | `crash`           | `crash/agent.ts`                               | session-errors-smoke, crash-policy smokes     |
 | `game-sync-smoke` | `game-sync-smoke/agent.ts`                     | deploy-smoke, shared-child, idle smokes       |
-| `redis-sync`      | `redis-sync/agent.ts` + `world-layout.ts`      | redis-sync-smoke (project Redis world buffer) |
+| `redis-sync`      | `redis-sync/agent.ts` + `world-layout.ts`      | redis-sync-smoke (binary positions + Redis world blob) |
 | `mix-smoke`       | `mix-smoke/agent.ts`                           | voice-data-mix-smoke                          |
 
 **Note:** Product `echo` is not the same as e2e `echo-smoke` — keep both ids.

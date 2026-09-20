@@ -18,6 +18,16 @@ export const PEER_FIELD_X = 1;
 export const PEER_FIELD_Y = 2;
 export const PEER_FIELD_ACTIVE = 3;
 
+/** Client → agent position frame: float32le [clientIndex, x, y] (12 bytes). */
+export const POSITION_FLOAT_COUNT = 3;
+export const POSITION_BYTE_LENGTH = POSITION_FLOAT_COUNT * 4;
+
+export type PeerPosition = {
+  clientIndex: number;
+  x: number;
+  y: number;
+};
+
 export const REDIS_WORLD_KEY = "e2e:redis-sync:world";
 
 /** Atomic splice of one peer slot (16 bytes) into the world blob. */
@@ -70,6 +80,51 @@ export function writePeerSlot(
 
 export function clearPeerSlot(world: Float32Array, clientIndex: number): void {
   writePeerSlot(world, clientIndex, 0, 0, 0);
+}
+
+function asDataView(data: ArrayBufferLike | ArrayBufferView): DataView {
+  if (ArrayBuffer.isView(data)) {
+    return new DataView(data.buffer, data.byteOffset, data.byteLength);
+  }
+  return new DataView(data);
+}
+
+/** Decode a 12-byte inbound position frame. */
+export function decodePositionBuffer(
+  data: ArrayBufferLike | ArrayBufferView | null | undefined,
+): PeerPosition | null {
+  if (data == null) {
+    return null;
+  }
+  const view = asDataView(data);
+  if (view.byteLength < POSITION_BYTE_LENGTH) {
+    return null;
+  }
+  const clientIndex = view.getFloat32(0, true);
+  const x = view.getFloat32(4, true);
+  const y = view.getFloat32(8, true);
+  if (
+    !Number.isFinite(clientIndex) ||
+    clientIndex < 0 ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y)
+  ) {
+    return null;
+  }
+  return { clientIndex: Math.trunc(clientIndex), x, y };
+}
+
+/** Write [clientIndex, x, y] into `dest` (length >= 3) and return it. */
+export function encodePositionInto(
+  dest: Float32Array,
+  clientIndex: number,
+  x: number,
+  y: number,
+): Float32Array {
+  dest[0] = clientIndex;
+  dest[1] = x;
+  dest[2] = y;
+  return dest;
 }
 
 export function readPeerSlot(

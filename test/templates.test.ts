@@ -116,6 +116,12 @@ describe("agent template registry", () => {
     expect(
       sources.find((source) => source.path === "world-layout.ts")?.content,
     ).toContain("REDIS_WORLD_KEY");
+    expect(
+      sources.find((source) => source.path === "world-layout.ts")?.content,
+    ).toContain("POSITION_BYTE_LENGTH");
+    expect(
+      sources.find((source) => source.path === "agent.ts")?.content,
+    ).toContain("onDataChannelBinary");
   });
 
   it("loads game-sync multi-file sources with Redis world buffer", () => {

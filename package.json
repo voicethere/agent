@@ -1,6 +1,6 @@
 {
   "name": "@voicethere/agent",
-  "version": "0.7.13",
+  "version": "0.8.0",
   "description": "VoiceThere customer agent SDK — IPC types and runtime helpers for sandboxed child bundles",
   "type": "module",
   "exports": {
@@ -56,6 +56,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:ci": "npm run typecheck && npm run build && npm run test && node scripts/ci/verify-package-exports.mjs",
+    "test:redis": "vitest run test/redis-lua.test.ts test/game-sync-redis-agent.test.ts",
     "verify:local": "npm run build && node ./dist/cli.js verify --no-build --bundle ./dist/agent.js",
     "verify:local:only": "node ./dist/cli.js verify --no-build --bundle ./dist/agent.js",
     "live-test:models": "bash ./scripts/select-sherpa-models.sh",
@@ -63,7 +64,7 @@
     "live-test:starter": "bash ./scripts/live-test-starter.sh",
     "live-test:stack": "npm run live-test:stack:echo",
     "live-test:stack:echo": "LIVE_TEST_AGENT_ENTRY=examples/agent.ts LIVE_TEST_PAGE_PATH=/examples/live-test/index.html LIVE_TEST_SESSION_MODE=voice bash ./scripts/live-test-stack.sh",
-    "live-test:stack:game": "LIVE_TEST_AGENT_ENTRY=templates/game-sync.ts LIVE_TEST_PAGE_PATH=/examples/live-test/game-sync.html LIVE_TEST_SESSION_MODE=data-only bash ./scripts/live-test-stack.sh",
+    "live-test:stack:game": "LIVE_TEST_AGENT_ENTRY=templates/game-sync/agent.ts LIVE_TEST_PAGE_PATH=/examples/live-test/game-sync.html LIVE_TEST_SESSION_MODE=data-only bash ./scripts/live-test-stack.sh",
     "prepublishOnly": "npm run build",
     "prepare": "npm run build"
   },

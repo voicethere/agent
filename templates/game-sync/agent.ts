@@ -30,13 +30,13 @@
  * - 60Hz world-state broadcast while the sim loop runs (no-op send when 0 sessions)
  *
  * Build:
- *   npx @voicethere/agent build --entry templates/game-sync.ts
+ *   npx @voicethere/agent build --entry templates/game-sync/agent.ts
  */
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import {
   agentLog,
+  broadCastBinaryToClients,
   defineAgent,
-  sendBinaryToClient,
   sendToClient,
 } from "@voicethere/agent";
 
@@ -48,21 +48,21 @@ import {
   resolveRemoveTarget,
   REGISTER_NACK_REASON_WORLD_FULL,
   UNREGISTER_NACK_REASON_NOT_FOUND,
-} from "./game-sync-protocol.js";
+} from "./protocol.js";
 import {
   LUA_ALLOCATE_OBJECT,
   LUA_RELEASE_OBJECT,
   REDIS_EVAL_KEYS,
-} from "./game-sync-redis.js";
+} from "./redis.js";
 import {
   BOARD_HEIGHT,
   BOARD_WIDTH,
   OBJECT_RADIUS,
   simulateWorldStep,
-} from "./game-sync-sim.js";
+} from "./sim.js";
 import {
   clampSimulationDtSec,
-  collectActiveObjectIds,
+  collectActiveObjectIdsInto,
   countLiveObjects,
   createEmptyWorldBuffer,
   findFirstEmptySlot,
@@ -70,13 +70,12 @@ import {
   markSlotFree,
   normalizeWorldBuffer,
   objectIdToSlot,
-  OBJECT_SLOT_BYTE_LENGTH,
   planRedisSimTick,
   REDIS_SIM_LOCK_KEY,
   REDIS_WORLD_KEY,
   slotToObjectId,
   writeObjectSlot,
-} from "./game-sync-world-layout.js";
+} from "./world-layout.js";
 
 const BROADCAST_HZ = 60;
 const BROADCAST_INTERVAL_MS = Math.floor(1000 / BROADCAST_HZ);
@@ -86,11 +85,19 @@ const MIN_SPEED = 90;
 const MAX_SPEED = 180;
 
 const connectedSessions = new Set<string>();
+/** Same members as connectedSessions; array form lets the broadcast skip Set iteration. */
+const connectedSessionList: string[] = [];
 const objectOwners = new Map<number, string>();
 const sessionObjects = new Map<string, Set<number>>();
 const freeSlots: number[] = [];
 
-let worldState = createEmptyWorldBuffer();
+/** The one world buffer: Redis loads copy into it, sim/broadcast/SET read from it. */
+const worldState = createEmptyWorldBuffer();
+const worldStateBytes = Buffer.from(
+  worldState.buffer,
+  worldState.byteOffset,
+  worldState.byteLength,
+);
 let redis: Redis | null = null;
 let broadcastTimer: NodeJS.Timeout | null = null;
 let worldMutationChain: Promise<void> = Promise.resolve();
@@ -151,18 +158,23 @@ function randomVelocity(): number {
   return (Math.random() < 0.5 ? -1 : 1) * rand(MIN_SPEED, MAX_SPEED);
 }
 
+const INITIAL_TAIL = new Float32Array(8);
+const INITIAL_TAIL_BUF = Buffer.from(
+  INITIAL_TAIL.buffer,
+  INITIAL_TAIL.byteOffset,
+  INITIAL_TAIL.byteLength,
+);
+
 function randomInitialTail(): Buffer {
-  const floats = new Float32Array([
-    rand(OBJECT_RADIUS, BOARD_WIDTH - OBJECT_RADIUS),
-    rand(OBJECT_RADIUS, BOARD_HEIGHT - OBJECT_RADIUS),
-    0,
-    1,
-    randomVelocity(),
-    randomVelocity(),
-    0,
-    0,
-  ]);
-  return Buffer.from(floats.buffer, floats.byteOffset, floats.byteLength);
+  INITIAL_TAIL[0] = rand(OBJECT_RADIUS, BOARD_WIDTH - OBJECT_RADIUS);
+  INITIAL_TAIL[1] = rand(OBJECT_RADIUS, BOARD_HEIGHT - OBJECT_RADIUS);
+  INITIAL_TAIL[2] = 0;
+  INITIAL_TAIL[3] = 1;
+  INITIAL_TAIL[4] = randomVelocity();
+  INITIAL_TAIL[5] = randomVelocity();
+  INITIAL_TAIL[6] = 0;
+  INITIAL_TAIL[7] = 0;
+  return INITIAL_TAIL_BUF;
 }
 
 function attachObjectToSession(sessionId: string, objectId: number): void {
@@ -259,7 +271,7 @@ async function registerObjectInRedis(
   }
 
   attachObjectToSession(sessionId, objectId);
-  worldState = await loadWorldFromRedis();
+  await loadWorldFromRedis();
   return objectId;
 }
 
@@ -281,7 +293,7 @@ async function releaseObjectInRedis(objectId: number): Promise<boolean> {
     REDIS_EVAL_KEYS.headers,
   );
   if (Number(released) === 1) {
-    worldState = await loadWorldFromRedis();
+    await loadWorldFromRedis();
   }
   return Number(released) === 1;
 }
@@ -345,93 +357,109 @@ function notifyObjectReleased(objectId: number, ownerSessionId: string): void {
   }
 }
 
-function copyWorldBuffer(world: Float32Array): Buffer {
-  return Buffer.from(world.buffer, world.byteOffset, world.byteLength);
+function broadcastWorldBuffer(): void {
+  if (connectedSessionList.length === 0) return;
+  // worldStateBytes is already a Buffer: forwarded as-is, one call, no iterator.
+  broadCastBinaryToClients(worldStateBytes, connectedSessionList, "sync");
 }
 
-function broadcastWorldBuffer(world: Float32Array): void {
-  if (connectedSessions.size === 0) return;
-  const payload = copyWorldBuffer(world);
-  for (const sessionId of connectedSessions) {
-    sendBinaryToClient(sessionId, payload, "sync");
-  }
-}
-
-async function loadWorldFromRedis(): Promise<Float32Array> {
-  if (!redis) {
-    return new Float32Array(worldState);
-  }
-  const raw = await redis.getBuffer(REDIS_WORLD_KEY);
-  return normalizeWorldBuffer(raw);
-}
-
-async function saveWorldToRedis(world: Float32Array): Promise<void> {
+/**
+ * Copy the Redis blob into `worldState` in place (the GET reply is the only
+ * per-tick allocation; it is a fresh socket Buffer we cannot avoid).
+ */
+async function loadWorldFromRedis(): Promise<void> {
   if (!redis) return;
-  await redis.set(REDIS_WORLD_KEY, copyWorldBuffer(world));
+  const raw = await redis.getBuffer(REDIS_WORLD_KEY);
+  normalizeWorldBuffer(raw, worldState);
 }
 
-async function runSimulationTick(): Promise<void> {
+async function saveWorldToRedis(): Promise<void> {
+  if (!redis) return;
+  await redis.set(REDIS_WORLD_KEY, worldStateBytes);
+}
+
+/** Live object ids for the current tick; filled in place, never reallocated. */
+const activeObjectIds = new Int32Array(MAX_LIVE_OBJECTS);
+
+const SIM_LOCK_TRY_ONCE = { retryUntilAcquired: false } as const;
+const SIM_TICK_PLAN_INPUT = { lockAcquired: false, connectedSessions } as const;
+
+/**
+ * Elapsed seconds since the previous tick body ran. Measured inside the
+ * serialized mutation chain so queued ticks never share or overwrite a dt.
+ */
+function takeTickDtSec(): number {
   const now = Date.now();
   const dt = clampSimulationDtSec(
     lastTickTimeMs === 0 ? 0 : now - lastTickTimeMs,
     BROADCAST_HZ,
   );
   lastTickTimeMs = now;
+  return dt;
+}
 
+function stepWorldInPlace(): void {
+  const dt = takeTickDtSec();
+  const count = collectActiveObjectIdsInto(worldState, activeObjectIds);
+  simulateWorldStep(worldState, dt, activeObjectIds, count);
+}
+
+async function stepWorldInMemory(): Promise<void> {
+  stepWorldInPlace();
+}
+
+async function stepWorldWithRedis(): Promise<boolean> {
+  await loadWorldFromRedis();
+  stepWorldInPlace();
+  await saveWorldToRedis();
+  broadcastWorldBuffer();
+  return true;
+}
+
+async function runRedisTick(): Promise<void> {
+  const lockResult = await withRedisSimLock(
+    stepWorldWithRedis,
+    SIM_LOCK_TRY_ONCE,
+  );
+  if (lockResult !== null) return;
+  takeTickDtSec();
+  if (planRedisSimTick(SIM_TICK_PLAN_INPUT) === "relay") {
+    await loadWorldFromRedis();
+    broadcastWorldBuffer();
+  }
+}
+
+// Tick bodies are module-level functions (no per-tick closures or option objects).
+async function runSimulationTick(): Promise<void> {
   if (!redis) {
-    await withWorldMutation(async () => {
-      simulateWorldStep(worldState, dt, collectActiveObjectIds(worldState));
-    });
-    broadcastWorldBuffer(worldState);
+    await withWorldMutation(stepWorldInMemory);
+    broadcastWorldBuffer();
     return;
   }
+  await withWorldMutation(runRedisTick);
+}
 
-  await withWorldMutation(async () => {
-    const lockResult = await withRedisSimLock(
-      async () => {
-        const world = await loadWorldFromRedis();
-        const activeObjectIds = collectActiveObjectIds(world);
-        simulateWorldStep(world, dt, activeObjectIds);
-        await saveWorldToRedis(world);
-        worldState = world;
-        broadcastWorldBuffer(world);
-        return true;
-      },
-      { retryUntilAcquired: false },
-    );
+function logTickError(error: unknown): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  agentLog("error", `world tick failed: ${detail}`);
+}
 
-    if (lockResult === null) {
-      const plan = planRedisSimTick({
-        lockAcquired: false,
-        connectedSessions,
-      });
-      if (plan === "relay") {
-        const world = await loadWorldFromRedis();
-        worldState = world;
-        broadcastWorldBuffer(world);
-      }
+function onBroadcastTick(): void {
+  if (!redis && connectedSessions.size < 1) {
+    if (broadcastTimer) {
+      clearInterval(broadcastTimer);
+      broadcastTimer = null;
     }
-  });
+    return;
+  }
+  void runSimulationTick().catch(logTickError);
 }
 
 function startBroadcastLoopIfNeeded(): void {
   if (broadcastTimer) return;
   if (!redis && connectedSessions.size < 1) return;
 
-  broadcastTimer = setInterval(() => {
-    if (!redis && connectedSessions.size < 1) {
-      if (broadcastTimer) {
-        clearInterval(broadcastTimer);
-        broadcastTimer = null;
-      }
-      return;
-    }
-    void runSimulationTick().catch((error: unknown) => {
-      const detail = error instanceof Error ? error.message : String(error);
-      agentLog("error", `world tick failed: ${detail}`);
-    });
-  }, BROADCAST_INTERVAL_MS);
-
+  broadcastTimer = setInterval(onBroadcastTick, BROADCAST_INTERVAL_MS);
   agentLog("info", `world loop started (${BROADCAST_HZ}Hz)`);
 }
 
@@ -448,8 +476,7 @@ async function ensureRedisWorldInitialized(): Promise<void> {
   if (!redis) return;
   const existing = await redis.getBuffer(REDIS_WORLD_KEY);
   if (!existing || existing.byteLength === 0) {
-    const empty = createEmptyWorldBuffer();
-    await redis.set(REDIS_WORLD_KEY, copyWorldBuffer(empty));
+    await redis.set(REDIS_WORLD_KEY, worldStateBytes);
   }
 }
 
@@ -461,7 +488,6 @@ defineAgent({
         "warn",
         "AGENT_REDIS_URL unset — game-sync uses per-worker in-memory world only",
       );
-      worldState = createEmptyWorldBuffer();
       return;
     }
 
@@ -471,17 +497,18 @@ defineAgent({
     });
     await redis.connect();
     await ensureRedisWorldInitialized();
-    worldState = await loadWorldFromRedis();
+    await loadWorldFromRedis();
     startBroadcastLoopIfNeeded();
     agentLog("info", "game-sync agent connected to project Redis world buffer");
   },
 
   async onClientJoin({ sessionId }) {
-    connectedSessions.add(sessionId);
-    startBroadcastLoopIfNeeded();
-    if (redis) {
-      worldState = await loadWorldFromRedis();
+    if (!connectedSessions.has(sessionId)) {
+      connectedSessions.add(sessionId);
+      connectedSessionList.push(sessionId);
     }
+    startBroadcastLoopIfNeeded();
+    await loadWorldFromRedis();
     sendToClient(sessionId, {
       type: "world_snapshot",
       objects: liveWorldSnapshot(worldState, objectOwners),
@@ -490,7 +517,12 @@ defineAgent({
   },
 
   async onClientLeave({ sessionId }) {
-    connectedSessions.delete(sessionId);
+    if (connectedSessions.delete(sessionId)) {
+      const index = connectedSessionList.indexOf(sessionId);
+      if (index !== -1) {
+        connectedSessionList.splice(index, 1);
+      }
+    }
     for (const [objectId, ownerSessionId] of objectOwners) {
       if (ownerSessionId === sessionId) {
         objectOwners.delete(objectId);
@@ -587,5 +619,5 @@ export {
   readSlotObjectId,
   slotToObjectId,
   writeObjectSlot,
-} from "./game-sync-world-layout.js";
-export { simulateWorldStep } from "./game-sync-sim.js";
+} from "./world-layout.js";
+export { simulateWorldStep } from "./sim.js";

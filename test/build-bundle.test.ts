@@ -6,14 +6,14 @@ import { describe, expect, it } from "vitest";
 import { buildAgentBundle } from "../src/build-bundle.js";
 
 describe("buildAgentBundle", () => {
-  it("bundles templates/agent.ts into a single ESM file", async () => {
+  it("bundles templates/voice-starter/agent.ts into a single ESM file", async () => {
     const dir = mkdtempSync(join(tmpdir(), "voicethere-agent-build-"));
     const outfile = join(dir, "dist", "agent.js");
 
     try {
       await buildAgentBundle({
         cwd: process.cwd(),
-        entry: "templates/agent.ts",
+        entry: "templates/voice-starter/agent.ts",
         outfile,
       });
 

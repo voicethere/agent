@@ -1,26 +1,32 @@
 /**
- * Inbound webhook handler — verify HMAC on raw bytes, then parse JSON and fan out.
+ * Inbound webhook + shared Redis counter — verify HMAC first, atomic Redis update, DC fan-out.
  *
- * VoiceThere forwards the exact inbound body over IPC. Verify the custom
- * `x-agent-webhook-signature` header (hex HMAC-SHA256 of the raw body) using
- * `AGENT_WEBHOOK_SIGNING_SECRET` **before** `JSON.parse`.
+ * Fan-out to connected sessions does not require Redis; Redis is for shared state across
+ * runner pods (every child in the process still receives the webhook IPC).
+ *
+ * Verify `x-agent-webhook-signature` on the raw body with `AGENT_WEBHOOK_SIGNING_SECRET`
+ * before `JSON.parse`. Atomic counter uses Redis Lua (read-modify-write in one round trip).
  *
  * Build:
- *   npx @voicethere/agent build --entry templates/webhooks.ts --outfile dist/agent.js
+ *   npx @voicethere/agent build --entry templates/webhooks-redis/agent.ts --outfile dist/agent.js
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { Redis } from "ioredis";
 
-import {
-  agentLog,
-  broadcastToClients,
-  defineAgent,
-  speak,
-} from "@voicethere/agent";
+import { agentLog, broadcastToClients, defineAgent } from "@voicethere/agent";
 
-/** Custom header carrying hex HMAC-SHA256 of the raw webhook body. */
 const WEBHOOK_SIGNATURE_HEADER = "x-agent-webhook-signature";
+const REDIS_COUNTER_KEY = "agent:webhook:event_count";
+
+/** Atomic increment — safe under concurrent webhook delivery on one pod. */
+export const LUA_INCREMENT_COUNTER = `
+local key = KEYS[1]
+local n = redis.call('INCR', key)
+return n
+`;
 
 const connectedSessions = new Set<string>();
+let redis: Redis | null = null;
 
 function getHeaderCaseInsensitive(
   headers: Record<string, string>,
@@ -55,6 +61,24 @@ function verifyWebhookSignature(
 }
 
 defineAgent({
+  async onAgentStart({ env }) {
+    const redisUrl = env.AGENT_REDIS_URL ?? process.env.AGENT_REDIS_URL;
+    if (!redisUrl?.trim()) {
+      agentLog(
+        "warn",
+        "AGENT_REDIS_URL unset — webhooks-redis uses in-memory sessions only",
+      );
+      return;
+    }
+
+    redis = new Redis(redisUrl, {
+      maxRetriesPerRequest: 3,
+      lazyConnect: true,
+    });
+    await redis.connect();
+    agentLog("info", "webhooks-redis connected to project Redis");
+  },
+
   onSessionStart({ sessionId }) {
     connectedSessions.add(sessionId);
   },
@@ -70,7 +94,7 @@ defineAgent({
       return;
     }
 
-    // Verify on raw bytes before JSON.parse — never parse untrusted payloads first.
+    // Verify on raw bytes before JSON.parse.
     if (!verifyWebhookSignature(ctx.body, ctx.headers, secret)) {
       agentLog("warn", `webhook signature invalid eventId=${ctx.eventId}`);
       return;
@@ -84,22 +108,22 @@ defineAgent({
       return;
     }
 
-    const record =
-      payload && typeof payload === "object"
-        ? (payload as { type?: string; text?: string })
-        : null;
-    const messageType = record?.type ?? "webhook";
-    const text =
-      typeof record?.text === "string" && record.text.trim()
-        ? record.text.trim()
-        : `webhook:${messageType}`;
+    let eventCount: number | null = null;
+    if (redis) {
+      const result = await redis.eval(
+        LUA_INCREMENT_COUNTER,
+        1,
+        REDIS_COUNTER_KEY,
+      );
+      eventCount = typeof result === "number" ? result : Number(result);
+    }
 
     const sessionIds =
       ctx.sessionIds.length > 0 ? ctx.sessionIds : [...connectedSessions];
     if (sessionIds.length === 0) {
       agentLog(
         "info",
-        `webhook verified with no live sessions eventId=${ctx.eventId}`,
+        `webhook verified (count=${eventCount ?? "n/a"}) with no live sessions`,
       );
       return;
     }
@@ -109,18 +133,15 @@ defineAgent({
         type: "webhook_event",
         eventId: ctx.eventId,
         path: ctx.path,
+        eventCount,
         payload,
       },
       sessionIds,
     );
 
-    for (const sessionId of sessionIds) {
-      speak(sessionId, text);
-    }
-
     agentLog(
       "info",
-      `webhook delivered to ${sessionIds.length} session(s) eventId=${ctx.eventId}`,
+      `webhook fan-out to ${sessionIds.length} session(s) eventId=${ctx.eventId}`,
     );
   },
 });

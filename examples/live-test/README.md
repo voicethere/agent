@@ -33,7 +33,7 @@ Voice config notes:
 ```bash
 npm install
 npm run live-test:stack:echo   # voice echo template (examples/agent.ts)
-npm run live-test:stack:game   # data-only, server-authoritative game sync (templates/game-sync.ts)
+npm run live-test:stack:game   # data-only, server-authoritative game sync (templates/game-sync/agent.ts)
 ```
 
 Open:
@@ -47,7 +47,7 @@ Game sync page:
 Each command rebuilds the selected bundle on start. You can still override entry/mode manually:
 
 ```bash
-export LIVE_TEST_AGENT_ENTRY=templates/game-sync.ts
+export LIVE_TEST_AGENT_ENTRY=templates/game-sync/agent.ts
 export LIVE_TEST_SESSION_MODE=data-only
 npm run live-test:stack
 ```

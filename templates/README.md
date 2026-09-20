@@ -1,6 +1,8 @@
 # Agent templates
 
-`@voicethere/agent` is the single source of truth for starter templates. Import the registry from `@voicethere/agent/templates`:
+`@voicethere/agent` is the single source of truth for starter templates. Each template lives in its own folder under `templates/<id>/` with a `README.md` and an `agent.ts` entry.
+
+Import the registry from `@voicethere/agent/templates`:
 
 ```typescript
 import {
@@ -15,16 +17,16 @@ import {
 
 ## Product vs e2e
 
-| Kind        | Dashboard create                                                                                                                                                 | Prebuilt seed bundle                 | Typical consumer        |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
-| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `game-sync`, `voice-showcase`, `recording-consent`, `positional-tts`, `spatial-showcase`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
-| **e2e**     | No                                                                                                                                                               | No — build from sources at test time | `voicethere/e2e` smokes |
+| Kind        | Dashboard create                                                                                                                                                                 | Prebuilt seed bundle                 | Typical consumer        |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
+| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `world-sync`, `world-sync-binary`, `game-sync`, `voice-showcase`, `recording-consent`, `positional-tts`, `spatial-showcase`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
+| **e2e**     | No                                                                                                                                                                               | No — build from sources at test time | `voicethere/e2e` smokes |
 
 Product templates always set `seedOnCreate: true`. CI fails if a product template is missing its prebuilt bundle after `npm run build`.
 
 ## Sources vs prebuilt
 
-- **Sources** live under `templates/` in the published package (editable TypeScript).
+- **Sources** live under `templates/<id>/` in the published package (editable TypeScript plus a README).
 - **Prebuilt** bundles are derived artifacts at `dist/templates/<id>/agent.js` for product templates only.
 - `loadTemplateSources(id)` returns `{ path, content }[]` — the canonical tree for a future web editor.
 - `loadTemplateBundle(id)` returns prebuilt bytes for platform seed/deploy (runner-ready `agent.js`).
@@ -32,7 +34,7 @@ Product templates always set `seedOnCreate: true`. CI fails if a product templat
 Build a template locally:
 
 ```bash
-npx @voicethere/agent build --entry templates/echo.ts --outfile dist/agent.js
+npx @voicethere/agent build --entry templates/echo/agent.ts --outfile dist/agent.js
 ```
 
 Prebuild all product seed bundles (also runs in `npm run build`):
@@ -41,78 +43,48 @@ Prebuild all product seed bundles (also runs in `npm run build`):
 npm run build:templates
 ```
 
+## World sync (data-only)
+
+Three product templates cover positional / world sync, from JSON to Redis:
+
+| Id                   | Channel                         | State                         |
+| -------------------- | ------------------------------- | ----------------------------- |
+| `world-sync`         | `onDataChannelMessage` (JSON)   | One agent, in-memory, no Redis |
+| `world-sync-binary`  | `onDataChannelBinary` + `broadCastBinaryToClients` (`ArrayBuffer`) | One agent, in-memory, no Redis |
+| `game-sync`          | JSON control + binary world snapshots | Redis when `AGENT_REDIS_URL` is set |
+
+See each folder README for the wire format.
+
 ## Product templates
 
-### `echo.ts` (`echo`)
+Each folder has its own README. Summary:
 
-Full echo debug agent for the VoiceThere dashboard — speaks **"you said: …"** on voice finals and text chat, relays speech events over DataChannel, and echoes chat replies on DC.
-
-### `echo-dc.ts` (`echo-dc`)
-
-Data-channel-only echo — relays speech events and chat text over DC without TTS.
-
-### `agent.ts` (`voice-starter`)
-
-Full starter bundle covering every speech event from `@node-webrtc-rust/sdk/voice`. Customize `onUserSpeechFinal` for your LLM/tools.
-
-### `game-sync.ts` (`game-sync`)
-
-Authoritative multi-object sync sample for real-time games/simulations (register, simulate, binary world snapshots). Live objects are capped at **25** per world; clients can send `{ type: "unregister" }` (or `{ type: "remove", objectId?: number }`) to release owned objects. Protocol helpers live in `game-sync-protocol.ts`.
-
-When `AGENT_REDIS_URL` is set (project Redis), the world blob is stored at `game-sync:world` and shared across runner workers — Lua atomic allocate/release enforces the global cap; one worker holds a sim lock per tick. Without Redis, the template falls back to per-worker in-memory state (local live-test stack).
-
-### `voice-showcase/` (`voice-showcase`)
-
-Conversational voice demo for landing and dashboard previews — greets the user, asks for a name, then offers a menu: weather (Open-Meteo, no API key), count 1–10, short recipes, and rotating fun facts. Typed chat and voice finals share the same handler. Sends structured `menu` payloads plus `chat_reply` for the chat log, then triggers TTS play so the client has the spoken text before audio starts.
-
-Sources: `voice-showcase/agent.ts` (defineAgent wiring), `conversation.ts` (pure state machine), `delivery.ts` (send-then-play order), `weather.ts`, `recipes.ts`, `fun-facts.ts`.
-
-### `recording-consent/` (`recording-consent`)
-
-Demonstrates conversation recording consent on connect: asks whether recording is OK when the project has recording enabled, pauses capture while collecting name and date of birth, then resumes only if the customer consented. When project recording is off, logs a warning and never calls `startRecording`. Voice finals and typed chat share the same handler.
-
-Sources: `recording-consent/agent.ts` (defineAgent wiring), `conversation.ts` (pure state machine).
-
-### `positional-tts/` (`positional-tts`)
-
-Voice+Data demo — enables positional mixing and orbits each listener’s TTS speaker with `setTtsPose` on a ~50 ms timer. Speaks a short greeting on connect and echoes voice finals / chat so you hear panning while TTS plays. Requires Voice+Data runner mode (`isMixAvailable`).
-
-Sources: `positional-tts/agent.ts` (defineAgent wiring), `positional-tts/orbit.ts` (pure circle helper for tests).
-
-### `spatial-showcase/` (`spatial-showcase`)
-
-Spatial audio showcase for `/showcase` — one agent template with three demos selected by `{ type: "join", demo }` on the control DataChannel:
-
-| Demo         | Behavior                                                                                                                                                                   |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `orbit`      | Looping sine tone + TTS orbit the listener (`setPlayPose` + `setTtsPose`); STT echo off; `{ type: "orbit", action: "set" \| "say" }`; agent emits `{ type: "orbit_pose" }` |
-| `soundboard` | Positional clip pads — browser sends `clipId` only (never URLs); agent resolves against an allowlisted `assetOrigin`                                                       |
-| `proximity`  | Shared mix room (`createMixGroup` + `setClientPose`); `{ type: "move" }`, `{ type: "mute_peer" }`; `{ type: "room_state" }` broadcast                                      |
-
-**Protocol:** inbound `join`, `orbit`, `pad`, `pad_stop`, `pad_status`, `move`, `mute_peer`, `leave`, `ping` — outbound `showcase_ack`, `orbit_pose`, `pad_progress`, `room_state`, `room_full`, `error`.
-
-**Limits:** `MAX_ROOM_PEERS = 8`, `MAX_ACTIVE_PLAYS = 12` per session. Clip ids: `chime`, `bell`, `laser`, `impact`, `footsteps`, `rain-loop`, `cafe-loop`, `jingle`.
-
-Sources: `spatial-showcase/agent.ts`, `protocol.ts`, `sounds.ts`, `room.ts`, `orbit.ts`, `sine.ts`.
-
-### `webhooks.ts` (`webhooks`)
-
-Inbound HTTP webhook sample — verifies `x-agent-webhook-signature` HMAC on the **raw body** with `AGENT_WEBHOOK_SIGNING_SECRET`, then `JSON.parse` and fans out to connected sessions via DataChannel + `speak`.
-
-### `webhooks-redis.ts` (`webhooks-redis`)
-
-Same HMAC verify path plus an atomic Redis counter (`AGENT_REDIS_URL`) before DataChannel fan-out. Fan-out to sessions does not require Redis; Redis is for shared cross-pod state.
+| Id | Folder | Summary |
+| -- | ------ | ------- |
+| `echo` | `echo/` | Voice + chat echo |
+| `echo-dc` | `echo-dc/` | Data-channel echo, no TTS |
+| `voice-starter` | `voice-starter/` | Every speech event |
+| `world-sync` | `world-sync/` | JSON pose broadcast |
+| `world-sync-binary` | `world-sync-binary/` | Binary pose `ArrayBuffer` |
+| `game-sync` | `game-sync/` | Authoritative sim, Redis + binary snapshots |
+| `voice-showcase` | `voice-showcase/` | Conversational landing demo |
+| `recording-consent` | `recording-consent/` | Recording consent flow |
+| `positional-tts` | `positional-tts/` | Orbiting TTS |
+| `spatial-showcase` | `spatial-showcase/` | Orbit / soundboard / proximity |
+| `webhooks` | `webhooks/` | Inbound HMAC webhooks |
+| `webhooks-redis` | `webhooks-redis/` | Webhooks plus Redis counter |
 
 ## E2e templates
 
 These mirror former `e2e/fixtures/*` sources. E2E resolves entries from the package, builds into ephemeral workdirs, and uploads `dist/agent.js`.
 
-| Id                | Source                                    | Purpose                                       |
-| ----------------- | ----------------------------------------- | --------------------------------------------- |
-| `echo-smoke`      | `echo-smoke.ts`                           | voice-smoke, agent-smoke, cli-smoke           |
-| `crash`           | `crash.ts`                                | session-errors-smoke, crash-policy smokes     |
-| `game-sync-smoke` | `game-sync-smoke.ts`                      | deploy-smoke, shared-child, idle smokes       |
-| `redis-sync`      | `redis-sync/agent.ts` + `world-layout.ts` | redis-sync-smoke (project Redis world buffer) |
+| Id                | Source                                         | Purpose                                       |
+| ----------------- | ---------------------------------------------- | --------------------------------------------- |
+| `echo-smoke`      | `echo-smoke/agent.ts`                          | voice-smoke, agent-smoke, cli-smoke           |
+| `crash`           | `crash/agent.ts`                               | session-errors-smoke, crash-policy smokes     |
+| `game-sync-smoke` | `game-sync-smoke/agent.ts`                     | deploy-smoke, shared-child, idle smokes       |
+| `redis-sync`      | `redis-sync/agent.ts` + `world-layout.ts`      | redis-sync-smoke (binary positions + Redis world blob) |
+| `mix-smoke`       | `mix-smoke/agent.ts`                           | voice-data-mix-smoke                          |
 
 **Note:** Product `echo` is not the same as e2e `echo-smoke` — keep both ids.
 

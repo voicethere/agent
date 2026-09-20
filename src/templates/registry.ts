@@ -2,7 +2,7 @@ export type TemplateKind = "product" | "e2e";
 
 export interface AgentTemplateDefinition {
   id: string;
-  /** Path relative to `templates/` (e.g. `echo.ts`, `redis-sync/agent.ts`). */
+  /** Path relative to `templates/` (e.g. `echo/agent.ts`, `redis-sync/agent.ts`). */
   entry: string;
   kind: TemplateKind;
   /** When true, a prebuilt bundle is published at `dist/templates/<id>/agent.js`. */
@@ -17,44 +17,62 @@ export interface AgentTemplateDefinition {
 export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
   {
     id: "echo",
-    entry: "echo.ts",
+    entry: "echo/agent.ts",
     kind: "product",
     seedOnCreate: true,
     description:
       "Full echo debug agent — voice finals and DataChannel chat with TTS playback.",
-    sourceFiles: ["echo.ts"],
+    sourceFiles: ["echo/agent.ts"],
   },
   {
     id: "echo-dc",
-    entry: "echo-dc.ts",
+    entry: "echo-dc/agent.ts",
     kind: "product",
     seedOnCreate: true,
     description:
       "Data-channel-only echo — relays speech events and chat without TTS.",
-    sourceFiles: ["echo-dc.ts"],
+    sourceFiles: ["echo-dc/agent.ts"],
   },
   {
     id: "voice-starter",
-    entry: "agent.ts",
+    entry: "voice-starter/agent.ts",
     kind: "product",
     seedOnCreate: true,
     description:
       "Voice starter covering every speech event — customize onUserSpeechFinal for your LLM.",
-    sourceFiles: ["agent.ts"],
+    sourceFiles: ["voice-starter/agent.ts"],
   },
   {
-    id: "game-sync",
-    entry: "game-sync.ts",
+    id: "world-sync",
+    entry: "world-sync/agent.ts",
     kind: "product",
     seedOnCreate: true,
     description:
-      "Authoritative multi-object sync sample for real-time games and simulations.",
+      "Single-agent JSON world sync — onDataChannelMessage pose updates, in-memory, no Redis.",
+    sourceFiles: ["world-sync/agent.ts"],
+  },
+  {
+    id: "world-sync-binary",
+    entry: "world-sync-binary/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    description:
+      "Single-agent binary world sync — onDataChannelBinary + sendBinaryToClient ArrayBuffer poses, no Redis.",
+    sourceFiles: ["world-sync-binary/agent.ts", "world-sync-binary/protocol.ts"],
+  },
+  {
+    id: "game-sync",
+    entry: "game-sync/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    description:
+      "Authoritative multi-object sync with binary world snapshots; uses Redis when AGENT_REDIS_URL is set.",
     sourceFiles: [
-      "game-sync.ts",
-      "game-sync-protocol.ts",
-      "game-sync-world-layout.ts",
-      "game-sync-sim.ts",
-      "game-sync-redis.ts",
+      "game-sync/agent.ts",
+      "game-sync/protocol.ts",
+      "game-sync/world-layout.ts",
+      "game-sync/sim.ts",
+      "game-sync/redis.ts",
     ],
     npmDependencies: { ioredis: "^5.11.1" },
   },
@@ -114,49 +132,49 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
   },
   {
     id: "webhooks",
-    entry: "webhooks.ts",
+    entry: "webhooks/agent.ts",
     kind: "product",
     seedOnCreate: true,
     description:
       "Inbound webhook handler — HMAC verify on raw body, then DataChannel + speak fan-out.",
-    sourceFiles: ["webhooks.ts"],
+    sourceFiles: ["webhooks/agent.ts"],
   },
   {
     id: "webhooks-redis",
-    entry: "webhooks-redis.ts",
+    entry: "webhooks-redis/agent.ts",
     kind: "product",
     seedOnCreate: true,
     description:
       "Webhook handler with Redis atomic shared counter plus DataChannel fan-out.",
-    sourceFiles: ["webhooks-redis.ts"],
+    sourceFiles: ["webhooks-redis/agent.ts"],
     npmDependencies: { ioredis: "^5.11.1" },
   },
   {
     id: "echo-smoke",
-    entry: "echo-smoke.ts",
+    entry: "echo-smoke/agent.ts",
     kind: "e2e",
     seedOnCreate: false,
     description:
       "Minimal echo agent for e2e voice-smoke, agent-smoke, and cli-smoke uploads.",
-    sourceFiles: ["echo-smoke.ts"],
+    sourceFiles: ["echo-smoke/agent.ts"],
   },
   {
     id: "crash",
-    entry: "crash.ts",
+    entry: "crash/agent.ts",
     kind: "e2e",
     seedOnCreate: false,
     description:
       "Crash / echo agent for session-errors-smoke and agent-crash-policy smokes.",
-    sourceFiles: ["crash.ts"],
+    sourceFiles: ["crash/agent.ts"],
   },
   {
     id: "game-sync-smoke",
-    entry: "game-sync-smoke.ts",
+    entry: "game-sync-smoke/agent.ts",
     kind: "e2e",
     seedOnCreate: false,
     description:
       "Minimal data-channel agent for deploy-smoke, shared-child, and idle smokes.",
-    sourceFiles: ["game-sync-smoke.ts"],
+    sourceFiles: ["game-sync-smoke/agent.ts"],
   },
   {
     id: "redis-sync",
@@ -164,18 +182,18 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "e2e",
     seedOnCreate: false,
     description:
-      "Redis-backed world buffer sync for redis-sync-smoke (Advanced tier + project Redis).",
+      "Redis-backed world buffer sync for redis-sync-smoke — binary 12-byte position frames + project Redis.",
     sourceFiles: ["redis-sync/agent.ts", "redis-sync/world-layout.ts"],
     npmDependencies: { ioredis: "^5.11.1" },
   },
   {
     id: "mix-smoke",
-    entry: "mix-smoke.ts",
+    entry: "mix-smoke/agent.ts",
     kind: "e2e",
     seedOnCreate: false,
     description:
       "Positional mix DC commands for voice-data-mix-smoke (Voice+Data, shared child).",
-    sourceFiles: ["mix-smoke.ts"],
+    sourceFiles: ["mix-smoke/agent.ts"],
   },
 ] as const;
 

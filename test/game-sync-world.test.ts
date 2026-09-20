@@ -1,24 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_LIVE_OBJECTS } from "../templates/game-sync-protocol.js";
+import { MAX_LIVE_OBJECTS } from "../templates/game-sync/protocol.js";
 import {
   simulateWorldStep,
   OBJECT_RADIUS,
-} from "../templates/game-sync-sim.js";
+} from "../templates/game-sync/sim.js";
 import {
   clampSimulationDtSec,
+  collectActiveObjectIds,
+  collectActiveObjectIdsInto,
   countLiveObjects,
   commitSimulatedWorld,
   createEmptyWorldBuffer,
   findFirstEmptySlot,
   liveWorldSnapshot,
   markSlotFree,
+  normalizeWorldBuffer,
+  objectIdHeaderBytes,
+  OBJECT_STRIDE,
   planRedisSimTick,
   preserveEmptySlots,
   readSlotObjectId,
   slotToObjectId,
   writeObjectSlot,
-} from "../templates/game-sync-world-layout.js";
+} from "../templates/game-sync/world-layout.js";
 
 function registerInMemory(world: Float32Array, slot: number): number {
   const objectId = slotToObjectId(slot);
@@ -189,5 +194,85 @@ describe("game-sync simulation", () => {
 
     expect(world[1]).toBeGreaterThanOrEqual(OBJECT_RADIUS);
     expect(world[5]).toBeGreaterThan(0);
+  });
+
+  it("simulateWorldStep separates overlapping objects and exchanges velocity", () => {
+    const world = createEmptyWorldBuffer();
+    writeObjectSlot(world, 0, 1, 200, 200, 0, 1, 80, 0, 0, 0);
+    writeObjectSlot(world, 1, 2, 230, 200, 0, 1, -80, 0, 0, 0);
+
+    simulateWorldStep(world, 1 / 60, [1, 2]);
+
+    expect(world[1]).toBeLessThan(world[OBJECT_STRIDE + 1]!);
+    expect(world[5]).toBeLessThan(0);
+    expect(world[OBJECT_STRIDE + 5]).toBeGreaterThan(0);
+  });
+
+  it("collectActiveObjectIdsInto fills a reusable Int32Array and returns the count", () => {
+    const world = createEmptyWorldBuffer();
+    writeObjectSlot(world, 0, 1, 100, 100, 0, 1, 0, 0, 0, 0);
+    writeObjectSlot(world, 3, 4, 300, 300, 0, 1, 0, 0, 0, 0);
+    const ids = new Int32Array(MAX_LIVE_OBJECTS);
+    ids.fill(99);
+
+    const count = collectActiveObjectIdsInto(world, ids);
+
+    expect(count).toBe(2);
+    expect([...ids.subarray(0, count)]).toEqual([1, 4]);
+    expect(ids[2]).toBe(99);
+    expect([...ids.subarray(0, count)]).toEqual(collectActiveObjectIds(world));
+  });
+
+  it("simulateWorldStep only reads the first `count` ids of a typed array", () => {
+    const world = createEmptyWorldBuffer();
+    writeObjectSlot(world, 0, 1, 100, 100, 0, 1, 100, 0, 0, 0);
+    writeObjectSlot(world, 1, 2, 500, 500, 0, 1, 100, 0, 0, 0);
+    const ids = new Int32Array(MAX_LIVE_OBJECTS);
+    ids[0] = 1;
+    ids[1] = 2; // stale tail entry from a previous tick; must be ignored
+
+    simulateWorldStep(world, 1, ids, 1);
+
+    expect(world[1]).toBe(200);
+    expect(world[OBJECT_STRIDE + 1]).toBe(500);
+  });
+});
+
+describe("game-sync world buffer reuse", () => {
+  it("normalizeWorldBuffer writes into the destination array", () => {
+    const dest = createEmptyWorldBuffer();
+    writeObjectSlot(dest, 0, 1, 10, 20, 0, 1, 0, 0, 0, 0);
+    const raw = Buffer.from(
+      new Uint8Array(dest.buffer, dest.byteOffset, dest.byteLength),
+    );
+    dest.fill(0);
+    const result = normalizeWorldBuffer(raw, dest);
+    expect(result).toBe(dest);
+    expect(readSlotObjectId(dest, 0)).toBe(1);
+    expect(dest[1]).toBe(10);
+    expect(dest[2]).toBe(20);
+  });
+
+  it("normalizeWorldBuffer copies an unaligned Redis view into dest", () => {
+    const aligned = createEmptyWorldBuffer();
+    writeObjectSlot(aligned, 1, 2, 3, 4, 0, 1, 0, 0, 0, 0);
+    const padded = Buffer.concat([
+      Buffer.from([0xff]),
+      Buffer.from(aligned.buffer),
+    ]);
+    const unaligned = padded.subarray(1);
+    expect(unaligned.byteOffset % 4).not.toBe(0);
+    const dest = createEmptyWorldBuffer();
+    normalizeWorldBuffer(unaligned, dest);
+    expect(readSlotObjectId(dest, 1)).toBe(2);
+    expect(dest[OBJECT_STRIDE + 1]).toBe(3);
+  });
+
+  it("objectIdHeaderBytes is a view into the shared headers blob", () => {
+    const first = objectIdHeaderBytes(1);
+    const again = objectIdHeaderBytes(1);
+    expect(first.buffer).toBe(again.buffer);
+    expect(first.readFloatLE(0)).toBe(1);
+    expect(objectIdHeaderBytes(2).readFloatLE(0)).toBe(2);
   });
 });

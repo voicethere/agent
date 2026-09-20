@@ -6,6 +6,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-19
+
+### Added
+
+- **World sync templates** — `world-sync` (JSON `onDataChannelMessage`, one in-memory agent, no Redis) and `world-sync-binary` (`onDataChannelBinary` + `sendBinaryToClient` with 12-byte `ArrayBuffer` poses). `game-sync` remains the Redis + binary snapshot starter. Binary templates reuse one pose/snapshot/`Float32Array` world buffer (no per-tick `ArrayBuffer.slice` copies).
+- **Per-template folders** — every template now lives in `templates/<id>/` with a `README.md` and `agent.ts` entry (`game-sync` files moved out of the templates root).
+- **World-sync tests** — JSON / binary / game-sync / redis-sync agent handler coverage plus Lua tests against real Redis (`AGENT_TEST_REDIS_URL`, localhost:6379, or spawned `redis-server`). Mini-redis remains the sandbox PING mock only.
+- **`broadCastBinaryToClients`** is now exported from `@voicethere/agent` — wraps the payload once and fans the same `Buffer` view out to every session.
+
+### Changed
+
+- **Zero-copy `sendBinaryToClient`** — passing a `Uint8Array` (or any typed-array view) no longer clones the bytes via `Buffer.from(typedArray)`; the runtime wraps the same `ArrayBuffer` with `Buffer.from(buffer, byteOffset, byteLength)`. `Buffer` inputs are forwarded as-is.
+- **Allocation-free `game-sync` tick** — `collectActiveObjectIdsInto` fills a reusable `Int32Array`; `simulateWorldStep` accepts any `ArrayLike<number>` plus a `count` (plain arrays still work). Tick bodies are stable module functions; `dt` is measured when the step runs inside the mutation chain, not when it is scheduled. `game-sync` / `redis-sync` broadcast via one `broadCastBinaryToClients` call over a live session array.
+- **`redis-sync` binary inbound** — clients send a 12-byte `Float32Array([clientIndex, x, y])` on `voicethere-sync`; `onDataChannelBinary` patches Redis slots. JSON `{ type: "position" }` is no longer accepted.
+
+- **Breaking (0.x):** template source paths. `templates/echo.ts` is now `templates/echo/agent.ts`; `templates/game-sync.ts` is `templates/game-sync/agent.ts`; `templates/agent.ts` is `templates/voice-starter/agent.ts`. Update local `build --entry` flags and GitHub permalinks.
+
 ## [0.7.13] - 2026-09-19
 
 ### Added

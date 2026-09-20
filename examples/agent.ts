@@ -1,6 +1,6 @@
 /**
  * Default agent bundle — built to `dist/agent.js` for local runner dev.
- * Same event coverage as `templates/agent.ts` (imports from src for this repo).
+ * Same event coverage as `templates/voice-starter/agent.ts` (imports from src for this repo).
  *
  *   cd agent && npm run build
  *   AGENT_BUNDLE_PATH=../agent/dist/agent.js npm run start   # on your agent runner checkout

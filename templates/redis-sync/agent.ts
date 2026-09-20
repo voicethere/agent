@@ -2,10 +2,11 @@
  * Redis-backed world buffer sync for redis-sync-smoke (Advanced tier + project Redis).
  *
  * Game-style layout: one Float32Array world blob in Redis (`e2e:redis-sync:world`).
- * Each client owns a fixed slot and publishes `{ type: "position", clientIndex, x, y }`.
- * Each runner pod runs its own broadcast loop: one Redis GET per tick, then binary
- * fan-out on voicethere-sync to all local sessions (no pub/sub). Clients patch
- * out of sync; the 20Hz server tick is the authoritative sync path.
+ * Each client owns a fixed slot and publishes a 12-byte `ArrayBuffer`
+ * `Float32Array([clientIndex, x, y])` on the sync DataChannel. Each runner pod
+ * runs its own broadcast loop: one Redis GET per tick, then binary fan-out on
+ * voicethere-sync to all local sessions (no pub/sub). Clients patch out of sync;
+ * the 20Hz server tick is the authoritative sync path.
  *
  * Slot writes use a Lua read-modify-write so concurrent patches from many sessions
  * cannot clobber each other (WATCH/MULTI lost slots under 30-way connect storms).
@@ -13,85 +14,50 @@
  * Build:
  *   npx @voicethere/agent build --entry templates/redis-sync/agent.ts --outfile dist/agent.js
  */
-import Redis from "ioredis";
-import { agentLog, defineAgent, sendBinaryToClient } from "@voicethere/agent";
+import { Redis } from "ioredis";
+import {
+  agentLog,
+  broadCastBinaryToClients,
+  defineAgent,
+  sendBinaryToClient,
+} from "@voicethere/agent";
 
 import {
   createEmptyWorldBuffer,
+  decodePositionBuffer,
   normalizeWorldBuffer,
   peerSlotOffset,
   PEER_SLOT_BYTE_LENGTH,
+  PEER_STRIDE,
   REDIS_WORLD_KEY,
   WORLD_BYTE_LENGTH,
   writePeerSlot,
+  LUA_PATCH_PEER_SLOT,
 } from "./world-layout.js";
-
-/** Atomic splice of one peer slot (16 bytes) into the world blob. */
-const LUA_PATCH_PEER_SLOT = `
-local key = KEYS[1]
-local offset = tonumber(ARGV[1])
-local slot = ARGV[2]
-local size = tonumber(ARGV[3])
-local world = redis.call('GET', key)
-if not world then
-  world = string.rep(string.char(0), size)
-elseif #world < size then
-  world = world .. string.rep(string.char(0), size - #world)
-elseif #world > size then
-  world = string.sub(world, 1, size)
-end
-world = string.sub(world, 1, offset) .. slot .. string.sub(world, offset + #slot + 1)
-redis.call('SET', key, world)
-return size
-`;
 
 const WORLD_BROADCAST_HZ = 20;
 const WORLD_BROADCAST_INTERVAL_MS = Math.floor(1000 / WORLD_BROADCAST_HZ);
 
 const connectedSessions = new Set<string>();
+/** Same members as connectedSessions; array form for the per-tick broadcast. */
+const connectedSessionList: string[] = [];
 const sessionClientIndex = new Map<string, number>();
-let localWorld = createEmptyWorldBuffer();
+/** The one world buffer: Redis GETs copy into it, every broadcast sends this view. */
+const localWorld = createEmptyWorldBuffer();
+const localWorldBytes = Buffer.from(
+  localWorld.buffer,
+  localWorld.byteOffset,
+  localWorld.byteLength,
+);
 let redis: Redis | null = null;
 let broadcastTimer: NodeJS.Timeout | null = null;
 
-function parsePositionMessage(
-  message: unknown,
-): { clientIndex: number; x: number; y: number } | null {
-  if (!message || typeof message !== "object") {
-    return null;
-  }
-  const record = message as {
-    type?: unknown;
-    clientIndex?: unknown;
-    x?: unknown;
-    y?: unknown;
-  };
-  if (record.type !== "position") {
-    return null;
-  }
-  if (
-    typeof record.clientIndex !== "number" ||
-    !Number.isFinite(record.clientIndex) ||
-    record.clientIndex < 0
-  ) {
-    return null;
-  }
-  if (typeof record.x !== "number" || !Number.isFinite(record.x)) {
-    return null;
-  }
-  if (typeof record.y !== "number" || !Number.isFinite(record.y)) {
-    return null;
-  }
-  return {
-    clientIndex: record.clientIndex,
-    x: record.x,
-    y: record.y,
-  };
-}
-
-function copyWorldBuffer(world: Float32Array): Buffer {
-  return Buffer.from(world.buffer, world.byteOffset, world.byteLength);
-}
+const PEER_SLOT = new Float32Array(PEER_STRIDE);
+const PEER_SLOT_BUF = Buffer.from(
+  PEER_SLOT.buffer,
+  PEER_SLOT.byteOffset,
+  PEER_SLOT.byteLength,
+);
 
 function encodePeerSlot(
   clientIndex: number,
@@ -99,15 +65,15 @@ function encodePeerSlot(
   y: number,
   active: number,
 ): Buffer {
-  const floats = new Float32Array([clientIndex, x, y, active]);
-  return Buffer.from(floats.buffer, floats.byteOffset, floats.byteLength);
+  PEER_SLOT[0] = clientIndex;
+  PEER_SLOT[1] = x;
+  PEER_SLOT[2] = y;
+  PEER_SLOT[3] = active;
+  return PEER_SLOT_BUF;
 }
 
-function broadcastWorldBuffer(
-  world: Float32Array,
-  targetSessionId?: string,
-): void {
-  const payload = copyWorldBuffer(world);
+function broadcastWorldBuffer(targetSessionId?: string): void {
+  const payload = localWorldBytes;
   if (targetSessionId) {
     try {
       sendBinaryToClient(targetSessionId, payload, "sync");
@@ -120,41 +86,44 @@ function broadcastWorldBuffer(
     }
     return;
   }
-  for (const sessionId of connectedSessions) {
-    try {
-      sendBinaryToClient(sessionId, payload, "sync");
-    } catch (error: unknown) {
-      const detail = error instanceof Error ? error.message : String(error);
-      agentLog("error", `world send failed session=${sessionId}: ${detail}`);
-    }
+  if (connectedSessionList.length === 0) return;
+  try {
+    // payload is already a Buffer: forwarded as-is, one call, no Set iterator.
+    broadCastBinaryToClients(payload, connectedSessionList, "sync");
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    agentLog("error", `world broadcast send failed: ${detail}`);
   }
 }
 
-async function loadWorldFromRedis(): Promise<Float32Array> {
-  if (!redis) {
-    return new Float32Array(localWorld);
-  }
+/** Copy the Redis blob into `localWorld` in place; the GET reply is the only allocation. */
+async function loadWorldFromRedis(): Promise<void> {
+  if (!redis) return;
   const raw = await redis.getBuffer(REDIS_WORLD_KEY);
-  return normalizeWorldBuffer(raw);
+  normalizeWorldBuffer(raw, localWorld);
 }
 
 async function broadcastWorldFromRedis(
   targetSessionId?: string,
 ): Promise<void> {
-  const world = await loadWorldFromRedis();
-  broadcastWorldBuffer(world, targetSessionId);
+  await loadWorldFromRedis();
+  broadcastWorldBuffer(targetSessionId);
+}
+
+function logBroadcastError(error: unknown): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  agentLog("error", `world broadcast failed: ${detail}`);
+}
+
+function onBroadcastTick(): void {
+  void broadcastWorldFromRedis().catch(logBroadcastError);
 }
 
 function startBroadcastLoopIfNeeded(): void {
   if (broadcastTimer || connectedSessions.size === 0) {
     return;
   }
-  broadcastTimer = setInterval(() => {
-    void broadcastWorldFromRedis().catch((error: unknown) => {
-      const detail = error instanceof Error ? error.message : String(error);
-      agentLog("error", `world broadcast failed: ${detail}`);
-    });
-  }, WORLD_BROADCAST_INTERVAL_MS);
+  broadcastTimer = setInterval(onBroadcastTick, WORLD_BROADCAST_INTERVAL_MS);
   agentLog("info", `world loop started (${WORLD_BROADCAST_HZ}Hz)`);
 }
 
@@ -218,13 +187,21 @@ defineAgent({
   },
 
   async onClientJoin({ sessionId }) {
-    connectedSessions.add(sessionId);
+    if (!connectedSessions.has(sessionId)) {
+      connectedSessions.add(sessionId);
+      connectedSessionList.push(sessionId);
+    }
     startBroadcastLoopIfNeeded();
     await broadcastWorldFromRedis(sessionId);
   },
 
   async onClientLeave({ sessionId }) {
-    connectedSessions.delete(sessionId);
+    if (connectedSessions.delete(sessionId)) {
+      const index = connectedSessionList.indexOf(sessionId);
+      if (index !== -1) {
+        connectedSessionList.splice(index, 1);
+      }
+    }
     const clientIndex = sessionClientIndex.get(sessionId);
     sessionClientIndex.delete(sessionId);
     stopBroadcastLoopIfNeeded();
@@ -239,8 +216,8 @@ defineAgent({
     }
   },
 
-  async onDataChannelMessage(ctx) {
-    const position = parsePositionMessage(ctx.message);
+  async onDataChannelBinary(ctx) {
+    const position = decodePositionBuffer(ctx.rawBinary);
     if (!position) {
       return;
     }

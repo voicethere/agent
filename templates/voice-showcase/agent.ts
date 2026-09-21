@@ -10,6 +10,7 @@ import {
   parseChatText,
   sendToClient,
   speak,
+  speakAndChat,
   type SpeechEvent,
 } from "@voicethere/agent";
 
@@ -54,7 +55,7 @@ function deliverSpokenThenPlay(
   applyOutboundOps(
     sessionId,
     spokenThenPlayOps(result.messages, result.speakLines),
-    { sendToClient, speak },
+    { sendToClient, speak, speakAndChat },
   );
 }
 
@@ -88,6 +89,7 @@ defineAgent({
     applyOutboundOps(sessionId, greetingOps(sessionId, GREETING), {
       sendToClient,
       speak,
+      speakAndChat,
     });
     agentLog("info", `voice-showcase session_start ${sessionId}`);
   },

@@ -432,16 +432,15 @@ export function handleUtterance(
       }
 
       if (!country) {
+        const ask = speakAndChat("Got it. Which country is that in?");
         return {
           state: {
             ...state,
             phase: "weatherAwaitingLocation",
             weatherCity: city,
           },
-          speakLines: ["Got it. Which country is that in?"],
-          messages: [
-            { type: "chat_reply", text: "Got it. Which country is that in?" },
-          ],
+          speakLines: ask.speakLines,
+          messages: ask.messages,
         };
       }
 

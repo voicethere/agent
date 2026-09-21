@@ -258,7 +258,12 @@ describe("voice-showcase send-then-play delivery", () => {
     expect(playIdx).toBeGreaterThan(chatIdx);
     expect(ops[chatIdx]).toMatchObject({
       kind: "send",
-      message: { type: "chat_reply", text: GREETING },
+      message: {
+        type: "chat_reply",
+        text: GREETING,
+        stream: true,
+        utteranceId: expect.any(String),
+      },
     });
     expect(ops[playIdx]).toEqual({ kind: "play", text: GREETING });
   });
@@ -274,6 +279,26 @@ describe("voice-showcase send-then-play delivery", () => {
     expect(result.speakLines.length).toBeGreaterThan(0);
     expect(result.messages.length).toBeGreaterThan(0);
     expect(firstPlay).toBeGreaterThan(lastSend);
+  });
+
+  it("spoken chat_reply messages include stream metadata; menu-only reply does not", () => {
+    const result = handleUtterance(createInitialState(), "my name is Ada");
+    const chatReplies = result.messages.filter((m) => m.type === "chat_reply");
+    const spokenReplies = chatReplies.filter((m) =>
+      result.speakLines.includes(m.text ?? ""),
+    );
+    expect(spokenReplies.length).toBeGreaterThan(0);
+    for (const message of spokenReplies) {
+      expect(message).toMatchObject({
+        stream: true,
+        utteranceId: expect.any(String),
+      });
+    }
+    const menuOnly = chatReplies.find((m) =>
+      m.text?.includes("Here is our menu"),
+    );
+    expect(menuOnly).toBeDefined();
+    expect(menuOnly).not.toHaveProperty("stream");
   });
 
   it("applyOutboundOps invokes sendToClient before speak", () => {

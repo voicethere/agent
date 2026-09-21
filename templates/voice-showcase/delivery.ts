@@ -3,11 +3,12 @@
  * then trigger TTS play. Parent IPC preserves this order.
  */
 
+import { randomUUID } from "node:crypto";
+
 import type { OutboundMessage } from "./conversation.js";
 
 export type OutboundOp =
-  | { kind: "send"; message: OutboundMessage }
-  | { kind: "play"; text: string };
+  { kind: "send"; message: OutboundMessage } | { kind: "play"; text: string };
 
 export interface OutboundDeps {
   sendToClient: (sessionId: string, payload: unknown) => void;
@@ -29,14 +30,17 @@ export function spokenThenPlayOps(
   return ops;
 }
 
-export function greetingOps(
-  sessionId: string,
-  greeting: string,
-): OutboundOp[] {
+export function greetingOps(sessionId: string, greeting: string): OutboundOp[] {
+  const utteranceId = randomUUID();
   return spokenThenPlayOps(
     [
       { type: "agent_event", event: "session_start", sessionId },
-      { type: "chat_reply", text: greeting },
+      {
+        type: "chat_reply",
+        text: greeting,
+        stream: true,
+        utteranceId,
+      },
     ],
     [greeting],
   );

@@ -3,6 +3,8 @@
  * Tests import this module directly — no defineAgent dependency.
  */
 
+import { randomUUID } from "node:crypto";
+
 import { formatRecipeSpeech, pickRecipe } from "./recipes.js";
 import { pickFunFact } from "./fun-facts.js";
 import {
@@ -55,6 +57,8 @@ export interface ConversationState {
 export interface OutboundMessage {
   type: "chat_reply" | "menu" | "agent_event";
   text?: string;
+  stream?: boolean;
+  utteranceId?: string;
   event?: string;
   items?: Array<{ id: number; label: string }>;
   sessionId?: string;
@@ -91,9 +95,10 @@ function speakAndChat(text: string): {
   speakLines: string[];
   messages: OutboundMessage[];
 } {
+  const utteranceId = randomUUID();
   return {
     speakLines: [text],
-    messages: [{ type: "chat_reply", text }],
+    messages: [{ type: "chat_reply", text, stream: true, utteranceId }],
   };
 }
 

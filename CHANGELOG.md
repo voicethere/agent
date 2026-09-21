@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- **`speakAndChat`** — sends a `chat_reply` to the client, then `speak()` with the same text (send-then-play). Optional `{ stream: true, utteranceId }` adds stream caption metadata for clients with spoken-text streaming enabled. Echo and voice-showcase spoken lines set `stream: true`.
+
 ## [0.8.0] - 2026-09-19
 
 ### Added

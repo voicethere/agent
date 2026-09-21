@@ -86,6 +86,7 @@ export {
   setTtsPose,
   clearTtsPose,
   speak,
+  speakAndChat,
   startRecording,
   stopRecording,
   stopPlay,
@@ -105,5 +106,6 @@ export {
   type WebhookContext,
   type PlayOptions,
   type AudioPosition,
+  type SpeakAndChatOptions,
   PLAY_BYTES_MAX_DECODED_LENGTH,
 } from "./runtime.js";

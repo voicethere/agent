@@ -258,7 +258,12 @@ describe("voice-showcase send-then-play delivery", () => {
     expect(playIdx).toBeGreaterThan(chatIdx);
     expect(ops[chatIdx]).toMatchObject({
       kind: "send",
-      message: { type: "chat_reply", text: GREETING },
+      message: {
+        type: "chat_reply",
+        text: GREETING,
+        stream: true,
+        utteranceId: expect.any(String),
+      },
     });
     expect(ops[playIdx]).toEqual({ kind: "play", text: GREETING });
   });
@@ -276,20 +281,89 @@ describe("voice-showcase send-then-play delivery", () => {
     expect(firstPlay).toBeGreaterThan(lastSend);
   });
 
-  it("applyOutboundOps invokes sendToClient before speak", () => {
-    const calls: string[] = [];
+  it("spoken chat_reply messages include stream metadata; menu-only reply does not", () => {
+    const result = handleUtterance(createInitialState(), "my name is Ada");
+    const chatReplies = result.messages.filter((m) => m.type === "chat_reply");
+    const spokenReplies = chatReplies.filter((m) =>
+      result.speakLines.includes(m.text ?? ""),
+    );
+    expect(spokenReplies.length).toBeGreaterThan(0);
+    for (const message of spokenReplies) {
+      expect(message).toMatchObject({
+        stream: true,
+        utteranceId: expect.any(String),
+      });
+    }
+    const menuOnly = chatReplies.find((m) =>
+      m.text?.includes("Here is our menu"),
+    );
+    expect(menuOnly).toBeDefined();
+    expect(menuOnly).not.toHaveProperty("stream");
+  });
+
+  it("applyOutboundOps uses speakAndChat for streamed spoken lines and skips duplicate play", () => {
+    const speakAndChatCalls: Array<{
+      text: string;
+      utteranceId?: string;
+    }> = [];
+    let speakCalls = 0;
+    let sendToClientCalls = 0;
+
     applyOutboundOps(
       "session-1",
-      spokenThenPlayOps([{ type: "chat_reply", text: "Hello" }], ["Hello"]),
+      spokenThenPlayOps(
+        [
+          {
+            type: "chat_reply",
+            text: "Hello",
+            stream: true,
+            utteranceId: "u-1",
+          },
+        ],
+        ["Hello"],
+      ),
       {
-        sendToClient: (_sessionId, payload) => {
-          calls.push(`send:${(payload as { text?: string }).text}`);
+        sendToClient: () => {
+          sendToClientCalls += 1;
         },
-        speak: (_sessionId, text) => {
-          calls.push(`play:${text}`);
+        speak: () => {
+          speakCalls += 1;
+        },
+        speakAndChat: (_sessionId, text, options) => {
+          speakAndChatCalls.push({ text, utteranceId: options?.utteranceId });
         },
       },
     );
-    expect(calls).toEqual(["send:Hello", "play:Hello"]);
+
+    expect(speakAndChatCalls).toEqual([{ text: "Hello", utteranceId: "u-1" }]);
+    expect(speakCalls).toBe(0);
+    expect(sendToClientCalls).toBe(0);
+  });
+
+  it("applyOutboundOps sends non-stream chat_reply and agent_event via sendToClient only", () => {
+    const payloads: unknown[] = [];
+    applyOutboundOps(
+      "session-1",
+      [
+        {
+          kind: "send",
+          message: { type: "agent_event", event: "session_start" },
+        },
+        { kind: "send", message: { type: "chat_reply", text: "Menu text" } },
+      ],
+      {
+        sendToClient: (_sessionId, payload) => {
+          payloads.push(payload);
+        },
+        speak: () => {},
+        speakAndChat: () => {
+          throw new Error("speakAndChat should not run for menu-only reply");
+        },
+      },
+    );
+    expect(payloads).toEqual([
+      { type: "agent_event", event: "session_start" },
+      { type: "chat_reply", text: "Menu text" },
+    ]);
   });
 });

@@ -10,7 +10,7 @@ import {
   defineAgent,
   parseChatText,
   sendToClient,
-  speak,
+  speakAndChat,
   type SpeechEvent,
 } from "@voicethere/agent";
 
@@ -42,16 +42,14 @@ defineAgent({
 
   onUserSpeechFinal({ sessionId, text }) {
     const reply = formatEcho(text);
-    speak(sessionId, reply);
-    sendToClient(sessionId, { type: "chat_reply", text: reply });
+    speakAndChat(sessionId, reply, { stream: true });
   },
 
   onDataChannelMessage(ctx) {
     const text = parseChatText(ctx.message);
     if (!text) return;
     const reply = formatEcho(text);
-    sendToClient(ctx.sessionId, { type: "chat_reply", text: reply });
-    speak(ctx.sessionId, reply);
+    speakAndChat(ctx.sessionId, reply, { stream: true });
   },
 
   onSessionEnd({ sessionId }) {

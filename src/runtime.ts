@@ -1131,6 +1131,39 @@ export function speak(sessionId: string, text: string): void {
   sendParentMessage({ type: "speak", sessionId, text });
 }
 
+export interface SpeakAndChatOptions {
+  /** When true, include `stream` and `utteranceId` on the chat_reply for client typewriters. */
+  stream?: boolean;
+  utteranceId?: string;
+}
+
+/**
+ * Send a `chat_reply` to the client, then ask the runner to speak the same text.
+ * Preserves send-then-play order for spoken captions.
+ */
+export function speakAndChat(
+  sessionId: string,
+  text: string,
+  options?: SpeakAndChatOptions,
+): void {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return;
+  }
+  const payload: {
+    type: "chat_reply";
+    text: string;
+    stream?: boolean;
+    utteranceId?: string;
+  } = { type: "chat_reply", text: trimmed };
+  if (options?.stream) {
+    payload.stream = true;
+    payload.utteranceId = options.utteranceId ?? randomUUID();
+  }
+  sendToClient(sessionId, payload);
+  speak(sessionId, trimmed);
+}
+
 /** True when {@link SessionStartMessage.recordingAvailable} was set for the session. */
 export function isRecordingAvailable(ctx: SessionContext): boolean {
   return ctx.recordingAvailable;

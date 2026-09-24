@@ -180,15 +180,16 @@ On plans that include project Redis, the runner injects **`AGENT_REDIS_URL`** in
 
 For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in project settings. The runner forwards the exact request bytes on process-wide **`onWebhook`** IPC (not session-queued). Verify HMAC on `ctx.body` before `JSON.parse` — VoiceThere does not verify signatures in the SDK. See [`templates/webhooks/agent.ts`](./templates/webhooks/agent.ts).
 
-| Export                                                                    | Purpose                                                                                                                        |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `defineAgent`                                                             | Register `onAgentStart`, `onWebhook`, `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onUserLanguage`, `onSessionEnd` |
-| `SpeechEvent`, `SpeechEventType`                                          | Re-exported **types** from `@node-webrtc-rust/sdk/voice`                                                                       |
-| `SPEECH_EVENT_TYPE`                                                       | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                                          |
-| `speak`                                                                   | Request parent TTS                                                                                                             |
-| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording` | Request parent conversation recording control                                                                                  |
-| `agentLog`                                                                | Forward structured logs to parent                                                                                              |
-| `ParentToChildMessage` / `ChildToParentMessage`                           | IPC contract shared with the VoiceThere agent runner                                                                           |
+| Export                                                                                       | Purpose                                                                                                                        |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `defineAgent`                                                                                | Register `onAgentStart`, `onWebhook`, `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onUserLanguage`, `onSessionEnd` |
+| `SpeechEvent`, `SpeechEventType`                                                             | Re-exported **types** from `@node-webrtc-rust/sdk/voice`                                                                       |
+| `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                                          |
+| `speak`                                                                                      | Request parent TTS                                                                                                             |
+| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording`                    | Request parent conversation recording control                                                                                  |
+| `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Enable or disable conversation history storage mid-session                                                                     |
+| `agentLog`                                                                                   | Forward structured logs to parent                                                                                              |
+| `ParentToChildMessage` / `ChildToParentMessage`                                              | IPC contract shared with the VoiceThere agent runner                                                                           |
 
 ### Runner runtime subpath (minimal shared sandbox API)
 

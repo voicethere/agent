@@ -25,6 +25,8 @@ import type {
   RecordingControlAckMessage,
   RecordingControlAction,
   RecordingControlResult,
+  ConversationHistoryControlAckMessage,
+  ConversationHistoryControlResult,
   SttControlAckMessage,
   SttControlResult,
   WebhookMessage,
@@ -46,6 +48,8 @@ export interface SessionContext {
   env: Record<string, string>;
   /** `true` when the runner advertises conversation recording for this project. */
   recordingAvailable: boolean;
+  /** `true` when the runner advertises conversation history storage for this project. */
+  conversationHistoryAvailable: boolean;
   /** `true` when the runner session is Voice+Data and mix group APIs are available. */
   mixAvailable: boolean;
   /** `true` when TTS pose / listener pose APIs are available (voice or Voice+Data). */
@@ -193,6 +197,17 @@ function isRecordingControlAckMessage(
   );
 }
 
+function isConversationHistoryControlAckMessage(
+  value: unknown,
+): value is ConversationHistoryControlAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return (
+    msg.type === "conversation_history_control_ack" &&
+    typeof msg.requestId === "string"
+  );
+}
+
 function isMixControlAckMessage(value: unknown): value is MixControlAckMessage {
   if (!value || typeof value !== "object") return false;
   const msg = value as { type?: string; requestId?: unknown };
@@ -263,6 +278,7 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "data_channel_binary" ||
     msg.type === "idle_timeout" ||
     msg.type === "recording_control_ack" ||
+    msg.type === "conversation_history_control_ack" ||
     msg.type === "play_ack" ||
     msg.type === "play_status_ack" ||
     msg.type === "play_stop_ack" ||
@@ -278,6 +294,7 @@ type SessionScopedParentMessage = Exclude<
   ParentToChildMessage,
   | WebhookMessage
   | RecordingControlAckMessage
+  | ConversationHistoryControlAckMessage
   | PlayAckMessage
   | PlayStatusAckMessage
   | PlayStopAckMessage
@@ -303,6 +320,8 @@ function parseDataChannelPayload(raw: string): unknown {
 const peerEnvBySessionId = new Map<string, Record<string, string>>();
 /** Cached from `session_start.recordingAvailable` until `session_end`. */
 const recordingAvailableBySessionId = new Map<string, boolean>();
+/** Cached from `session_start.conversationHistoryAvailable` until `session_end`. */
+const conversationHistoryAvailableBySessionId = new Map<string, boolean>();
 /** Cached from `session_start.mixAvailable` until `session_end`. */
 const mixAvailableBySessionId = new Map<string, boolean>();
 /** Cached from `session_start.ttsPoseAvailable` until `session_end`. */
@@ -311,6 +330,7 @@ const ttsPoseAvailableBySessionId = new Map<string, boolean>();
 const endedSessionIds = new Set<string>();
 
 const RECORDING_CONTROL_ACK_TIMEOUT_MS = 5000;
+const CONVERSATION_HISTORY_CONTROL_ACK_TIMEOUT_MS = 5000;
 const PLAY_CONTROL_ACK_TIMEOUT_MS = 5000;
 
 /** Max decoded bytes for optional inline `bytes` on {@link play} (base64 in IPC). */
@@ -323,6 +343,17 @@ type PendingRecordingAck = {
 };
 
 const pendingRecordingAcks = new Map<string, PendingRecordingAck>();
+
+type PendingConversationHistoryAck = {
+  sessionId: string;
+  resolve: (result: ConversationHistoryControlResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const pendingConversationHistoryAcks = new Map<
+  string,
+  PendingConversationHistoryAck
+>();
 
 type PendingPlayAck = {
   resolve: (result: PlayResult) => void;
@@ -373,6 +404,20 @@ function handleRecordingControlAck(message: RecordingControlAckMessage): void {
   if (!pending) return;
   clearTimeout(pending.timer);
   pendingRecordingAcks.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    reason: message.reason,
+    requestId: message.requestId,
+  });
+}
+
+function handleConversationHistoryControlAck(
+  message: ConversationHistoryControlAckMessage,
+): void {
+  const pending = pendingConversationHistoryAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingConversationHistoryAcks.delete(message.requestId);
   pending.resolve({
     ok: message.ok,
     reason: message.reason,
@@ -546,6 +591,18 @@ function clearPendingRecordingAcksForSession(
     if (pending.sessionId !== sessionId) continue;
     clearTimeout(pending.timer);
     pendingRecordingAcks.delete(requestId);
+    pending.resolve({ ok: false, reason, requestId });
+  }
+}
+
+function clearPendingConversationHistoryAcksForSession(
+  sessionId: string,
+  reason: string,
+): void {
+  for (const [requestId, pending] of pendingConversationHistoryAcks) {
+    if (pending.sessionId !== sessionId) continue;
+    clearTimeout(pending.timer);
+    pendingConversationHistoryAcks.delete(requestId);
     pending.resolve({ ok: false, reason, requestId });
   }
 }
@@ -788,6 +845,10 @@ async function handleParentMessage(
         message.sessionId,
         message.recordingAvailable ?? false,
       );
+      conversationHistoryAvailableBySessionId.set(
+        message.sessionId,
+        message.conversationHistoryAvailable ?? false,
+      );
       mixAvailableBySessionId.set(
         message.sessionId,
         message.mixAvailable ?? false,
@@ -806,6 +867,8 @@ async function handleParentMessage(
         sessionId: message.sessionId,
         env: message.env,
         recordingAvailable: message.recordingAvailable ?? false,
+        conversationHistoryAvailable:
+          message.conversationHistoryAvailable ?? false,
         mixAvailable: message.mixAvailable ?? false,
         ttsPoseAvailable: message.ttsPoseAvailable ?? false,
       });
@@ -859,8 +922,13 @@ async function handleParentMessage(
       break;
     case "session_end":
       clearPendingRecordingAcksForSession(message.sessionId, "session_ended");
+      clearPendingConversationHistoryAcksForSession(
+        message.sessionId,
+        "session_ended",
+      );
       peerEnvBySessionId.delete(message.sessionId);
       recordingAvailableBySessionId.delete(message.sessionId);
+      conversationHistoryAvailableBySessionId.delete(message.sessionId);
       mixAvailableBySessionId.delete(message.sessionId);
       ttsPoseAvailableBySessionId.delete(message.sessionId);
       await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
@@ -892,6 +960,10 @@ export function defineAgent(handlers: AgentHandlers): void {
   process.on("message", (message: unknown) => {
     if (isRecordingControlAckMessage(message)) {
       handleRecordingControlAck(message);
+      return;
+    }
+    if (isConversationHistoryControlAckMessage(message)) {
+      handleConversationHistoryControlAck(message);
       return;
     }
     if (isPlayAckMessage(message)) {
@@ -930,6 +1002,10 @@ export function defineAgent(handlers: AgentHandlers): void {
     if (message.type === "session_end") {
       endedSessionIds.add(message.sessionId);
       clearPendingRecordingAcksForSession(message.sessionId, "session_ended");
+      clearPendingConversationHistoryAcksForSession(
+        message.sessionId,
+        "session_ended",
+      );
       inboundBySession.clear(message.sessionId);
     }
     // session_start must not chain onto a dying session_end generation — clear
@@ -1114,12 +1190,17 @@ export function resetAgentIpcStateForTests(): void {
   endedSessionIds.clear();
   peerEnvBySessionId.clear();
   recordingAvailableBySessionId.clear();
+  conversationHistoryAvailableBySessionId.clear();
   mixAvailableBySessionId.clear();
   ttsPoseAvailableBySessionId.clear();
   inboundQueueAuthority = null;
   for (const [requestId, pending] of pendingRecordingAcks) {
     clearTimeout(pending.timer);
     pendingRecordingAcks.delete(requestId);
+  }
+  for (const [requestId, pending] of pendingConversationHistoryAcks) {
+    clearTimeout(pending.timer);
+    pendingConversationHistoryAcks.delete(requestId);
   }
   clearPendingPlayAcks("reset");
   clearPendingMixAcks("reset");
@@ -1167,6 +1248,11 @@ export function speakAndChat(
 /** True when {@link SessionStartMessage.recordingAvailable} was set for the session. */
 export function isRecordingAvailable(ctx: SessionContext): boolean {
   return ctx.recordingAvailable;
+}
+
+/** True when {@link SessionStartMessage.conversationHistoryAvailable} was set for the session. */
+export function isConversationHistoryAvailable(ctx: SessionContext): boolean {
+  return ctx.conversationHistoryAvailable;
 }
 
 /** True when {@link SessionStartMessage.mixAvailable} was set for the session. */
@@ -1494,6 +1580,76 @@ export function stopRecording(
   sessionId: string,
 ): Promise<RecordingControlResult> {
   return sendRecordingControl(sessionId, "stop");
+}
+
+async function sendConversationHistoryControl(
+  sessionId: string,
+  enabled: boolean,
+): Promise<ConversationHistoryControlResult> {
+  const requestId = randomUUID();
+
+  if (!allowOutboundForSession(sessionId)) {
+    return { ok: false, reason: "session_ended", requestId };
+  }
+
+  if (
+    enabled &&
+    conversationHistoryAvailableBySessionId.has(sessionId) &&
+    conversationHistoryAvailableBySessionId.get(sessionId) === false
+  ) {
+    agentLog(
+      "warn",
+      "Project conversation history is disabled; the agent cannot turn history storage on",
+      sessionId,
+    );
+    return { ok: false, reason: "disabled", requestId };
+  }
+
+  if (!isVoicethereAgentChild()) {
+    return { ok: true, reason: "local_mock", requestId };
+  }
+
+  return new Promise<ConversationHistoryControlResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingConversationHistoryAcks.delete(requestId);
+      resolve({ ok: false, reason: "timeout", requestId });
+    }, CONVERSATION_HISTORY_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingConversationHistoryAcks.set(requestId, {
+      sessionId,
+      resolve,
+      timer,
+    });
+
+    sendParentMessage({
+      type: "conversation_history_control",
+      sessionId,
+      enabled,
+      requestId,
+    });
+  });
+}
+
+/** Enable or disable conversation history storage for the session. */
+export function setConversationHistoryEnabled(
+  sessionId: string,
+  enabled: boolean,
+): Promise<ConversationHistoryControlResult> {
+  return sendConversationHistoryControl(sessionId, enabled);
+}
+
+/** Ask the runner parent to resume storing conversation history for the session. */
+export function enableConversationHistory(
+  sessionId: string,
+): Promise<ConversationHistoryControlResult> {
+  return sendConversationHistoryControl(sessionId, true);
+}
+
+/** Ask the runner parent to stop storing conversation history for the session. */
+export function disableConversationHistory(
+  sessionId: string,
+): Promise<ConversationHistoryControlResult> {
+  return sendConversationHistoryControl(sessionId, false);
 }
 
 export interface PlayOptions {

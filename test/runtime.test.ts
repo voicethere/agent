@@ -4,7 +4,9 @@ import {
   agentLog,
   broadCastBinaryToClients,
   defineAgent,
+  disableConversationHistory,
   disconnectClient,
+  enableConversationHistory,
   getPlay,
   pauseRecording,
   play,
@@ -12,6 +14,7 @@ import {
   resumeRecording,
   sendBinaryToClient,
   sendToClient,
+  setConversationHistoryEnabled,
   setPlayPose,
   speak,
   startRecording,
@@ -210,6 +213,7 @@ describe("defineAgent", () => {
           BUILD_ID: "build-1",
         },
         recordingAvailable: false,
+        conversationHistoryAvailable: false,
         mixAvailable: false,
         ttsPoseAvailable: false,
       });
@@ -250,6 +254,7 @@ describe("defineAgent", () => {
         sessionId: "peer-delay-default",
         env: { SESSION_ID: "peer-delay-default" },
         recordingAvailable: false,
+        conversationHistoryAvailable: false,
         mixAvailable: false,
         ttsPoseAvailable: false,
       });
@@ -298,6 +303,7 @@ describe("defineAgent", () => {
         sessionId: "peer-delay-custom",
         env: { SESSION_ID: "peer-delay-custom" },
         recordingAvailable: false,
+        conversationHistoryAvailable: false,
         mixAvailable: false,
         ttsPoseAvailable: false,
       });
@@ -339,6 +345,7 @@ describe("defineAgent", () => {
           sessionId: "peer-delay-disabled",
           env: { SESSION_ID: "peer-delay-disabled" },
           recordingAvailable: false,
+          conversationHistoryAvailable: false,
           mixAvailable: false,
           ttsPoseAvailable: false,
         });
@@ -1358,6 +1365,202 @@ describe("recording control", () => {
   });
 });
 
+describe("conversation history control", () => {
+  const childBundleEnv = process.env.__CHILD_BUNDLE_PATH__;
+
+  beforeEach(() => {
+    resetAgentIpcStateForTests();
+    delete process.env.__CHILD_BUNDLE_PATH__;
+  });
+
+  afterEach(() => {
+    if (childBundleEnv === undefined) {
+      delete process.env.__CHILD_BUNDLE_PATH__;
+    } else {
+      process.env.__CHILD_BUNDLE_PATH__ = childBundleEnv;
+    }
+  });
+
+  it("resolves local_mock when not a forked agent child", async () => {
+    const result = await setConversationHistoryEnabled("peer-1", true);
+    expect(result).toMatchObject({ ok: true, reason: "local_mock" });
+  });
+
+  it("sends conversation_history_control IPC and awaits matching ack (enabled true)", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+      conversationHistoryAvailable: true,
+    });
+    await vi.waitFor(() =>
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session_start_ack" }),
+      ),
+    );
+    capture.send.mockClear();
+
+    const ackPromise = enableConversationHistory("peer-1");
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const sent = capture.send.mock.calls[0]?.[0] as {
+      type: string;
+      sessionId: string;
+      enabled: boolean;
+      requestId: string;
+    };
+    expect(sent).toEqual(
+      expect.objectContaining({
+        type: "conversation_history_control",
+        sessionId: "peer-1",
+        enabled: true,
+      }),
+    );
+
+    capture.emit({
+      type: "conversation_history_control_ack",
+      sessionId: "peer-1",
+      enabled: true,
+      requestId: sent.requestId,
+      ok: true,
+      reason: "applied",
+    });
+
+    await expect(ackPromise).resolves.toEqual({
+      ok: true,
+      reason: "applied",
+      requestId: sent.requestId,
+    });
+    capture.restore();
+  });
+
+  it("sends conversation_history_control IPC and awaits matching ack (enabled false)", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+      conversationHistoryAvailable: true,
+    });
+    await vi.waitFor(() =>
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session_start_ack" }),
+      ),
+    );
+    capture.send.mockClear();
+
+    const ackPromise = disableConversationHistory("peer-1");
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const sent = capture.send.mock.calls[0]?.[0] as {
+      type: string;
+      sessionId: string;
+      enabled: boolean;
+      requestId: string;
+    };
+    expect(sent).toEqual(
+      expect.objectContaining({
+        type: "conversation_history_control",
+        sessionId: "peer-1",
+        enabled: false,
+      }),
+    );
+
+    capture.emit({
+      type: "conversation_history_control_ack",
+      sessionId: "peer-1",
+      enabled: false,
+      requestId: sent.requestId,
+      ok: true,
+      reason: "applied",
+    });
+
+    await expect(ackPromise).resolves.toEqual({
+      ok: true,
+      reason: "applied",
+      requestId: sent.requestId,
+    });
+    capture.restore();
+  });
+
+  it("denies enable when conversationHistoryAvailable is false after session_start", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+      conversationHistoryAvailable: false,
+    });
+    await vi.waitFor(() =>
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session_start_ack" }),
+      ),
+    );
+    capture.send.mockClear();
+
+    const enableResult = await enableConversationHistory("peer-1");
+    expect(enableResult).toMatchObject({ ok: false, reason: "disabled" });
+    expect(capture.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "conversation_history_control",
+        enabled: true,
+      }),
+    );
+
+    capture.send.mockClear();
+    const disablePromise = disableConversationHistory("peer-1");
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const disableCall = capture.send.mock.calls[0]?.[0] as {
+      requestId: string;
+    };
+    capture.emit({
+      type: "conversation_history_control_ack",
+      sessionId: "peer-1",
+      enabled: false,
+      requestId: disableCall.requestId,
+      ok: true,
+      reason: "applied",
+    });
+    await disablePromise;
+    capture.restore();
+  });
+
+  it("does not send conversation_history_control after session_end for the same session", async () => {
+    const capture = installProcessMessageCapture();
+    const onSessionEnd = vi.fn();
+    defineAgent({ onSessionEnd });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+      conversationHistoryAvailable: true,
+    });
+    await vi.waitFor(() =>
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session_start_ack" }),
+      ),
+    );
+    capture.send.mockClear();
+
+    capture.emit({ type: "session_end", sessionId: "peer-1" });
+    await vi.waitFor(() => expect(onSessionEnd).toHaveBeenCalled());
+
+    const result = await disableConversationHistory("peer-1");
+    expect(capture.send).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: false, reason: "session_ended" });
+    capture.restore();
+  });
+});
+
 describe("play control", () => {
   const childBundleEnv = process.env.__CHILD_BUNDLE_PATH__;
 
@@ -1647,6 +1850,7 @@ describe("session_start recordingAvailable", () => {
       sessionId: "peer-1",
       env: { SESSION_ID: "peer-1" },
       recordingAvailable: true,
+      conversationHistoryAvailable: false,
       mixAvailable: false,
       ttsPoseAvailable: false,
     });
@@ -1669,6 +1873,7 @@ describe("session_start recordingAvailable", () => {
       sessionId: "peer-1",
       env: { SESSION_ID: "peer-1" },
       recordingAvailable: false,
+      conversationHistoryAvailable: false,
       mixAvailable: false,
       ttsPoseAvailable: false,
     });

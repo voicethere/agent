@@ -26,6 +26,7 @@ export type ParentToChildMessage =
   | DataChannelBinaryMessage
   | IdleTimeoutMessage
   | RecordingControlAckMessage
+  | ConversationHistoryControlAckMessage
   | PlayAckMessage
   | PlayStatusAckMessage
   | PlayStopAckMessage
@@ -43,6 +44,7 @@ export type ChildToParentMessage =
   | SessionStartAckMessage
   | SpeakMessage
   | RecordingControlMessage
+  | ConversationHistoryControlMessage
   | PlayMessage
   | PlayStatusMessage
   | PlayStopMessage
@@ -80,6 +82,11 @@ export interface SessionStartMessage {
    * Absent on older runners — treat as `false`.
    */
   recordingAvailable?: boolean;
+  /**
+   * When `true`, the runner has conversation history storage enabled for this project.
+   * Absent on older runners — treat as `false`.
+   */
+  conversationHistoryAvailable?: boolean;
   /**
    * When `true`, the runner session is Voice+Data and positional mix APIs are available.
    * Absent on older runners or voice/data-only sessions — treat as `false`.
@@ -203,6 +210,39 @@ export interface RecordingControlAckMessage {
 
 /** Result returned by {@link startRecording} and related helpers. */
 export type RecordingControlResult = {
+  ok: boolean;
+  reason?: string;
+  requestId: string;
+};
+
+/**
+ * Ask the parent to enable or disable conversation history storage for a session.
+ *
+ * Use {@link setConversationHistoryEnabled}, {@link enableConversationHistory}, or
+ * {@link disableConversationHistory} instead of raw `process.send`.
+ */
+export interface ConversationHistoryControlMessage {
+  type: "conversation_history_control";
+  /** Target peer/session id (must match a prior {@link SessionStartMessage}). */
+  sessionId: string;
+  enabled: boolean;
+  /** Correlates with {@link ConversationHistoryControlAckMessage.requestId}. */
+  requestId: string;
+}
+
+/** Runner acknowledgement for a {@link ConversationHistoryControlMessage}. */
+export interface ConversationHistoryControlAckMessage {
+  type: "conversation_history_control_ack";
+  sessionId: string;
+  enabled: boolean;
+  requestId: string;
+  ok: boolean;
+  reason?:
+    "applied" | "disabled" | "unsupported" | "local_mock" | "timeout" | string;
+}
+
+/** Result returned by {@link setConversationHistoryEnabled} and related helpers. */
+export type ConversationHistoryControlResult = {
   ok: boolean;
   reason?: string;
   requestId: string;

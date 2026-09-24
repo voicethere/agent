@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- **Conversation history controls:** `setConversationHistoryEnabled`, `enableConversationHistory`, and `disableConversationHistory` (`ConversationHistoryControlMessage`) return `Promise<ConversationHistoryControlResult>` after a parent `conversation_history_control_ack` (`requestId`). `SessionStartMessage.conversationHistoryAvailable` matches `recordingAvailable`.
+
 ## [0.8.1] - 2026-09-21
 
 ### Added

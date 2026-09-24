@@ -187,7 +187,7 @@ For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in proje
 | `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                                          |
 | `speak`                                                                                      | Request parent TTS                                                                                                             |
 | `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording`                    | Request parent conversation recording control                                                                                  |
-| `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Enable or disable conversation history storage mid-session                                                                     |
+| `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Stop or resume conversation history storage for one session                                                                    |
 | `agentLog`                                                                                   | Forward structured logs to parent                                                                                              |
 | `ParentToChildMessage` / `ChildToParentMessage`                                              | IPC contract shared with the VoiceThere agent runner                                                                           |
 

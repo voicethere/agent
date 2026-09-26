@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-09-26
+
+### Changed
+
+- **`spatial-showcase` orbit** — pose and mix updates run at 60 Hz so the circling voice moves smoothly.
+- **`spatial-showcase` clip origins** — `https://www.voicethere.io` and `https://voicethere.io` are allowed asset origins for showcase sound URLs.
+
 ## [0.8.2] - 2026-09-24
 
 ### Added

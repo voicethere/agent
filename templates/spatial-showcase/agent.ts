@@ -56,8 +56,9 @@ import {
   orbitSineClipDurationMs,
 } from "./sine.js";
 
-const ORBIT_TICK_MS = 50;
-const ORBIT_POSE_EMIT_MS = 100;
+const ORBIT_POSE_HZ = 60;
+const ORBIT_TICK_MS = 1000 / ORBIT_POSE_HZ;
+const ORBIT_POSE_EMIT_MS = ORBIT_TICK_MS;
 const ROOM_STATE_TICK_MS = 100;
 const LOOP_PAD_POLL_MS = 250;
 const ORBIT_SINE_POLL_MS = 250;
@@ -426,7 +427,7 @@ function emitOrbitPose(sessionId: string, state: SessionState): void {
   const now = Date.now();
   if (
     state.lastOrbitPoseEmitMs !== undefined &&
-    now - state.lastOrbitPoseEmitMs < ORBIT_POSE_EMIT_MS
+    now - state.lastOrbitPoseEmitMs < ORBIT_POSE_EMIT_MS - 2
   ) {
     return;
   }

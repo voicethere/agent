@@ -264,6 +264,12 @@ describe("resolveClipUrl", () => {
     expect(resolveClipUrl("http://localhost:3000", "laser")).toBe(
       "http://localhost:3000/showcase/sounds/laser.wav",
     );
+    expect(resolveClipUrl("https://www.voicethere.io", "cafe-loop")).toBe(
+      "https://www.voicethere.io/showcase/sounds/cafe-loop.wav",
+    );
+    expect(resolveClipUrl("https://voicethere.io", "chime")).toBe(
+      "https://voicethere.io/showcase/sounds/chime.wav",
+    );
   });
 
   it("trims trailing slash on origin", () => {

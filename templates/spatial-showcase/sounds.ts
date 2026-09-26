@@ -35,6 +35,8 @@ export const SHOWCASE_SOUND_FILES: Record<ShowcaseClipId, ShowcaseSoundFile> = {
 export const SHOWCASE_ASSET_ORIGINS = [
   "https://app.voicethere.io",
   "https://app.voicethere.dev",
+  "https://www.voicethere.io",
+  "https://voicethere.io",
   "http://localhost:3000",
 ] as const;
 

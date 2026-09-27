@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-27
+
 ### Added
 
 - **`setVoiceLanguage`** — agent code changes STT, TTS, or both for one live session, including the vendor (`sttVendor` / `ttsVendor`). `scope: "stt"` or `"tts"` leaves the other side in place. Spoken-language detection does not change either side until you call it. API keys stay in project secrets.

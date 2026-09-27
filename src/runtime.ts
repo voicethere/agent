@@ -29,6 +29,10 @@ import type {
   ConversationHistoryControlResult,
   SttControlAckMessage,
   SttControlResult,
+  VoiceControlScope,
+  VoiceLanguageControlAckMessage,
+  VoiceLanguageResult,
+  VoiceVendorSelection,
   WebhookMessage,
 } from "./protocol.js";
 import {
@@ -220,6 +224,17 @@ function isSttControlAckMessage(value: unknown): value is SttControlAckMessage {
   return msg.type === "stt_control_ack" && typeof msg.requestId === "string";
 }
 
+function isVoiceLanguageControlAckMessage(
+  value: unknown,
+): value is VoiceLanguageControlAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return (
+    msg.type === "voice_language_control_ack" &&
+    typeof msg.requestId === "string"
+  );
+}
+
 function isWebhookMessage(value: unknown): value is WebhookMessage {
   if (!value || typeof value !== "object") return false;
   const msg = value as {
@@ -285,6 +300,7 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "play_pose_ack" ||
     msg.type === "mix_control_ack" ||
     msg.type === "stt_control_ack" ||
+    msg.type === "voice_language_control_ack" ||
     msg.type === "webhook"
   );
 }
@@ -301,6 +317,7 @@ type SessionScopedParentMessage = Exclude<
   | PlayPoseAckMessage
   | MixControlAckMessage
   | SttControlAckMessage
+  | VoiceLanguageControlAckMessage
 >;
 
 function isSessionScopedParentMessage(
@@ -398,6 +415,16 @@ type PendingSttAck = {
 
 const pendingMixAcks = new Map<string, PendingMixAck>();
 const pendingSttAcks = new Map<string, PendingSttAck>();
+
+/** Pool create can take several minutes on a cold language. */
+const VOICE_LANGUAGE_CONTROL_ACK_TIMEOUT_MS = 660_000;
+
+type PendingVoiceLanguageAck = {
+  resolve: (result: VoiceLanguageResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const pendingVoiceLanguageAcks = new Map<string, PendingVoiceLanguageAck>();
 
 function handleRecordingControlAck(message: RecordingControlAckMessage): void {
   const pending = pendingRecordingAcks.get(message.requestId);
@@ -557,6 +584,34 @@ function clearPendingSttAcks(reason: string): void {
   }
 }
 
+function handleVoiceLanguageControlAck(
+  message: VoiceLanguageControlAckMessage,
+): void {
+  const pending = pendingVoiceLanguageAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingVoiceLanguageAcks.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    reason: message.reason,
+    requestId: message.requestId,
+    ...(message.language ? { language: message.language } : {}),
+    ...(message.voice ? { voice: message.voice } : {}),
+    ...(message.stt ? { stt: message.stt } : {}),
+    ...(message.scope ? { scope: message.scope } : {}),
+    ...(message.sttProvider ? { sttProvider: message.sttProvider } : {}),
+    ...(message.ttsProvider ? { ttsProvider: message.ttsProvider } : {}),
+  });
+}
+
+function clearPendingVoiceLanguageAcks(reason: string): void {
+  for (const [requestId, pending] of pendingVoiceLanguageAcks) {
+    clearTimeout(pending.timer);
+    pendingVoiceLanguageAcks.delete(requestId);
+    pending.resolve({ ok: false, reason, requestId });
+  }
+}
+
 function isMixAvailableInProcess(): boolean {
   for (const available of mixAvailableBySessionId.values()) {
     if (available) return true;
@@ -707,7 +762,11 @@ function sendParentMessage(message: unknown): void {
     message && typeof message === "object" && "type" in message
       ? (message as { type?: string }).type
       : undefined;
-  if (msgType === "mix_control" || msgType === "stt_control") {
+  if (
+    msgType === "mix_control" ||
+    msgType === "stt_control" ||
+    msgType === "voice_language_control"
+  ) {
     process.send?.(message as never);
     return;
   }
@@ -990,6 +1049,10 @@ export function defineAgent(handlers: AgentHandlers): void {
       handleSttControlAck(message);
       return;
     }
+    if (isVoiceLanguageControlAckMessage(message)) {
+      handleVoiceLanguageControlAck(message);
+      return;
+    }
     if (isWebhookMessage(message)) {
       void agentStartReady.then(() => handleWebhookMessage(message, handlers));
       return;
@@ -1205,6 +1268,7 @@ export function resetAgentIpcStateForTests(): void {
   clearPendingPlayAcks("reset");
   clearPendingMixAcks("reset");
   clearPendingSttAcks("reset");
+  clearPendingVoiceLanguageAcks("reset");
 }
 
 /** Ask the runner parent to synthesize speech for the session. */
@@ -1508,6 +1572,116 @@ export function setSttEnabled(options: {
   sessionId?: string;
 }): Promise<SttControlResult> {
   return sendSttControl(options);
+}
+
+export interface SetVoiceLanguageOptions {
+  /**
+   * ISO 639-1 code, for example `"de"`. Omit when you only change a cloud vendor.
+   * Alone, with no `scope`, this switches both Sherpa sides.
+   */
+  language?: string;
+  /**
+   * `stt` changes listening and leaves the speaking voice. `tts` changes the
+   * voice and leaves listening. `both` changes both. Omit to infer from which
+   * of `voice` / `stt` / `sttVendor` / `ttsVendor` you set.
+   */
+  scope?: VoiceControlScope;
+  /**
+   * Sherpa TTS catalog id (`de`, `en-lessac`, `de-thorsten-high`).
+   * On a TTS switch, omit it to use `language` when that id exists.
+   */
+  voice?: string;
+  /**
+   * Sherpa STT catalog id (`de`, `en-small`). On an STT or both switch, omit
+   * it to use `language` when that id exists. Italian, Portuguese, Dutch,
+   * Polish, and Hindi have no STT id; a `both` switch still changes TTS.
+   */
+  stt?: string;
+  /**
+   * Replace the STT vendor for this session. Keys stay in project secrets.
+   * `provider`: `local-sherpa`, `openai`, `deepgram`, `assemblyai`, or `google`.
+   */
+  sttVendor?: VoiceVendorSelection;
+  /**
+   * Replace the TTS vendor for this session. Keys stay in project secrets.
+   * `provider`: `local-sherpa`, `openai`, `elevenlabs`, `cartesia`, or `google`.
+   */
+  ttsVendor?: VoiceVendorSelection;
+}
+
+function cleanVendor(
+  selection: VoiceVendorSelection | undefined,
+): VoiceVendorSelection | undefined {
+  const provider = selection?.provider?.trim();
+  if (!provider) return undefined;
+  return {
+    provider,
+    ...(selection?.model?.trim() ? { model: selection.model.trim() } : {}),
+    ...(selection?.voice?.trim() ? { voice: selection.voice.trim() } : {}),
+    ...(selection?.language?.trim() ? { language: selection.language.trim() } : {}),
+  };
+}
+
+/**
+ * Change STT, TTS, or the vendor for one live session. Detection
+ * (`onUserLanguage`) does not change either side until agent code calls this.
+ * The promise resolves when the runner has applied the requested side (a cold
+ * Sherpa pool can take minutes). Cloud vendors use project secrets already on
+ * the running deploy — this call does not send API keys.
+ */
+export function setVoiceLanguage(
+  sessionId: string,
+  options: SetVoiceLanguageOptions,
+): Promise<VoiceLanguageResult> {
+  const requestId = randomUUID();
+  const language = options.language?.trim() ?? "";
+  const scope = options.scope;
+  if (scope && scope !== "stt" && scope !== "tts" && scope !== "both") {
+    return Promise.resolve({
+      ok: false,
+      reason: "invalid_scope",
+      requestId,
+    });
+  }
+  const sttVendor = cleanVendor(options.sttVendor);
+  const ttsVendor = cleanVendor(options.ttsVendor);
+  const hasWork = Boolean(
+    language ||
+      options.voice?.trim() ||
+      options.stt?.trim() ||
+      sttVendor ||
+      ttsVendor,
+  );
+  if (!hasWork) {
+    return Promise.resolve({
+      ok: false,
+      reason: "nothing_to_apply",
+      requestId,
+    });
+  }
+  if (!isVoicethereAgentChild()) {
+    return Promise.resolve({ ok: true, reason: "local_mock", requestId });
+  }
+
+  return new Promise<VoiceLanguageResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingVoiceLanguageAcks.delete(requestId);
+      resolve({ ok: false, reason: "timeout", requestId });
+    }, VOICE_LANGUAGE_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingVoiceLanguageAcks.set(requestId, { resolve, timer });
+    sendParentMessage({
+      type: "voice_language_control",
+      requestId,
+      sessionId,
+      ...(language ? { language } : {}),
+      ...(scope ? { scope } : {}),
+      ...(options.voice?.trim() ? { voice: options.voice.trim() } : {}),
+      ...(options.stt?.trim() ? { stt: options.stt.trim() } : {}),
+      ...(sttVendor ? { sttVendor } : {}),
+      ...(ttsVendor ? { ttsVendor } : {}),
+    });
+  });
 }
 
 async function sendRecordingControl(

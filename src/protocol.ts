@@ -33,6 +33,7 @@ export type ParentToChildMessage =
   | PlayPoseAckMessage
   | MixControlAckMessage
   | SttControlAckMessage
+  | VoiceLanguageControlAckMessage
   | WebhookMessage;
 
 /**
@@ -51,6 +52,7 @@ export type ChildToParentMessage =
   | PlayPoseMessage
   | MixControlMessage
   | SttControlMessage
+  | VoiceLanguageControlMessage
   | AgentLogMessage
   | AgentErrorMessage
   | SendToClientMessage
@@ -517,6 +519,80 @@ export type SttControlResult = {
   ok: boolean;
   reason?: string;
   requestId: string;
+};
+
+/** Which side of a live session {@link setVoiceLanguage} changes. */
+export type VoiceControlScope = "stt" | "tts" | "both";
+
+/**
+ * Vendor selection for a mid-conversation STT or TTS switch.
+ * `provider` is a public id (`local-sherpa`, `deepgram`, `elevenlabs`, …).
+ * Do not put API keys here — the runner reads project secrets.
+ */
+export interface VoiceVendorSelection {
+  provider: string;
+  /** Cloud model id, or a Sherpa catalog id when `provider` is `local-sherpa`. */
+  model?: string;
+  /** Cloud voice id, or a Sherpa TTS catalog id when `provider` is `local-sherpa`. */
+  voice?: string;
+  /** BCP-47 or ISO code passed through to the vendor. */
+  language?: string;
+}
+
+/**
+ * Ask the runner to change STT, TTS, or both for one live session.
+ * Spoken-language detection does not do this by itself.
+ *
+ * `voice` and `stt` are Sherpa catalog ids (`en`, `de`, `en-lessac`, `en-small`),
+ * not model paths. `sttVendor` and `ttsVendor` replace that side's provider.
+ */
+export interface VoiceLanguageControlMessage {
+  type: "voice_language_control";
+  requestId: string;
+  sessionId: string;
+  /** ISO 639-1 code, for example `de`. Omit for a vendor-only change. */
+  language?: string;
+  /** `stt` keeps the current voice. `tts` keeps the current STT model. */
+  scope?: VoiceControlScope;
+  /** TTS catalog id. Omit on a TTS switch to use `language` when that id exists. */
+  voice?: string;
+  /**
+   * STT catalog id. Omit on an STT or both switch to use `language` when that
+   * id exists. A missing language-default id skips STT when `scope` is `both`.
+   */
+  stt?: string;
+  sttVendor?: VoiceVendorSelection;
+  ttsVendor?: VoiceVendorSelection;
+}
+
+/** Runner acknowledgement for a {@link VoiceLanguageControlMessage}. */
+export interface VoiceLanguageControlAckMessage {
+  type: "voice_language_control_ack";
+  requestId: string;
+  sessionId: string;
+  ok: boolean;
+  reason?: string;
+  language?: string;
+  voice?: string;
+  stt?: string;
+  scope?: VoiceControlScope;
+  /** Public vendor id that listening uses after this call (`deepgram`, `local-sherpa`). */
+  sttProvider?: string;
+  /** Public vendor id that the speaking voice uses after this call. */
+  ttsProvider?: string;
+}
+
+/** Result returned by {@link setVoiceLanguage}. */
+export type VoiceLanguageResult = {
+  ok: boolean;
+  reason?: string;
+  requestId: string;
+  language?: string;
+  voice?: string;
+  stt?: string;
+  scope?: VoiceControlScope;
+  sttProvider?: string;
+  ttsProvider?: string;
 };
 
 /** Thrown by mix group helpers when {@link SessionStartMessage.mixAvailable} is not `true`. */

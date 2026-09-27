@@ -37,6 +37,7 @@ describe("agent template registry", () => {
         "echo-smoke",
         "game-sync",
         "game-sync-smoke",
+        "language-switch",
         "mix-smoke",
         "positional-tts",
         "recording-consent",
@@ -55,7 +56,7 @@ describe("agent template registry", () => {
   it("filters templates by kind", () => {
     const product = listTemplates({ kind: "product" });
     expect(product.every((template) => template.kind === "product")).toBe(true);
-    expect(product).toHaveLength(12);
+    expect(product).toHaveLength(13);
 
     const e2e = listTemplates({ kind: "e2e" });
     expect(e2e.every((template) => template.kind === "e2e")).toBe(true);
@@ -166,6 +167,7 @@ describe("seed template bundles", () => {
         "echo",
         "echo-dc",
         "game-sync",
+        "language-switch",
         "positional-tts",
         "spatial-showcase",
         "recording-consent",

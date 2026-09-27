@@ -34,6 +34,15 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     sourceFiles: ["echo-dc/agent.ts"],
   },
   {
+    id: "language-switch",
+    entry: "language-switch/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    description:
+      "Switches the TTS voice from onUserLanguage. Detection does not change the voice until this agent calls setVoiceLanguage.",
+    sourceFiles: ["language-switch/agent.ts"],
+  },
+  {
     id: "voice-starter",
     entry: "voice-starter/agent.ts",
     kind: "product",

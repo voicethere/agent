@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- **`setVoiceLanguage`** — agent code switches the TTS voice (optional STT catalog id) for one session. Spoken-language detection does not change TTS until you call it.
+- **`language-switch` template** — `onUserLanguage` calls `setVoiceLanguage` and speaks in the new language.
+
 ## [0.8.3] - 2026-09-26
 
 ### Changed

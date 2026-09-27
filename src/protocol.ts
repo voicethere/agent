@@ -33,6 +33,7 @@ export type ParentToChildMessage =
   | PlayPoseAckMessage
   | MixControlAckMessage
   | SttControlAckMessage
+  | VoiceLanguageControlAckMessage
   | WebhookMessage;
 
 /**
@@ -51,6 +52,7 @@ export type ChildToParentMessage =
   | PlayPoseMessage
   | MixControlMessage
   | SttControlMessage
+  | VoiceLanguageControlMessage
   | AgentLogMessage
   | AgentErrorMessage
   | SendToClientMessage
@@ -517,6 +519,47 @@ export type SttControlResult = {
   ok: boolean;
   reason?: string;
   requestId: string;
+};
+
+/**
+ * Ask the runner to change the speaking voice (and optionally the STT model)
+ * for one live session. Spoken-language detection does not do this by itself.
+ *
+ * `voice` and `stt` are Sherpa catalog ids (`en`, `de`, `en-lessac`, `en-small`),
+ * not model paths.
+ */
+export interface VoiceLanguageControlMessage {
+  type: "voice_language_control";
+  requestId: string;
+  sessionId: string;
+  /** ISO 639-1 code, for example `de`. */
+  language: string;
+  /** TTS catalog id. Omit to use `language` when that id exists. */
+  voice?: string;
+  /** STT catalog id. Omit to keep the current speech-to-text model. */
+  stt?: string;
+}
+
+/** Runner acknowledgement for a {@link VoiceLanguageControlMessage}. */
+export interface VoiceLanguageControlAckMessage {
+  type: "voice_language_control_ack";
+  requestId: string;
+  sessionId: string;
+  ok: boolean;
+  reason?: string;
+  language?: string;
+  voice?: string;
+  stt?: string;
+}
+
+/** Result returned by {@link setVoiceLanguage}. */
+export type VoiceLanguageResult = {
+  ok: boolean;
+  reason?: string;
+  requestId: string;
+  language?: string;
+  voice?: string;
+  stt?: string;
 };
 
 /** Thrown by mix group helpers when {@link SessionStartMessage.mixAvailable} is not `true`. */

@@ -29,6 +29,8 @@ import type {
   ConversationHistoryControlResult,
   SttControlAckMessage,
   SttControlResult,
+  VoiceLanguageControlAckMessage,
+  VoiceLanguageResult,
   WebhookMessage,
 } from "./protocol.js";
 import {
@@ -220,6 +222,17 @@ function isSttControlAckMessage(value: unknown): value is SttControlAckMessage {
   return msg.type === "stt_control_ack" && typeof msg.requestId === "string";
 }
 
+function isVoiceLanguageControlAckMessage(
+  value: unknown,
+): value is VoiceLanguageControlAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return (
+    msg.type === "voice_language_control_ack" &&
+    typeof msg.requestId === "string"
+  );
+}
+
 function isWebhookMessage(value: unknown): value is WebhookMessage {
   if (!value || typeof value !== "object") return false;
   const msg = value as {
@@ -285,6 +298,7 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "play_pose_ack" ||
     msg.type === "mix_control_ack" ||
     msg.type === "stt_control_ack" ||
+    msg.type === "voice_language_control_ack" ||
     msg.type === "webhook"
   );
 }
@@ -301,6 +315,7 @@ type SessionScopedParentMessage = Exclude<
   | PlayPoseAckMessage
   | MixControlAckMessage
   | SttControlAckMessage
+  | VoiceLanguageControlAckMessage
 >;
 
 function isSessionScopedParentMessage(
@@ -398,6 +413,16 @@ type PendingSttAck = {
 
 const pendingMixAcks = new Map<string, PendingMixAck>();
 const pendingSttAcks = new Map<string, PendingSttAck>();
+
+/** Pool create can take several minutes on a cold language. */
+const VOICE_LANGUAGE_CONTROL_ACK_TIMEOUT_MS = 660_000;
+
+type PendingVoiceLanguageAck = {
+  resolve: (result: VoiceLanguageResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const pendingVoiceLanguageAcks = new Map<string, PendingVoiceLanguageAck>();
 
 function handleRecordingControlAck(message: RecordingControlAckMessage): void {
   const pending = pendingRecordingAcks.get(message.requestId);
@@ -557,6 +582,31 @@ function clearPendingSttAcks(reason: string): void {
   }
 }
 
+function handleVoiceLanguageControlAck(
+  message: VoiceLanguageControlAckMessage,
+): void {
+  const pending = pendingVoiceLanguageAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingVoiceLanguageAcks.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    reason: message.reason,
+    requestId: message.requestId,
+    ...(message.language ? { language: message.language } : {}),
+    ...(message.voice ? { voice: message.voice } : {}),
+    ...(message.stt ? { stt: message.stt } : {}),
+  });
+}
+
+function clearPendingVoiceLanguageAcks(reason: string): void {
+  for (const [requestId, pending] of pendingVoiceLanguageAcks) {
+    clearTimeout(pending.timer);
+    pendingVoiceLanguageAcks.delete(requestId);
+    pending.resolve({ ok: false, reason, requestId });
+  }
+}
+
 function isMixAvailableInProcess(): boolean {
   for (const available of mixAvailableBySessionId.values()) {
     if (available) return true;
@@ -707,7 +757,11 @@ function sendParentMessage(message: unknown): void {
     message && typeof message === "object" && "type" in message
       ? (message as { type?: string }).type
       : undefined;
-  if (msgType === "mix_control" || msgType === "stt_control") {
+  if (
+    msgType === "mix_control" ||
+    msgType === "stt_control" ||
+    msgType === "voice_language_control"
+  ) {
     process.send?.(message as never);
     return;
   }
@@ -990,6 +1044,10 @@ export function defineAgent(handlers: AgentHandlers): void {
       handleSttControlAck(message);
       return;
     }
+    if (isVoiceLanguageControlAckMessage(message)) {
+      handleVoiceLanguageControlAck(message);
+      return;
+    }
     if (isWebhookMessage(message)) {
       void agentStartReady.then(() => handleWebhookMessage(message, handlers));
       return;
@@ -1205,6 +1263,7 @@ export function resetAgentIpcStateForTests(): void {
   clearPendingPlayAcks("reset");
   clearPendingMixAcks("reset");
   clearPendingSttAcks("reset");
+  clearPendingVoiceLanguageAcks("reset");
 }
 
 /** Ask the runner parent to synthesize speech for the session. */
@@ -1508,6 +1567,61 @@ export function setSttEnabled(options: {
   sessionId?: string;
 }): Promise<SttControlResult> {
   return sendSttControl(options);
+}
+
+export interface SetVoiceLanguageOptions {
+  /** ISO 639-1 code, for example `"de"`. */
+  language: string;
+  /**
+   * TTS catalog id. Defaults to `language` when that id exists (`de`, `en`, `fr`).
+   * Use a specific voice such as `en-lessac` or `de-thorsten-high`.
+   */
+  voice?: string;
+  /**
+   * STT catalog id. Omit to keep the current speech-to-text model.
+   * Pass `de` or `en-small` to switch listening as well.
+   */
+  stt?: string;
+}
+
+/**
+ * Switch the session's speaking voice. Detection (`onUserLanguage`) does not
+ * change TTS until agent code calls this. The promise resolves when the runner
+ * has applied the new voice (a cold language pool can take minutes).
+ */
+export function setVoiceLanguage(
+  sessionId: string,
+  options: SetVoiceLanguageOptions,
+): Promise<VoiceLanguageResult> {
+  const requestId = randomUUID();
+  const language = options.language.trim();
+  if (!language) {
+    return Promise.resolve({
+      ok: false,
+      reason: "invalid_language",
+      requestId,
+    });
+  }
+  if (!isVoicethereAgentChild()) {
+    return Promise.resolve({ ok: true, reason: "local_mock", requestId });
+  }
+
+  return new Promise<VoiceLanguageResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingVoiceLanguageAcks.delete(requestId);
+      resolve({ ok: false, reason: "timeout", requestId });
+    }, VOICE_LANGUAGE_CONTROL_ACK_TIMEOUT_MS);
+
+    pendingVoiceLanguageAcks.set(requestId, { resolve, timer });
+    sendParentMessage({
+      type: "voice_language_control",
+      requestId,
+      sessionId,
+      language,
+      ...(options.voice?.trim() ? { voice: options.voice.trim() } : {}),
+      ...(options.stt?.trim() ? { stt: options.stt.trim() } : {}),
+    });
+  });
 }
 
 async function sendRecordingControl(

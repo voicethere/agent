@@ -39,7 +39,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     description:
-      "Switches the TTS voice from onUserLanguage. Detection does not change the voice until this agent calls setVoiceLanguage.",
+      "Switches the TTS voice and STT model from onUserLanguage. Detection does not change either until this agent calls setVoiceLanguage.",
     sourceFiles: ["language-switch/agent.ts"],
   },
   {

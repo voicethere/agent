@@ -522,11 +522,11 @@ export type SttControlResult = {
 };
 
 /**
- * Ask the runner to change the speaking voice (and optionally the STT model)
- * for one live session. Spoken-language detection does not do this by itself.
+ * Ask the runner to change the speaking voice and the STT model for one live
+ * session. Spoken-language detection does not do this by itself.
  *
  * `voice` and `stt` are Sherpa catalog ids (`en`, `de`, `en-lessac`, `en-small`),
- * not model paths.
+ * not model paths. Omit `stt` to use `language` when that STT id exists.
  */
 export interface VoiceLanguageControlMessage {
   type: "voice_language_control";
@@ -536,7 +536,10 @@ export interface VoiceLanguageControlMessage {
   language: string;
   /** TTS catalog id. Omit to use `language` when that id exists. */
   voice?: string;
-  /** STT catalog id. Omit to keep the current speech-to-text model. */
+  /**
+   * STT catalog id. Omit to use `language` when that id exists.
+   * A missing language-default id keeps the current speech-to-text model.
+   */
   stt?: string;
 }
 

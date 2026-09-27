@@ -179,8 +179,8 @@ defineAgent({
   },
 
   onUserLanguage({ sessionId, language }) {
-    // Detection does not change TTS. Call setVoiceLanguage here if you want
-    // a new voice — see templates/language-switch/agent.ts.
+    // Detection does not change TTS or STT. Call setVoiceLanguage here if you
+    // want a new voice and listening model — see templates/language-switch/agent.ts.
     agentLog("info", `user_language ${sessionId} ${language}`);
   },
 

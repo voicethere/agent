@@ -1,12 +1,14 @@
 /**
- * Switch the speaking voice when spoken-language detection changes.
+ * Switch the speaking voice and the STT model when spoken-language detection changes.
  *
- * The runner reports `user_language` and does not change TTS by itself.
- * This agent calls `setVoiceLanguage`, then speaks in the new language.
- * The revealing utterance is not echoed (the English STT transcript of a
- * German sentence is not what we want to say back).
+ * The runner reports `user_language` and does not change TTS or STT by itself.
+ * This agent calls `setVoiceLanguage` with both catalog ids, then speaks in
+ * the new language. The revealing utterance is not echoed (the English STT
+ * transcript of a German sentence is not what we want to say back).
  *
  * `voice` and `stt` are catalog ids. See /docs/spoken-language.
+ * Languages with a TTS voice but no STT id (`it`, `pt`, `nl`, `pl`, `hi`)
+ * still switch TTS and keep the current STT model.
  */
 import {
   agentLog,
@@ -70,6 +72,8 @@ defineAgent({
       state.suppressNextFinal = true;
     }
 
+    // Both catalog ids follow the detected language. A language with no STT
+    // id still switches TTS and leaves the current STT model in place.
     const result = await setVoiceLanguage(sessionId, {
       language,
       voice: language,
@@ -85,7 +89,10 @@ defineAgent({
     }
 
     state.language = language;
-    agentLog("info", `voice language ${sessionId} ${language} voice=${result.voice}`);
+    agentLog(
+      "info",
+      `voice language ${sessionId} ${language} voice=${result.voice} stt=${result.stt ?? "unchanged"}`,
+    );
     speak(sessionId, replyFor(language));
   },
 

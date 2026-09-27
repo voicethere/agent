@@ -1578,16 +1578,20 @@ export interface SetVoiceLanguageOptions {
    */
   voice?: string;
   /**
-   * STT catalog id. Omit to keep the current speech-to-text model.
-   * Pass `de` or `en-small` to switch listening as well.
+   * STT catalog id. Defaults to `language` when that id exists (`de`, `en`, `fr`).
+   * The next utterance is heard with that model. Pass `en-small` to choose a
+   * specific model. Languages with a TTS voice but no STT id (`it`, `pt`, `nl`,
+   * `pl`, `hi`) keep the current STT model. An unknown id that is not the
+   * language code fails the switch.
    */
   stt?: string;
 }
 
 /**
- * Switch the session's speaking voice. Detection (`onUserLanguage`) does not
- * change TTS until agent code calls this. The promise resolves when the runner
- * has applied the new voice (a cold language pool can take minutes).
+ * Switch the session's speaking voice and speech-to-text model. Detection
+ * (`onUserLanguage`) does not change either until agent code calls this. The
+ * promise resolves when the runner has applied both (a cold language pool can
+ * take minutes).
  */
 export function setVoiceLanguage(
   sessionId: string,

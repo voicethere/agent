@@ -29,8 +29,10 @@ import type {
   ConversationHistoryControlResult,
   SttControlAckMessage,
   SttControlResult,
+  VoiceControlScope,
   VoiceLanguageControlAckMessage,
   VoiceLanguageResult,
+  VoiceVendorSelection,
   WebhookMessage,
 } from "./protocol.js";
 import {
@@ -596,6 +598,9 @@ function handleVoiceLanguageControlAck(
     ...(message.language ? { language: message.language } : {}),
     ...(message.voice ? { voice: message.voice } : {}),
     ...(message.stt ? { stt: message.stt } : {}),
+    ...(message.scope ? { scope: message.scope } : {}),
+    ...(message.sttProvider ? { sttProvider: message.sttProvider } : {}),
+    ...(message.ttsProvider ? { ttsProvider: message.ttsProvider } : {}),
   });
 }
 
@@ -1570,39 +1575,87 @@ export function setSttEnabled(options: {
 }
 
 export interface SetVoiceLanguageOptions {
-  /** ISO 639-1 code, for example `"de"`. */
-  language: string;
   /**
-   * TTS catalog id. Defaults to `language` when that id exists (`de`, `en`, `fr`).
-   * Use a specific voice such as `en-lessac` or `de-thorsten-high`.
+   * ISO 639-1 code, for example `"de"`. Omit when you only change a cloud vendor.
+   * Alone, with no `scope`, this switches both Sherpa sides.
+   */
+  language?: string;
+  /**
+   * `stt` changes listening and leaves the speaking voice. `tts` changes the
+   * voice and leaves listening. `both` changes both. Omit to infer from which
+   * of `voice` / `stt` / `sttVendor` / `ttsVendor` you set.
+   */
+  scope?: VoiceControlScope;
+  /**
+   * Sherpa TTS catalog id (`de`, `en-lessac`, `de-thorsten-high`).
+   * On a TTS switch, omit it to use `language` when that id exists.
    */
   voice?: string;
   /**
-   * STT catalog id. Defaults to `language` when that id exists (`de`, `en`, `fr`).
-   * The next utterance is heard with that model. Pass `en-small` to choose a
-   * specific model. Languages with a TTS voice but no STT id (`it`, `pt`, `nl`,
-   * `pl`, `hi`) keep the current STT model. An unknown id that is not the
-   * language code fails the switch.
+   * Sherpa STT catalog id (`de`, `en-small`). On an STT or both switch, omit
+   * it to use `language` when that id exists. Italian, Portuguese, Dutch,
+   * Polish, and Hindi have no STT id; a `both` switch still changes TTS.
    */
   stt?: string;
+  /**
+   * Replace the STT vendor for this session. Keys stay in project secrets.
+   * `provider`: `local-sherpa`, `openai`, `deepgram`, `assemblyai`, or `google`.
+   */
+  sttVendor?: VoiceVendorSelection;
+  /**
+   * Replace the TTS vendor for this session. Keys stay in project secrets.
+   * `provider`: `local-sherpa`, `openai`, `elevenlabs`, `cartesia`, or `google`.
+   */
+  ttsVendor?: VoiceVendorSelection;
+}
+
+function cleanVendor(
+  selection: VoiceVendorSelection | undefined,
+): VoiceVendorSelection | undefined {
+  const provider = selection?.provider?.trim();
+  if (!provider) return undefined;
+  return {
+    provider,
+    ...(selection?.model?.trim() ? { model: selection.model.trim() } : {}),
+    ...(selection?.voice?.trim() ? { voice: selection.voice.trim() } : {}),
+    ...(selection?.language?.trim() ? { language: selection.language.trim() } : {}),
+  };
 }
 
 /**
- * Switch the session's speaking voice and speech-to-text model. Detection
- * (`onUserLanguage`) does not change either until agent code calls this. The
- * promise resolves when the runner has applied both (a cold language pool can
- * take minutes).
+ * Change STT, TTS, or the vendor for one live session. Detection
+ * (`onUserLanguage`) does not change either side until agent code calls this.
+ * The promise resolves when the runner has applied the requested side (a cold
+ * Sherpa pool can take minutes). Cloud vendors use project secrets already on
+ * the running deploy — this call does not send API keys.
  */
 export function setVoiceLanguage(
   sessionId: string,
   options: SetVoiceLanguageOptions,
 ): Promise<VoiceLanguageResult> {
   const requestId = randomUUID();
-  const language = options.language.trim();
-  if (!language) {
+  const language = options.language?.trim() ?? "";
+  const scope = options.scope;
+  if (scope && scope !== "stt" && scope !== "tts" && scope !== "both") {
     return Promise.resolve({
       ok: false,
-      reason: "invalid_language",
+      reason: "invalid_scope",
+      requestId,
+    });
+  }
+  const sttVendor = cleanVendor(options.sttVendor);
+  const ttsVendor = cleanVendor(options.ttsVendor);
+  const hasWork = Boolean(
+    language ||
+      options.voice?.trim() ||
+      options.stt?.trim() ||
+      sttVendor ||
+      ttsVendor,
+  );
+  if (!hasWork) {
+    return Promise.resolve({
+      ok: false,
+      reason: "nothing_to_apply",
       requestId,
     });
   }
@@ -1621,9 +1674,12 @@ export function setVoiceLanguage(
       type: "voice_language_control",
       requestId,
       sessionId,
-      language,
+      ...(language ? { language } : {}),
+      ...(scope ? { scope } : {}),
       ...(options.voice?.trim() ? { voice: options.voice.trim() } : {}),
       ...(options.stt?.trim() ? { stt: options.stt.trim() } : {}),
+      ...(sttVendor ? { sttVendor } : {}),
+      ...(ttsVendor ? { ttsVendor } : {}),
     });
   });
 }

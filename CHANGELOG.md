@@ -8,8 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Added
 
-- **`setVoiceLanguage`** — agent code switches the TTS voice and the STT model for one session. Spoken-language detection does not change either until you call it. Omitting `stt` uses the language's STT catalog id when one exists.
-- **`language-switch` template** — `onUserLanguage` calls `setVoiceLanguage` for both the voice and the STT model, then speaks in the new language.
+- **`setVoiceLanguage`** — agent code changes STT, TTS, or both for one live session, including the vendor (`sttVendor` / `ttsVendor`). `scope: "stt"` or `"tts"` leaves the other side in place. Spoken-language detection does not change either side until you call it. API keys stay in project secrets.
+- **`language-switch` template** — `onUserLanguage` switches the Sherpa voice and STT model as two calls. Chat commands `/tts` and `/stt` change one vendor mid-conversation.
 
 ## [0.8.3] - 2026-09-26
 

@@ -55,6 +55,8 @@ export {
   type SttControlMessage,
   type SttControlAckMessage,
   type SttControlResult,
+  type VoiceControlScope,
+  type VoiceVendorSelection,
   type VoiceLanguageControlMessage,
   type VoiceLanguageControlAckMessage,
   type VoiceLanguageResult,

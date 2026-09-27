@@ -186,7 +186,7 @@ For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in proje
 | `SpeechEvent`, `SpeechEventType`                                                             | Re-exported **types** from `@node-webrtc-rust/sdk/voice`                                                                       |
 | `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                                          |
 | `speak`                                                                                      | Request parent TTS                                                                                                             |
-| `setVoiceLanguage`                                                                           | Switch TTS and STT for one session. Detection does not do this until you call it.                                             |
+| `setVoiceLanguage`                                                                           | Change STT, TTS, or the vendor for one live session. `scope` selects one side. Detection does not do this until you call it. |
 | `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording`                    | Request parent conversation recording control                                                                                  |
 | `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Stop or resume conversation history storage for one session                                                                    |
 | `agentLog`                                                                                   | Forward structured logs to parent                                                                                              |
@@ -217,7 +217,7 @@ Forwarded from the runner voice pipeline as SDK `SpeechEvent` payloads on `speec
 | `user_speaking_start` / `user_speaking_end`   | UI state, turn-taking                                   |
 | `user_speech_partial`                         | Live captions, early barge-in logic                     |
 | `user_speech_final`                           | Primary turn boundary (`onUserSpeechFinal` convenience) |
-| `user_language`                               | Detected ISO 639-1 code (`onUserLanguage`). Call `setVoiceLanguage` yourself to change the speaking voice and the STT model. See [`templates/language-switch`](./templates/language-switch/agent.ts). |
+| `user_language`                               | Detected ISO 639-1 code (`onUserLanguage`). Call `setVoiceLanguage` yourself to change STT, TTS, or the vendor. See [`templates/language-switch`](./templates/language-switch/agent.ts). |
 | `agent_speaking_start` / `agent_speaking_end` | Know when TTS playback starts/stops                     |
 | `barge_in`                                    | User interrupted agent playback                         |
 | `vad_triggered`, `stt_stream_*`, `user_stt_*` | Low-level pipeline hooks                                |

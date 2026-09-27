@@ -64,7 +64,7 @@ Each folder has its own README. Summary:
 | `echo` | `echo/` | Voice + chat echo |
 | `echo-dc` | `echo-dc/` | Data-channel echo, no TTS |
 | `voice-starter` | `voice-starter/` | Every speech event |
-| `language-switch` | `language-switch/` | `onUserLanguage` calls `setVoiceLanguage` for TTS and STT |
+| `language-switch` | `language-switch/` | Separate `setVoiceLanguage` calls for STT, TTS, and vendor |
 | `world-sync` | `world-sync/` | JSON pose broadcast |
 | `world-sync-binary` | `world-sync-binary/` | Binary pose `ArrayBuffer` |
 | `game-sync` | `game-sync/` | Authoritative sim, Redis + binary snapshots |

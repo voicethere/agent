@@ -69,4 +69,51 @@ describe("setVoiceLanguage", () => {
     });
     capture.restore();
   });
+
+  it("sends a one-sided vendor change without a language", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    const ackPromise = setVoiceLanguage("session-1", {
+      scope: "stt",
+      sttVendor: { provider: "deepgram", model: "nova-3", language: "de" },
+    });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const sent = capture.send.mock.calls[0]?.[0] as {
+      type: string;
+      requestId: string;
+      scope?: string;
+      language?: string;
+      sttVendor?: { provider: string; model?: string; language?: string };
+    };
+    expect(sent).toEqual(
+      expect.objectContaining({
+        type: "voice_language_control",
+        sessionId: "session-1",
+        scope: "stt",
+        sttVendor: { provider: "deepgram", model: "nova-3", language: "de" },
+      }),
+    );
+    expect(sent.language).toBeUndefined();
+
+    capture.emit({
+      type: "voice_language_control_ack",
+      requestId: sent.requestId,
+      sessionId: "session-1",
+      ok: true,
+      reason: "applied",
+      scope: "stt",
+      stt: "nova-3",
+      sttProvider: "deepgram",
+      language: "de",
+    });
+    await expect(ackPromise).resolves.toMatchObject({
+      ok: true,
+      scope: "stt",
+      sttProvider: "deepgram",
+      stt: "nova-3",
+    });
+    capture.restore();
+  });
 });

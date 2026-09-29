@@ -6,12 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
-## [0.9.0] - 2026-09-27
+## [0.9.1] - 2026-09-29
 
 ### Added
 
 - **`setVoiceLanguage`** — agent code changes STT, TTS, or both for one live session, including the vendor (`sttVendor` / `ttsVendor`). `scope: "stt"` or `"tts"` leaves the other side in place. Spoken-language detection does not change either side until you call it. API keys stay in project secrets.
-- **`language-switch` template** — `onUserLanguage` switches the Sherpa voice and STT model as two calls. Chat commands `/tts` and `/stt` change one vendor mid-conversation.
+- **`getVoiceLanguage`** — last known ISO 639-1 from a successful switch ack or LID / `voice_language_changed` events.
+- **`onVoiceLanguageChanged`** — `defineAgent` handler when the runner commits a language change (`voice_language_changed` IPC).
+- **`voiceLanguageSwitchAvailable`** on `session_start` plus **`isVoiceLanguageSwitchAvailable`** / **`isRunnerLidAutoSwitchEnabled`** helpers for manual vs project auto-switch.
+- **`language-switch` template** — `onUserLanguage` switches the Sherpa voice and STT model as two calls. Chat commands `/tts` and `/stt` change one vendor mid-conversation. When `session_start.env` has truthy **`SHERPA_LID_AUTO_SWITCH`**, the template skips `setVoiceLanguage` in `onUserLanguage` (runner owns the switch; use `onVoiceLanguageChanged` for prompts).
+
+## [0.9.0] - 2026-09-27
 
 ## [0.8.3] - 2026-09-26
 

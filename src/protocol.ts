@@ -95,6 +95,12 @@ export interface SessionStartMessage {
    */
   mixAvailable?: boolean;
   /**
+   * When `true`, the runner can apply {@link VoiceLanguageControlMessage} for this
+   * session (spoken-language switching via agent IPC). Absent on older runners —
+   * treat as `false`. Project auto-switch from LID is separate (runner-owned).
+   */
+  voiceLanguageSwitchAvailable?: boolean;
+  /**
    * When `true`, TTS pose / listener pose / positional panning APIs are available
    * (voice or Voice+Data). Absent on data-only or older runners — treat as `false`.
    */
@@ -105,11 +111,14 @@ export interface SessionStartMessage {
  * Forwards one speech lifecycle event from the parent Sherpa/VAD/STT/TTS pipeline.
  *
  * The {@link SpeechEvent} shape matches `@node-webrtc-rust/sdk/voice` — see SDK docs
- * for `SpeechEventType` semantics (`user_speech_final`, `user_language`, `barge_in`, etc.).
+ * for `SpeechEventType` semantics (`user_speech_final`, `user_language`, `barge_in`,
+ * `voice_language_switching`, `voice_language_changed`, `voice_language_switch_failed`, etc.).
  *
  * Delivered to customer code as `onSpeechEvent(ctx, message.event)`; `user_speech_final`
  * also triggers the `onUserSpeechFinal` handler when `event.text` is non-empty, and
  * `user_language` triggers `onUserLanguage` when `event.language` or `event.text` is set.
+ * `voice_language_changed` triggers the `onVoiceLanguageChanged` handler when a language
+ * code is present on the event.
  */
 export interface SpeechEventMessage {
   type: "speech_event";

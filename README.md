@@ -180,17 +180,20 @@ On plans that include project Redis, the runner injects **`AGENT_REDIS_URL`** in
 
 For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in project settings. The runner forwards the exact request bytes on process-wide **`onWebhook`** IPC (not session-queued). Verify HMAC on `ctx.body` before `JSON.parse` — VoiceThere does not verify signatures in the SDK. See [`templates/webhooks/agent.ts`](./templates/webhooks/agent.ts).
 
-| Export                                                                                       | Purpose                                                                                                                        |
-| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `defineAgent`                                                                                | Register `onAgentStart`, `onWebhook`, `onSessionStart`, `onSpeechEvent`, `onUserSpeechFinal`, `onUserLanguage`, `onSessionEnd` |
-| `SpeechEvent`, `SpeechEventType`                                                             | Re-exported **types** from `@node-webrtc-rust/sdk/voice`                                                                       |
-| `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                                          |
-| `speak`                                                                                      | Request parent TTS                                                                                                             |
-| `setVoiceLanguage`                                                                           | Change STT, TTS, or the vendor for one live session. `scope` selects one side. Detection does not do this until you call it. |
-| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording`                    | Request parent conversation recording control                                                                                  |
-| `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Stop or resume conversation history storage for one session                                                                    |
-| `agentLog`                                                                                   | Forward structured logs to parent                                                                                              |
-| `ParentToChildMessage` / `ChildToParentMessage`                                              | IPC contract shared with the VoiceThere agent runner                                                                           |
+| Export                                                                                       | Purpose                                                                                                 |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `defineAgent`                                                                                | Register handlers including `onUserLanguage`, `onVoiceLanguageChanged`, `onSessionStart`, …             |
+| `SpeechEvent`, `SpeechEventType`                                                             | Re-exported **types** from `@node-webrtc-rust/sdk/voice` (includes `voice_language_changed`, …)         |
+| `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                   |
+| `speak`                                                                                      | Request parent TTS                                                                                      |
+| `setVoiceLanguage`                                                                           | Change STT, TTS, or the vendor for one live session (`scope`, Sherpa catalog ids, cloud vendors).       |
+| `getVoiceLanguage`                                                                           | Last known ISO 639-1 from a successful switch ack or LID / `voice_language_changed` events.             |
+| `isVoiceLanguageSwitchAvailable`                                                             | `true` when `session_start.voiceLanguageSwitchAvailable` was set (runner supports agent IPC).           |
+| `isRunnerLidAutoSwitchEnabled`                                                               | `true` when `session_start.env.SHERPA_LID_AUTO_SWITCH` is truthy (runner auto-switch; optional in env). |
+| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording`                    | Request parent conversation recording control                                                           |
+| `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Stop or resume conversation history storage for one session                                             |
+| `agentLog`                                                                                   | Forward structured logs to parent                                                                       |
+| `ParentToChildMessage` / `ChildToParentMessage`                                              | IPC contract shared with the VoiceThere agent runner                                                    |
 
 ### Runner runtime subpath (minimal shared sandbox API)
 
@@ -212,18 +215,30 @@ session orchestration and crash policy remain in the runner codebase.
 
 Forwarded from the runner voice pipeline as SDK `SpeechEvent` payloads on `speech_event.event` (`event.type`, optional `text` / `error`):
 
-| Event                                         | Typical use in custom agent                             |
-| --------------------------------------------- | ------------------------------------------------------- |
-| `user_speaking_start` / `user_speaking_end`   | UI state, turn-taking                                   |
-| `user_speech_partial`                         | Live captions, early barge-in logic                     |
-| `user_speech_final`                           | Primary turn boundary (`onUserSpeechFinal` convenience) |
-| `user_language`                               | Detected ISO 639-1 code (`onUserLanguage`). Call `setVoiceLanguage` yourself to change STT, TTS, or the vendor. See [`templates/language-switch`](./templates/language-switch/agent.ts). |
-| `agent_speaking_start` / `agent_speaking_end` | Know when TTS playback starts/stops                     |
-| `barge_in`                                    | User interrupted agent playback                         |
-| `vad_triggered`, `stt_stream_*`, `user_stt_*` | Low-level pipeline hooks                                |
-| `error`                                       | Vendor or pipeline failure                              |
+| Event                                                                                  | Typical use in custom agent                                                                                                                  |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_speaking_start` / `user_speaking_end`                                            | UI state, turn-taking                                                                                                                        |
+| `user_speech_partial`                                                                  | Live captions, early barge-in logic                                                                                                          |
+| `user_speech_final`                                                                    | Primary turn boundary (`onUserSpeechFinal` convenience)                                                                                      |
+| `user_language`                                                                        | Detected ISO 639-1 (`onUserLanguage`). Does not change STT/TTS unless you call `setVoiceLanguage` or the project enables runner auto-switch. |
+| `voice_language_switching` / `voice_language_changed` / `voice_language_switch_failed` | Runner language switch lifecycle; `onVoiceLanguageChanged` on `voice_language_changed`.                                                      |
+| `agent_speaking_start` / `agent_speaking_end`                                          | Know when TTS playback starts/stops                                                                                                          |
+| `barge_in`                                                                             | User interrupted agent playback                                                                                                              |
+| `vad_triggered`, `stt_stream_*`, `user_stt_*`                                          | Low-level pipeline hooks                                                                                                                     |
+| `error`                                                                                | Vendor or pipeline failure                                                                                                                   |
 
 Copy [`templates/voice-starter/agent.ts`](./templates/voice-starter/agent.ts) as a starting point — exhaustive `switch` over speech event types with per-peer state stubs and `agentLog` tracing.
+
+### Spoken-language switching
+
+Sherpa **voice** and **STT** catalog ids (for example `de`, `en-lessac`, `en-small`) are documented on VoiceThere at `/docs/spoken-language`.
+
+| Approach                | Who changes STT/TTS                                                   | Agent hooks                                                                                                       |
+| ----------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Manual (default)**    | Your code calls `setVoiceLanguage` per side or vendor                 | `onUserLanguage` → `setVoiceLanguage`; use `isVoiceLanguageSwitchAvailable` before relying on IPC                 |
+| **Project auto-switch** | Runner when LID detects a new language (opt-in project voice setting) | `onUserLanguage` / `onVoiceLanguageChanged` for prompts; do not double-call `setVoiceLanguage` on every detection |
+
+See [`templates/language-switch`](./templates/language-switch/README.md) for both modes.
 
 ## Multiplayer / shared state
 

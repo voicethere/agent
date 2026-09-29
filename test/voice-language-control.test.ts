@@ -1,12 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { defineAgent, setVoiceLanguage } from "../src/runtime.js";
+import {
+  defineAgent,
+  getVoiceLanguage,
+  isRunnerLidAutoSwitchEnabled,
+  isVoiceLanguageSwitchAvailable,
+  resetAgentIpcStateForTests,
+  setVoiceLanguage,
+} from "../src/runtime.js";
 import { installProcessMessageCapture } from "./helpers/process-mock.js";
 
 describe("setVoiceLanguage", () => {
   const childBundleEnv = process.env.__CHILD_BUNDLE_PATH__;
 
   afterEach(() => {
+    resetAgentIpcStateForTests();
     if (childBundleEnv === undefined) {
       delete process.env.__CHILD_BUNDLE_PATH__;
     } else {
@@ -115,5 +123,93 @@ describe("setVoiceLanguage", () => {
       stt: "nova-3",
     });
     capture.restore();
+  });
+});
+
+describe("voice language session helpers", () => {
+  afterEach(() => {
+    resetAgentIpcStateForTests();
+  });
+
+  it("caches voiceLanguageSwitchAvailable on session_start", async () => {
+    const capture = installProcessMessageCapture();
+    const onSessionStart = vi.fn();
+    defineAgent({ onSessionStart });
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-1",
+      env: { SESSION_ID: "peer-1" },
+      voiceLanguageSwitchAvailable: true,
+    });
+    await vi.waitFor(() => expect(onSessionStart).toHaveBeenCalled());
+    expect(
+      isVoiceLanguageSwitchAvailable(onSessionStart.mock.calls[0][0]),
+    ).toBe(true);
+
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-2",
+      env: { SESSION_ID: "peer-2" },
+    });
+    await vi.waitFor(() => expect(onSessionStart).toHaveBeenCalledTimes(2));
+    expect(
+      isVoiceLanguageSwitchAvailable(onSessionStart.mock.calls[1][0]),
+    ).toBe(false);
+    capture.restore();
+  });
+
+  it("getVoiceLanguage returns language from setVoiceLanguage ack", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+
+    const ackPromise = setVoiceLanguage("session-1", { language: "fr" });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const sent = capture.send.mock.calls[0]?.[0] as { requestId: string };
+    capture.emit({
+      type: "voice_language_control_ack",
+      requestId: sent.requestId,
+      sessionId: "session-1",
+      ok: true,
+      reason: "applied",
+      language: "fr",
+    });
+    await ackPromise;
+    expect(getVoiceLanguage("session-1")).toBe("fr");
+    capture.restore();
+    delete process.env.__CHILD_BUNDLE_PATH__;
+  });
+
+  it("dispatches onVoiceLanguageChanged from voice_language_changed speech_event", async () => {
+    const capture = installProcessMessageCapture();
+    const onVoiceLanguageChanged = vi.fn();
+    defineAgent({ onVoiceLanguageChanged });
+
+    capture.emit({
+      type: "speech_event",
+      sessionId: "peer-1",
+      event: { type: "voice_language_changed", language: "de" },
+    });
+    await vi.waitFor(() => expect(onVoiceLanguageChanged).toHaveBeenCalled());
+    expect(onVoiceLanguageChanged).toHaveBeenCalledWith({
+      sessionId: "peer-1",
+      language: "de",
+    });
+    expect(getVoiceLanguage("peer-1")).toBe("de");
+    capture.restore();
+  });
+
+  it("isRunnerLidAutoSwitchEnabled parses truthy env values", () => {
+    expect(isRunnerLidAutoSwitchEnabled({})).toBe(false);
+    expect(isRunnerLidAutoSwitchEnabled({ SHERPA_LID_AUTO_SWITCH: "1" })).toBe(
+      true,
+    );
+    expect(
+      isRunnerLidAutoSwitchEnabled({ SHERPA_LID_AUTO_SWITCH: "true" }),
+    ).toBe(true);
+    expect(isRunnerLidAutoSwitchEnabled({ SHERPA_LID_AUTO_SWITCH: "0" })).toBe(
+      false,
+    );
   });
 });

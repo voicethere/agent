@@ -215,6 +215,7 @@ describe("defineAgent", () => {
         recordingAvailable: false,
         conversationHistoryAvailable: false,
         mixAvailable: false,
+        voiceLanguageSwitchAvailable: false,
         ttsPoseAvailable: false,
       });
       expect(capture.send).toHaveBeenCalledWith({
@@ -256,6 +257,7 @@ describe("defineAgent", () => {
         recordingAvailable: false,
         conversationHistoryAvailable: false,
         mixAvailable: false,
+        voiceLanguageSwitchAvailable: false,
         ttsPoseAvailable: false,
       });
     } finally {
@@ -305,6 +307,7 @@ describe("defineAgent", () => {
         recordingAvailable: false,
         conversationHistoryAvailable: false,
         mixAvailable: false,
+        voiceLanguageSwitchAvailable: false,
         ttsPoseAvailable: false,
       });
     } finally {
@@ -347,6 +350,7 @@ describe("defineAgent", () => {
           recordingAvailable: false,
           conversationHistoryAvailable: false,
           mixAvailable: false,
+          voiceLanguageSwitchAvailable: false,
           ttsPoseAvailable: false,
         });
       });
@@ -1852,6 +1856,7 @@ describe("session_start recordingAvailable", () => {
       recordingAvailable: true,
       conversationHistoryAvailable: false,
       mixAvailable: false,
+      voiceLanguageSwitchAvailable: false,
       ttsPoseAvailable: false,
     });
     capture.restore();
@@ -1875,6 +1880,7 @@ describe("session_start recordingAvailable", () => {
       recordingAvailable: false,
       conversationHistoryAvailable: false,
       mixAvailable: false,
+      voiceLanguageSwitchAvailable: false,
       ttsPoseAvailable: false,
     });
     capture.restore();

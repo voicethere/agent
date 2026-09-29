@@ -24,10 +24,12 @@ describe("protocol", () => {
       env: { SESSION_ID: "peer-1", PROJECT_ID: "p", BUILD_ID: "b" },
       recordingAvailable: true,
       mixAvailable: true,
+      voiceLanguageSwitchAvailable: true,
     };
     expect(message.type).toBe("session_start");
     expect(message.recordingAvailable).toBe(true);
     expect(message.mixAvailable).toBe(true);
+    expect(message.voiceLanguageSwitchAvailable).toBe(true);
   });
 
   it("accepts parent recording_control_ack shape", () => {

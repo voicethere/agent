@@ -56,6 +56,8 @@ export interface SessionContext {
   conversationHistoryAvailable: boolean;
   /** `true` when the runner session is Voice+Data and mix group APIs are available. */
   mixAvailable: boolean;
+  /** `true` when runner {@link setVoiceLanguage} IPC is available for this session. */
+  voiceLanguageSwitchAvailable: boolean;
   /** `true` when TTS pose / listener pose APIs are available (voice or Voice+Data). */
   ttsPoseAvailable: boolean;
 }
@@ -69,6 +71,13 @@ export interface SpeechContext {
 export interface UserLanguageContext {
   sessionId: string;
   /** ISO 639-1 code from the parent voice pipeline (`en`, `de`, …). */
+  language: string;
+}
+
+/** Runner committed a voice language switch (`speech.type` is `voice_language_changed`). */
+export interface VoiceLanguageChangedContext {
+  sessionId: string;
+  /** ISO 639-1 code after the runner applied STT/TTS (agent or auto-switch). */
   language: string;
 }
 
@@ -131,6 +140,13 @@ export interface AgentHandlers {
   onUserSpeechFinal?: (ctx: SpeechContext) => void | Promise<void>;
   /** Convenience handler — also invoked when `speech.type` is `user_language`. */
   onUserLanguage?: (ctx: UserLanguageContext) => void | Promise<void>;
+  /**
+   * Runner finished applying a language switch (`voice_language_changed`). Use with
+   * project auto-switch or after your own `setVoiceLanguage` calls.
+   */
+  onVoiceLanguageChanged?: (
+    ctx: VoiceLanguageChangedContext,
+  ) => void | Promise<void>;
   /** Alias for {@link AgentHandlers.onSessionEnd}. */
   onClientLeave?: (ctx: { sessionId: string }) => void | Promise<void>;
   onSessionEnd?: (ctx: { sessionId: string }) => void | Promise<void>;
@@ -341,6 +357,10 @@ const recordingAvailableBySessionId = new Map<string, boolean>();
 const conversationHistoryAvailableBySessionId = new Map<string, boolean>();
 /** Cached from `session_start.mixAvailable` until `session_end`. */
 const mixAvailableBySessionId = new Map<string, boolean>();
+/** Cached from `session_start.voiceLanguageSwitchAvailable` until `session_end`. */
+const voiceLanguageSwitchAvailableBySessionId = new Map<string, boolean>();
+/** Last known ISO 639-1 per session (setVoiceLanguage ack or speech events). */
+const lastVoiceLanguageBySessionId = new Map<string, string>();
 /** Cached from `session_start.ttsPoseAvailable` until `session_end`. */
 const ttsPoseAvailableBySessionId = new Map<string, boolean>();
 /** Sessions that received `session_end`; `speak()` becomes a no-op when no live gen. */
@@ -591,6 +611,12 @@ function handleVoiceLanguageControlAck(
   if (!pending) return;
   clearTimeout(pending.timer);
   pendingVoiceLanguageAcks.delete(message.requestId);
+  if (message.ok && message.language?.trim()) {
+    lastVoiceLanguageBySessionId.set(
+      message.sessionId,
+      message.language.trim(),
+    );
+  }
   pending.resolve({
     ok: message.ok,
     reason: message.reason,
@@ -912,6 +938,10 @@ async function handleParentMessage(
         message.sessionId,
         message.mixAvailable ?? false,
       );
+      voiceLanguageSwitchAvailableBySessionId.set(
+        message.sessionId,
+        message.voiceLanguageSwitchAvailable ?? false,
+      );
       ttsPoseAvailableBySessionId.set(
         message.sessionId,
         message.ttsPoseAvailable ?? false,
@@ -929,6 +959,8 @@ async function handleParentMessage(
         conversationHistoryAvailable:
           message.conversationHistoryAvailable ?? false,
         mixAvailable: message.mixAvailable ?? false,
+        voiceLanguageSwitchAvailable:
+          message.voiceLanguageSwitchAvailable ?? false,
         ttsPoseAvailable: message.ttsPoseAvailable ?? false,
       });
       sendParentMessage({
@@ -954,7 +986,18 @@ async function handleParentMessage(
       if ((message.event.type as string) === "user_language") {
         const language = resolveUserLanguageCode(message.event);
         if (language) {
+          lastVoiceLanguageBySessionId.set(message.sessionId, language);
           await handlers.onUserLanguage?.({
+            sessionId: message.sessionId,
+            language,
+          });
+        }
+      }
+      if ((message.event.type as string) === "voice_language_changed") {
+        const language = resolveUserLanguageCode(message.event);
+        if (language) {
+          lastVoiceLanguageBySessionId.set(message.sessionId, language);
+          await handlers.onVoiceLanguageChanged?.({
             sessionId: message.sessionId,
             language,
           });
@@ -989,6 +1032,8 @@ async function handleParentMessage(
       recordingAvailableBySessionId.delete(message.sessionId);
       conversationHistoryAvailableBySessionId.delete(message.sessionId);
       mixAvailableBySessionId.delete(message.sessionId);
+      voiceLanguageSwitchAvailableBySessionId.delete(message.sessionId);
+      lastVoiceLanguageBySessionId.delete(message.sessionId);
       ttsPoseAvailableBySessionId.delete(message.sessionId);
       await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
         sessionId: message.sessionId,
@@ -1255,6 +1300,8 @@ export function resetAgentIpcStateForTests(): void {
   recordingAvailableBySessionId.clear();
   conversationHistoryAvailableBySessionId.clear();
   mixAvailableBySessionId.clear();
+  voiceLanguageSwitchAvailableBySessionId.clear();
+  lastVoiceLanguageBySessionId.clear();
   ttsPoseAvailableBySessionId.clear();
   inboundQueueAuthority = null;
   for (const [requestId, pending] of pendingRecordingAcks) {
@@ -1324,9 +1371,30 @@ export function isMixAvailable(ctx: SessionContext): boolean {
   return ctx.mixAvailable;
 }
 
+/** True when {@link SessionStartMessage.voiceLanguageSwitchAvailable} was set for the session. */
+export function isVoiceLanguageSwitchAvailable(ctx: SessionContext): boolean {
+  return ctx.voiceLanguageSwitchAvailable;
+}
+
+/**
+ * Last known ISO 639-1 for the session: successful {@link setVoiceLanguage} ack,
+ * then `user_language` / `voice_language_changed` speech events.
+ */
+export function getVoiceLanguage(sessionId: string): string | undefined {
+  return lastVoiceLanguageBySessionId.get(sessionId);
+}
+
 /** True when {@link SessionStartMessage.ttsPoseAvailable} was set for the session. */
 export function isTtsPoseAvailable(ctx: SessionContext): boolean {
   return ctx.ttsPoseAvailable;
+}
+
+/** True when `session_start.env` advertises runner LID auto-switch (if forwarded). */
+export function isRunnerLidAutoSwitchEnabled(
+  env: Record<string, string>,
+): boolean {
+  const raw = env.SHERPA_LID_AUTO_SWITCH?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
 async function sendMixControl(
@@ -1607,6 +1675,10 @@ export interface SetVoiceLanguageOptions {
    * `provider`: `local-sherpa`, `openai`, `elevenlabs`, `cartesia`, or `google`.
    */
   ttsVendor?: VoiceVendorSelection;
+  /**
+   * Max wait for runner `voice_language_control_ack` (default 11 minutes for cold Sherpa pools).
+   */
+  timeoutMs?: number;
 }
 
 function cleanVendor(
@@ -1618,7 +1690,9 @@ function cleanVendor(
     provider,
     ...(selection?.model?.trim() ? { model: selection.model.trim() } : {}),
     ...(selection?.voice?.trim() ? { voice: selection.voice.trim() } : {}),
-    ...(selection?.language?.trim() ? { language: selection.language.trim() } : {}),
+    ...(selection?.language?.trim()
+      ? { language: selection.language.trim() }
+      : {}),
   };
 }
 
@@ -1647,10 +1721,10 @@ export function setVoiceLanguage(
   const ttsVendor = cleanVendor(options.ttsVendor);
   const hasWork = Boolean(
     language ||
-      options.voice?.trim() ||
-      options.stt?.trim() ||
-      sttVendor ||
-      ttsVendor,
+    options.voice?.trim() ||
+    options.stt?.trim() ||
+    sttVendor ||
+    ttsVendor,
   );
   if (!hasWork) {
     return Promise.resolve({
@@ -1663,11 +1737,14 @@ export function setVoiceLanguage(
     return Promise.resolve({ ok: true, reason: "local_mock", requestId });
   }
 
+  const ackTimeoutMs =
+    options.timeoutMs ?? VOICE_LANGUAGE_CONTROL_ACK_TIMEOUT_MS;
+
   return new Promise<VoiceLanguageResult>((resolve) => {
     const timer = setTimeout(() => {
       pendingVoiceLanguageAcks.delete(requestId);
       resolve({ ok: false, reason: "timeout", requestId });
-    }, VOICE_LANGUAGE_CONTROL_ACK_TIMEOUT_MS);
+    }, ackTimeoutMs);
 
     pendingVoiceLanguageAcks.set(requestId, { resolve, timer });
     sendParentMessage({

@@ -1,10 +1,14 @@
 /**
  * Change STT and TTS separately, including the vendor, while the call stays up.
  *
- * The runner reports `user_language` and does not change either side. This
- * agent switches the Sherpa voice and the Sherpa STT model as two calls, so
- * one side can fail without blocking the other. Chat commands change a single
- * vendor mid-conversation:
+ * Two deployment modes (see README):
+ *
+ * (A) Project auto-switch off — this agent calls `setVoiceLanguage` from
+ *     `onUserLanguage` when LID detects a new language.
+ * (B) Project enables runner auto-switch — STT/TTS are runner-owned; use
+ *     `onUserLanguage` / `onVoiceLanguageChanged` for prompts only.
+ *
+ * Chat commands change a single vendor mid-conversation:
  *
  * - `/tts sherpa de` — Sherpa TTS only
  * - `/stt sherpa de` — Sherpa STT only
@@ -17,6 +21,7 @@
 import {
   agentLog,
   defineAgent,
+  isRunnerLidAutoSwitchEnabled,
   parseChatText,
   setVoiceLanguage,
   speak,
@@ -39,17 +44,22 @@ const REPLIES: Record<string, string> = {
 
 type SessionLanguage = {
   language: string;
+  runnerAutoSwitch: boolean;
   echoTimer: ReturnType<typeof setTimeout> | undefined;
   suppressNextFinal: boolean;
 };
 
 const sessions = new Map<string, SessionLanguage>();
 
-function stateFor(sessionId: string): SessionLanguage {
+function stateFor(
+  sessionId: string,
+  env?: Record<string, string>,
+): SessionLanguage {
   const existing = sessions.get(sessionId);
   if (existing) return existing;
   const created: SessionLanguage = {
     language: "en",
+    runnerAutoSwitch: env ? isRunnerLidAutoSwitchEnabled(env) : false,
     echoTimer: undefined,
     suppressNextFinal: false,
   };
@@ -61,9 +71,16 @@ function replyFor(language: string): string {
   return REPLIES[language] ?? `Continuing in ${language}.`;
 }
 
-function logSwitch(sessionId: string, side: string, result: VoiceLanguageResult): void {
+function logSwitch(
+  sessionId: string,
+  side: string,
+  result: VoiceLanguageResult,
+): void {
   if (!result.ok) {
-    agentLog("warn", `setVoiceLanguage ${side} failed: ${result.reason ?? "unknown"}`);
+    agentLog(
+      "warn",
+      `setVoiceLanguage ${side} failed: ${result.reason ?? "unknown"}`,
+    );
     return;
   }
   const provider = side === "tts" ? result.ttsProvider : result.sttProvider;
@@ -74,21 +91,45 @@ function logSwitch(sessionId: string, side: string, result: VoiceLanguageResult)
   );
 }
 
+function prepareLanguageTransition(state: SessionLanguage): void {
+  if (state.echoTimer) {
+    clearTimeout(state.echoTimer);
+    state.echoTimer = undefined;
+  } else {
+    state.suppressNextFinal = true;
+  }
+}
+
 defineAgent({
-  onSessionStart({ sessionId }) {
-    stateFor(sessionId);
-    agentLog("info", `language-switch session_start ${sessionId}`);
+  onSessionStart({ sessionId, env }) {
+    const state = stateFor(sessionId, env);
+    if (state.runnerAutoSwitch) {
+      agentLog(
+        "info",
+        `language-switch session_start ${sessionId} runner LID auto-switch owns STT/TTS`,
+      );
+    } else {
+      agentLog(
+        "info",
+        `language-switch session_start ${sessionId} manual setVoiceLanguage`,
+      );
+    }
   },
 
   async onUserLanguage({ sessionId, language }) {
     const state = stateFor(sessionId);
     if (!language || language === state.language) return;
 
-    if (state.echoTimer) {
-      clearTimeout(state.echoTimer);
-      state.echoTimer = undefined;
-    } else {
-      state.suppressNextFinal = true;
+    prepareLanguageTransition(state);
+
+    if (state.runnerAutoSwitch) {
+      agentLog(
+        "info",
+        `LID detected ${language}; runner auto-switch applies STT/TTS — agent updates prompts only`,
+      );
+      state.language = language;
+      speak(sessionId, replyFor(language));
+      return;
     }
 
     const tts = await setVoiceLanguage(sessionId, {
@@ -112,6 +153,18 @@ defineAgent({
 
     state.language = language;
     speak(sessionId, replyFor(language));
+  },
+
+  async onVoiceLanguageChanged({ sessionId, language }) {
+    const state = stateFor(sessionId);
+    if (!state.runnerAutoSwitch || !language || language === state.language) {
+      return;
+    }
+    agentLog(
+      "info",
+      `runner committed voice language ${language} for ${sessionId}`,
+    );
+    state.language = language;
   },
 
   async onDataChannelMessage(ctx) {

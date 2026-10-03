@@ -13,7 +13,7 @@ A Sherpa language with no STT id (`it`, `pt`, `nl`, `pl`, `hi`) fails the STT ca
 
 ## Mode B — Runner auto-switch
 
-Enable auto-switch in the project voice settings (runner applies STT/TTS when LID detects a new language). When `session_start.env` includes a truthy `SHERPA_LID_AUTO_SWITCH`, this template **does not** call `setVoiceLanguage` from `onUserLanguage` — it logs that the runner owns the switch and updates prompts only. Use `onVoiceLanguageChanged` when you need the committed language after the runner applies the change.
+Enable auto-switch in the project voice settings (runner applies STT/TTS when LID detects a new language). When `session_start.env` includes a truthy `SHERPA_LID_AUTO_SWITCH`, this template **does not** call `setVoiceLanguage`. The runner replays the utterance into the new language's STT, so the next final is the recognized text in the new language. The agent remembers the language from `onUserLanguage` / `onVoiceLanguageChanged` and answers each final right away with a short localized prefix, for example `you said: …` in English and `Du hast gesagt: …` in German. Use `onVoiceLanguageChanged` when you need the committed language after the runner applies the change.
 
 Detection and chat commands are unchanged: `/tts` and `/stt` still call `setVoiceLanguage` for one vendor at a time.
 
@@ -24,7 +24,7 @@ Chat commands change one vendor while the session stays connected. API keys are 
 - `/tts elevenlabs` — ElevenLabs TTS, current STT stays
 - `/stt deepgram de` — Deepgram STT, current voice stays
 
-English finals are echoed as `you said: …` after a short wait, so a language event for the same utterance can cancel the echo. The revealing utterance is not spoken back as an English transcript.
+In manual mode, English finals are echoed as `you said: …` after a short wait, so a language event for the same utterance can cancel the echo. The revealing utterance is not spoken back as an English transcript.
 
 `voice` and `stt` are Sherpa catalog ids (`de`, `en-lessac`, `en-small`), listed in the spoken-language docs. Vendor ids are `local-sherpa`, `openai`, `deepgram`, `assemblyai`, `google`, `elevenlabs`, and `cartesia`.
 

@@ -5,8 +5,11 @@
  *
  * (A) Project auto-switch off — this agent calls `setVoiceLanguage` from
  *     `onUserLanguage` when LID detects a new language.
- * (B) Project enables runner auto-switch — STT/TTS are runner-owned; use
- *     `onUserLanguage` / `onVoiceLanguageChanged` for prompts only.
+ * (B) Project enables runner auto-switch — STT/TTS are runner-owned. The
+ *     runner replays the utterance into the new language's STT, so the next
+ *     final is the correctly recognized text. The agent never calls
+ *     `setVoiceLanguage`; it remembers the language and answers each final
+ *     right away with a short localized prefix ("Du hast gesagt: …").
  *
  * Chat commands change a single vendor mid-conversation:
  *
@@ -30,6 +33,19 @@ import {
 
 const ECHO_PREFIX = "you said:";
 const ECHO_WAIT_MS = 4000;
+
+/** Echo prefix per language for runner auto-switch mode. */
+const ECHO_PREFIXES: Record<string, string> = {
+  en: "you said:",
+  de: "Du hast gesagt:",
+  es: "Dijiste:",
+  fr: "Tu as dit :",
+  it: "Hai detto:",
+  pt: "Você disse:",
+  nl: "Je zei:",
+  pl: "Powiedziałeś:",
+  ru: "Вы сказали:",
+};
 
 const REPLIES: Record<string, string> = {
   de: "Guten Tag. Ich antworte jetzt auf Deutsch.",
@@ -69,6 +85,10 @@ function stateFor(
 
 function replyFor(language: string): string {
   return REPLIES[language] ?? `Continuing in ${language}.`;
+}
+
+function echoPrefixFor(language: string): string {
+  return ECHO_PREFIXES[language] ?? ECHO_PREFIXES.en!;
 }
 
 function logSwitch(
@@ -120,17 +140,19 @@ defineAgent({
     const state = stateFor(sessionId);
     if (!language || language === state.language) return;
 
-    prepareLanguageTransition(state);
-
     if (state.runnerAutoSwitch) {
+      // The runner switches STT/TTS and replays the utterance into the new
+      // STT; the next final is the real utterance, so nothing is suppressed
+      // and no fixed sentence is spoken.
       agentLog(
         "info",
-        `LID detected ${language}; runner auto-switch applies STT/TTS — agent updates prompts only`,
+        `LID detected ${language}; runner auto-switch applies STT/TTS — agent only remembers the language`,
       );
       state.language = language;
-      speak(sessionId, replyFor(language));
       return;
     }
+
+    prepareLanguageTransition(state);
 
     const tts = await setVoiceLanguage(sessionId, {
       scope: "tts",
@@ -214,6 +236,12 @@ defineAgent({
 
   onUserSpeechFinal({ sessionId, text }) {
     const state = stateFor(sessionId);
+    if (state.runnerAutoSwitch) {
+      // Reply immediately: the runner already holds the final until LID has
+      // decided, so no extra wait is needed to avoid a wrong-language echo.
+      speak(sessionId, `${echoPrefixFor(state.language)} ${text}`.trim());
+      return;
+    }
     if (state.suppressNextFinal) {
       state.suppressNextFinal = false;
       return;

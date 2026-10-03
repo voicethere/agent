@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-03
+
+### Changed
+
+- **`language-switch` template** — with project auto-switch on, the agent now answers what the user said in the new language (for example "Du hast gesagt: …") right after the runner switches and replays the utterance. It no longer speaks a fixed greeting and no longer drops the next transcript. It still never calls `setVoiceLanguage` in this mode. Manual mode is unchanged.
+
 ## [0.9.1] - 2026-09-29
 
 ### Added

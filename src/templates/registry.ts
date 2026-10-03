@@ -39,7 +39,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     description:
-      "Switches STT and TTS independently from onUserLanguage, and can change one vendor mid-conversation. Detection does not change either side until this agent calls setVoiceLanguage.",
+      "Switches STT and TTS independently from onUserLanguage, and can change one vendor mid-conversation. With project auto-switch on, the runner switches and replays the utterance, and the agent answers the recognized text in the new language. With auto-switch off, detection does not change either side until this agent calls setVoiceLanguage.",
     sourceFiles: ["language-switch/agent.ts"],
   },
   {
@@ -67,7 +67,10 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     seedOnCreate: true,
     description:
       "Single-agent binary world sync — onDataChannelBinary + sendBinaryToClient ArrayBuffer poses, no Redis.",
-    sourceFiles: ["world-sync-binary/agent.ts", "world-sync-binary/protocol.ts"],
+    sourceFiles: [
+      "world-sync-binary/agent.ts",
+      "world-sync-binary/protocol.ts",
+    ],
   },
   {
     id: "game-sync",

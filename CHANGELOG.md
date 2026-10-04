@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-10-04
+
+### Changed
+
+- **`language-switch` template** — in manual mode (runner auto-switch off) the agent now speaks a per-language wait message in the language being left before it calls `setVoiceLanguage`, because the runner plays nothing for manual switches and the target pools can be cold for several seconds. If the switch fails it speaks a short fallback in the old language and stays. Override the texts with `LANGUAGE_SWITCH_WAIT_MESSAGES_JSON` and `LANGUAGE_SWITCH_FAILED_MESSAGES_JSON` (JSON object keyed by ISO 639-1 code). Auto mode is unchanged.
+
 ## [0.9.2] - 2026-10-03
 
 ### Changed

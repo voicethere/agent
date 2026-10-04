@@ -4,7 +4,15 @@
  * Two deployment modes (see README):
  *
  * (A) Project auto-switch off — this agent calls `setVoiceLanguage` from
- *     `onUserLanguage` when LID detects a new language.
+ *     `onUserLanguage` when LID detects a new language. The runner plays
+ *     nothing for manual switches and the target pools may be cold for
+ *     several seconds, so the agent first speaks a wait message in the
+ *     language being left (current voice), then switches TTS and STT, then
+ *     replies in the new language. If the switch fails it speaks a short
+ *     fallback in the old language and stays. Texts live in WAIT_MESSAGES /
+ *     FAILED_MESSAGES and can be overridden per language with the session env
+ *     vars LANGUAGE_SWITCH_WAIT_MESSAGES_JSON and
+ *     LANGUAGE_SWITCH_FAILED_MESSAGES_JSON (JSON object, ISO 639-1 -> text).
  * (B) Project enables runner auto-switch — STT/TTS are runner-owned. The
  *     runner replays the utterance into the new language's STT, so the next
  *     final is the correctly recognized text. The agent never calls
@@ -47,6 +55,70 @@ const ECHO_PREFIXES: Record<string, string> = {
   ru: "Вы сказали:",
 };
 
+/** Spoken in the language being left, before a manual switch starts. */
+export const WAIT_MESSAGES: Record<string, string> = {
+  en: "One moment please, I'm switching to your language.",
+  de: "Einen Moment bitte, ich wechsle zu Ihrer Sprache.",
+  es: "Un momento, por favor, estoy cambiando a su idioma.",
+  fr: "Un instant, je passe dans votre langue.",
+  it: "Un momento, per favore, sto passando alla tua lingua.",
+  pt: "Um momento, por favor, estou mudando para o seu idioma.",
+  nl: "Een moment alstublieft, ik schakel over naar uw taal.",
+  pl: "Chwileczkę, przełączam się na Twój język.",
+  ru: "Одну минуту, я перехожу на ваш язык.",
+};
+
+/** Spoken in the old language when the switch fails and the agent stays. */
+export const FAILED_MESSAGES: Record<string, string> = {
+  en: "Sorry, I couldn't switch languages. I'll keep going in English.",
+  de: "Entschuldigung, der Sprachwechsel hat nicht geklappt. Ich bleibe bei Deutsch.",
+  es: "Lo siento, no pude cambiar de idioma. Sigo en español.",
+  fr: "Désolé, je n'ai pas pu changer de langue. Je continue en français.",
+  it: "Mi dispiace, non sono riuscito a cambiare lingua. Continuo in italiano.",
+  pt: "Desculpe, não consegui mudar de idioma. Continuo em português.",
+  nl: "Sorry, het wisselen van taal is niet gelukt. Ik blijf Nederlands spreken.",
+  pl: "Przepraszam, nie udało się zmienić języka. Zostaję przy polskim.",
+  ru: "Извините, не удалось сменить язык. Продолжаю по-русски.",
+};
+
+export const WAIT_MESSAGES_ENV = "LANGUAGE_SWITCH_WAIT_MESSAGES_JSON";
+export const FAILED_MESSAGES_ENV = "LANGUAGE_SWITCH_FAILED_MESSAGES_JSON";
+
+/**
+ * Parse a per-language override from a session env var. Accepts a JSON object
+ * of language code -> non-empty string; anything else yields no overrides.
+ */
+export function parseMessageOverrides(
+  raw: string | undefined,
+): Record<string, string> {
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value === "string" && value.trim()) {
+      out[key.trim().toLowerCase()] = value.trim();
+    }
+  }
+  return out;
+}
+
+/** Message for `language`: override, then default, then English default. */
+export function pickMessage(
+  defaults: Record<string, string>,
+  overrides: Record<string, string>,
+  language: string,
+): string {
+  return (
+    overrides[language] ?? defaults[language] ?? overrides.en ?? defaults.en!
+  );
+}
+
 const REPLIES: Record<string, string> = {
   de: "Guten Tag. Ich antworte jetzt auf Deutsch.",
   es: "Hola. Ahora respondo en español.",
@@ -63,6 +135,8 @@ type SessionLanguage = {
   runnerAutoSwitch: boolean;
   echoTimer: ReturnType<typeof setTimeout> | undefined;
   suppressNextFinal: boolean;
+  waitOverrides: Record<string, string>;
+  failedOverrides: Record<string, string>;
 };
 
 const sessions = new Map<string, SessionLanguage>();
@@ -78,6 +152,8 @@ function stateFor(
     runnerAutoSwitch: env ? isRunnerLidAutoSwitchEnabled(env) : false,
     echoTimer: undefined,
     suppressNextFinal: false,
+    waitOverrides: parseMessageOverrides(env?.[WAIT_MESSAGES_ENV]),
+    failedOverrides: parseMessageOverrides(env?.[FAILED_MESSAGES_ENV]),
   };
   sessions.set(sessionId, created);
   return created;
@@ -154,6 +230,11 @@ defineAgent({
 
     prepareLanguageTransition(state);
 
+    // The runner plays nothing for manual switches and the target pools may be
+    // cold, so tell the user first, in the language being left.
+    const previous = state.language;
+    speak(sessionId, pickMessage(WAIT_MESSAGES, state.waitOverrides, previous));
+
     const tts = await setVoiceLanguage(sessionId, {
       scope: "tts",
       language,
@@ -170,6 +251,12 @@ defineAgent({
 
     if (!tts.ok) {
       state.suppressNextFinal = false;
+      // Switch failed (for example a timeout): the voice is unchanged, so
+      // apologise in the old language and stay.
+      speak(
+        sessionId,
+        pickMessage(FAILED_MESSAGES, state.failedOverrides, previous),
+      );
       return;
     }
 

@@ -35,6 +35,28 @@ function speech(capture: Capture, event: Record<string, unknown>): void {
   capture.emit({ type: "speech_event", sessionId: SESSION, event });
 }
 
+describe("language-switch message helpers", () => {
+  it("picks override, then default, then English", async () => {
+    const { WAIT_MESSAGES, pickMessage } =
+      await import("../templates/language-switch/agent.js");
+    expect(pickMessage(WAIT_MESSAGES, {}, "de")).toBe(WAIT_MESSAGES.de);
+    expect(pickMessage(WAIT_MESSAGES, { de: "X" }, "de")).toBe("X");
+    expect(pickMessage(WAIT_MESSAGES, {}, "xx")).toBe(WAIT_MESSAGES.en);
+    expect(pickMessage(WAIT_MESSAGES, { en: "Y" }, "xx")).toBe("Y");
+  });
+
+  it("parses env overrides and ignores invalid input", async () => {
+    const { parseMessageOverrides } =
+      await import("../templates/language-switch/agent.js");
+    expect(parseMessageOverrides(undefined)).toEqual({});
+    expect(parseMessageOverrides("not json")).toEqual({});
+    expect(parseMessageOverrides("[1]")).toEqual({});
+    expect(parseMessageOverrides('{"DE":" Hallo ","fr":3,"es":""}')).toEqual({
+      de: "Hallo",
+    });
+  });
+});
+
 describe("language-switch template", () => {
   let capture: Capture | undefined;
 
@@ -100,11 +122,14 @@ describe("language-switch template", () => {
   });
 
   describe("manual mode", () => {
-    it("switches TTS and STT itself, speaks the fixed reply, and drops the switch utterance transcript", async () => {
+    it("speaks the wait message in the old language, switches, then replies in the new language, and drops the switch utterance transcript", async () => {
       const t = await startTemplate({});
       capture = t.capture;
       speech(t.capture, { type: "user_language", text: "de", language: "de" });
       await vi.waitFor(() => expect(t.vlc()).toHaveLength(1));
+      expect(t.spoken()).toEqual([
+        "One moment please, I'm switching to your language.",
+      ]);
       const first = t.vlc()[0] as { requestId: string; scope: string };
       expect(first.scope).toBe("tts");
       t.capture.emit({
@@ -126,13 +151,78 @@ describe("language-switch template", () => {
       });
       await vi.waitFor(() =>
         expect(t.spoken()).toEqual([
+          "One moment please, I'm switching to your language.",
           "Guten Tag. Ich antworte jetzt auf Deutsch.",
         ]),
       );
       // The utterance that revealed the language is not echoed back.
       speech(t.capture, { type: "user_speech_final", text: "guten tag" });
       await new Promise((r) => setTimeout(r, 50));
-      expect(t.spoken()).toHaveLength(1);
+      expect(t.spoken()).toHaveLength(2);
+    });
+
+    it("waits in the language being left on the second switch", async () => {
+      const t = await startTemplate({});
+      capture = t.capture;
+      const ack = async (n: number, language: string) => {
+        await vi.waitFor(() => expect(t.vlc()).toHaveLength(n));
+        const m = t.vlc()[n - 1] as { requestId: string };
+        t.capture.emit({
+          type: "voice_language_control_ack",
+          sessionId: SESSION,
+          requestId: m.requestId,
+          ok: true,
+          language,
+        });
+      };
+      speech(t.capture, { type: "user_language", text: "de", language: "de" });
+      await ack(1, "de");
+      await ack(2, "de");
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(2));
+      speech(t.capture, { type: "user_language", text: "fr", language: "fr" });
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(3));
+      expect(t.spoken()[2]).toBe(
+        "Einen Moment bitte, ich wechsle zu Ihrer Sprache.",
+      );
+    });
+
+    it("uses the env override for the wait message", async () => {
+      const t = await startTemplate({
+        LANGUAGE_SWITCH_WAIT_MESSAGES_JSON: JSON.stringify({ en: "Hold on." }),
+      });
+      capture = t.capture;
+      speech(t.capture, { type: "user_language", text: "de", language: "de" });
+      await vi.waitFor(() => expect(t.spoken()).toEqual(["Hold on."]));
+    });
+
+    it("speaks a fallback in the old language and stays when the switch fails", async () => {
+      const t = await startTemplate({});
+      capture = t.capture;
+      speech(t.capture, { type: "user_language", text: "de", language: "de" });
+      await vi.waitFor(() => expect(t.vlc()).toHaveLength(1));
+      const first = t.vlc()[0] as { requestId: string };
+      t.capture.emit({
+        type: "voice_language_control_ack",
+        sessionId: SESSION,
+        requestId: first.requestId,
+        ok: false,
+        reason: "timeout",
+      });
+      await vi.waitFor(() => expect(t.vlc()).toHaveLength(2));
+      const second = t.vlc()[1] as { requestId: string };
+      t.capture.emit({
+        type: "voice_language_control_ack",
+        sessionId: SESSION,
+        requestId: second.requestId,
+        ok: false,
+        reason: "timeout",
+      });
+      await vi.waitFor(() =>
+        expect(t.spoken()).toEqual([
+          "One moment please, I'm switching to your language.",
+          "Sorry, I couldn't switch languages. I'll keep going in English.",
+        ]),
+      );
     });
 
     it("keeps the delayed English echo", async () => {

@@ -9,11 +9,22 @@ Leave the project **spoken-language auto-switch** setting off. When `onUserLangu
 - `scope: "tts"` switches only the speaking voice
 - `scope: "stt"` switches only the listening model
 
+The runner plays nothing for a manual switch, and the target voice and STT pools can take several seconds to warm up. So the agent first speaks a short wait message in the language it is leaving, using the current voice (for example `One moment please, I'm switching to your language.` in English, `Einen Moment bitte, ich wechsle zu Ihrer Sprache.` in German). The runner swaps the voice without draining it, so the agent waits for the `agent_speaking_end` speech event (at most 8 seconds, `WAIT_SPEECH_TIMEOUT_MS`) before it calls `setVoiceLanguage` for TTS and STT and replies in the new language. A second language event during the wait or the switch is ignored. The utterance that revealed the language is not echoed back. If the TTS switch fails (a timeout, for instance), the agent speaks a short fallback in the old language and stays in it.
+
+The texts live in the `WAIT_MESSAGES` and `FAILED_MESSAGES` maps in `agent.ts` (en, de, es, fr, it, pt, nl, pl, ru). Override any of them per language with a JSON object in the session env, keyed by ISO 639-1 code:
+
+- `LANGUAGE_SWITCH_WAIT_MESSAGES_JSON` — wait message, for example `{"en":"Hold on, switching languages."}`
+- `LANGUAGE_SWITCH_FAILED_MESSAGES_JSON` — fallback after a failed switch
+
+Invalid JSON or non-string values are ignored and the built-in text is used. A language without a text falls back to English.
+
 A Sherpa language with no STT id (`it`, `pt`, `nl`, `pl`, `hi`) fails the STT call and still switches TTS.
 
 ## Mode B — Runner auto-switch
 
 Enable auto-switch in the project voice settings (runner applies STT/TTS when LID detects a new language). When `session_start.env` includes a truthy `SHERPA_LID_AUTO_SWITCH`, this template **does not** call `setVoiceLanguage`. The runner replays the utterance into the new language's STT, so the next final is the recognized text in the new language. The agent remembers the language from `onUserLanguage` / `onVoiceLanguageChanged` and answers each final right away with a short localized prefix, for example `you said: …` in English and `Du hast gesagt: …` in German. Use `onVoiceLanguageChanged` when you need the committed language after the runner applies the change.
+
+In this mode the runner owns the wait message and the agent speaks no wait or fallback text of its own.
 
 Detection and chat commands are unchanged: `/tts` and `/stt` still call `setVoiceLanguage` for one vendor at a time.
 

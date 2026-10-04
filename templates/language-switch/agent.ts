@@ -7,8 +7,10 @@
  *     `onUserLanguage` when LID detects a new language. The runner plays
  *     nothing for manual switches and the target pools may be cold for
  *     several seconds, so the agent first speaks a wait message in the
- *     language being left (current voice), then switches TTS and STT, then
- *     replies in the new language. If the switch fails it speaks a short
+ *     language being left (current voice), waits for `agent_speaking_end`
+ *     (at most WAIT_SPEECH_TIMEOUT_MS) so the runner does not swap the voice
+ *     mid-sentence, then switches TTS and STT, then replies in the new
+ *     language. If the switch fails it speaks a short
  *     fallback in the old language and stays. Texts live in WAIT_MESSAGES /
  *     FAILED_MESSAGES and can be overridden per language with the session env
  *     vars LANGUAGE_SWITCH_WAIT_MESSAGES_JSON and
@@ -135,6 +137,14 @@ type SessionLanguage = {
   runnerAutoSwitch: boolean;
   echoTimer: ReturnType<typeof setTimeout> | undefined;
   suppressNextFinal: boolean;
+  pendingSwitch:
+    | {
+        language: string;
+        previous: string;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    | undefined;
+  switching: boolean;
   waitOverrides: Record<string, string>;
   failedOverrides: Record<string, string>;
 };
@@ -152,6 +162,8 @@ function stateFor(
     runnerAutoSwitch: env ? isRunnerLidAutoSwitchEnabled(env) : false,
     echoTimer: undefined,
     suppressNextFinal: false,
+    pendingSwitch: undefined,
+    switching: false,
     waitOverrides: parseMessageOverrides(env?.[WAIT_MESSAGES_ENV]),
     failedOverrides: parseMessageOverrides(env?.[FAILED_MESSAGES_ENV]),
   };
@@ -185,6 +197,61 @@ function logSwitch(
     "info",
     `voice ${side} ${sessionId} ${result.language ?? ""} provider=${provider ?? "unchanged"} model=${model ?? "unchanged"}`,
   );
+}
+
+/** Upper bound for waiting on the wait message before switching anyway. */
+export const WAIT_SPEECH_TIMEOUT_MS = 8000;
+
+/** Consume the pending switch (once) and run it without blocking handlers. */
+function startSwitch(sessionId: string, state: SessionLanguage): void {
+  const pending = state.pendingSwitch;
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  state.pendingSwitch = undefined;
+  state.switching = true;
+  void runSwitch(sessionId, state, pending.language, pending.previous)
+    .catch((error: unknown) => {
+      state.suppressNextFinal = false;
+      agentLog("warn", `language-switch ${sessionId} failed: ${String(error)}`);
+    })
+    .finally(() => {
+      state.switching = false;
+    });
+}
+
+async function runSwitch(
+  sessionId: string,
+  state: SessionLanguage,
+  language: string,
+  previous: string,
+): Promise<void> {
+  const tts = await setVoiceLanguage(sessionId, {
+    scope: "tts",
+    language,
+    voice: language,
+  });
+  logSwitch(sessionId, "tts", tts);
+
+  const stt = await setVoiceLanguage(sessionId, {
+    scope: "stt",
+    language,
+    stt: language,
+  });
+  logSwitch(sessionId, "stt", stt);
+
+  if (!tts.ok) {
+    state.suppressNextFinal = false;
+    // Switch failed (for example a timeout): the voice is unchanged, so
+    // apologise in the old language and stay.
+    speak(
+      sessionId,
+      pickMessage(FAILED_MESSAGES, state.failedOverrides, previous),
+    );
+    return;
+  }
+
+  state.language = language;
+  speak(sessionId, replyFor(language));
 }
 
 function prepareLanguageTransition(state: SessionLanguage): void {
@@ -228,6 +295,9 @@ defineAgent({
       return;
     }
 
+    // A switch is already waiting for the wait message or in flight.
+    if (state.pendingSwitch || state.switching) return;
+
     prepareLanguageTransition(state);
 
     // The runner plays nothing for manual switches and the target pools may be
@@ -235,33 +305,25 @@ defineAgent({
     const previous = state.language;
     speak(sessionId, pickMessage(WAIT_MESSAGES, state.waitOverrides, previous));
 
-    const tts = await setVoiceLanguage(sessionId, {
-      scope: "tts",
-      language,
-      voice: language,
-    });
-    logSwitch(sessionId, "tts", tts);
-
-    const stt = await setVoiceLanguage(sessionId, {
-      scope: "stt",
-      language,
-      stt: language,
-    });
-    logSwitch(sessionId, "stt", stt);
-
-    if (!tts.ok) {
-      state.suppressNextFinal = false;
-      // Switch failed (for example a timeout): the voice is unchanged, so
-      // apologise in the old language and stay.
-      speak(
-        sessionId,
-        pickMessage(FAILED_MESSAGES, state.failedOverrides, previous),
+    // `speak` is fire-and-forget and the runner swaps the TTS without draining
+    // it, so the switch must wait until the wait message has been spoken
+    // (`agent_speaking_end`, delivered to onSpeechEvent). Inbound handlers of
+    // one session run strictly in order, so this handler must return instead
+    // of awaiting that event. The bounded timer covers a missing event.
+    const timer = setTimeout(() => {
+      agentLog(
+        "warn",
+        `language-switch ${sessionId} no agent_speaking_end within ${WAIT_SPEECH_TIMEOUT_MS}ms; switching anyway`,
       );
-      return;
-    }
+      startSwitch(sessionId, state);
+    }, WAIT_SPEECH_TIMEOUT_MS);
+    state.pendingSwitch = { language, previous, timer };
+  },
 
-    state.language = language;
-    speak(sessionId, replyFor(language));
+  onSpeechEvent({ sessionId }, event) {
+    if (event.type !== "agent_speaking_end") return;
+    const state = sessions.get(sessionId);
+    if (state?.pendingSwitch) startSwitch(sessionId, state);
   },
 
   async onVoiceLanguageChanged({ sessionId, language }) {
@@ -343,6 +405,7 @@ defineAgent({
   onSessionEnd({ sessionId }) {
     const state = sessions.get(sessionId);
     if (state?.echoTimer) clearTimeout(state.echoTimer);
+    if (state?.pendingSwitch) clearTimeout(state.pendingSwitch.timer);
     sessions.delete(sessionId);
   },
 });

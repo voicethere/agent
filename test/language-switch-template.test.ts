@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetAgentIpcStateForTests } from "../src/runtime.js";
+import { WAIT_SPEECH_TIMEOUT_MS } from "../templates/language-switch/agent.js";
 import { installProcessMessageCapture } from "./helpers/process-mock.js";
 
 type Capture = ReturnType<typeof installProcessMessageCapture>;
@@ -33,6 +34,17 @@ async function startTemplate(
 
 function speech(capture: Capture, event: Record<string, unknown>): void {
   capture.emit({ type: "speech_event", sessionId: SESSION, event });
+}
+
+/** Emit user_language and finish the wait message so the switch starts. */
+async function detectAndFinishWait(
+  t: { capture: Capture; spoken: () => string[] },
+  language: string,
+): Promise<void> {
+  const before = t.spoken().length;
+  speech(t.capture, { type: "user_language", text: language, language });
+  await vi.waitFor(() => expect(t.spoken().length).toBe(before + 1));
+  speech(t.capture, { type: "agent_speaking_end" });
 }
 
 describe("language-switch message helpers", () => {
@@ -126,6 +138,9 @@ describe("language-switch template", () => {
       const t = await startTemplate({});
       capture = t.capture;
       speech(t.capture, { type: "user_language", text: "de", language: "de" });
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
+      expect(t.vlc()).toEqual([]);
+      speech(t.capture, { type: "agent_speaking_end" });
       await vi.waitFor(() => expect(t.vlc()).toHaveLength(1));
       expect(t.spoken()).toEqual([
         "One moment please, I'm switching to your language.",
@@ -175,12 +190,11 @@ describe("language-switch template", () => {
           language,
         });
       };
-      speech(t.capture, { type: "user_language", text: "de", language: "de" });
+      await detectAndFinishWait(t, "de");
       await ack(1, "de");
       await ack(2, "de");
       await vi.waitFor(() => expect(t.spoken()).toHaveLength(2));
-      speech(t.capture, { type: "user_language", text: "fr", language: "fr" });
-      await vi.waitFor(() => expect(t.spoken()).toHaveLength(3));
+      await detectAndFinishWait(t, "fr");
       expect(t.spoken()[2]).toBe(
         "Einen Moment bitte, ich wechsle zu Ihrer Sprache.",
       );
@@ -198,7 +212,7 @@ describe("language-switch template", () => {
     it("speaks a fallback in the old language and stays when the switch fails", async () => {
       const t = await startTemplate({});
       capture = t.capture;
-      speech(t.capture, { type: "user_language", text: "de", language: "de" });
+      await detectAndFinishWait(t, "de");
       await vi.waitFor(() => expect(t.vlc()).toHaveLength(1));
       const first = t.vlc()[0] as { requestId: string };
       t.capture.emit({
@@ -223,6 +237,43 @@ describe("language-switch template", () => {
           "Sorry, I couldn't switch languages. I'll keep going in English.",
         ]),
       );
+    });
+
+    it("does not request the switch before agent_speaking_end, and ignores a second language event while waiting", async () => {
+      const t = await startTemplate({});
+      capture = t.capture;
+      speech(t.capture, { type: "user_language", text: "de", language: "de" });
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
+      speech(t.capture, { type: "user_language", text: "fr", language: "fr" });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(t.vlc()).toEqual([]);
+      expect(t.spoken()).toHaveLength(1);
+      speech(t.capture, { type: "agent_speaking_end" });
+      await vi.waitFor(() => expect(t.vlc()).toHaveLength(1));
+      expect((t.vlc()[0] as { language: string }).language).toBe("de");
+    });
+
+    it("switches after the timeout bound when agent_speaking_end never arrives", async () => {
+      const t = await startTemplate({});
+      capture = t.capture;
+      vi.useFakeTimers();
+      speech(t.capture, { type: "user_language", text: "de", language: "de" });
+      await vi.advanceTimersByTimeAsync(WAIT_SPEECH_TIMEOUT_MS - 1);
+      expect(t.vlc()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(t.vlc()).toHaveLength(1);
+    });
+
+    it("clears the waiter on session end so no switch is requested", async () => {
+      const t = await startTemplate({});
+      capture = t.capture;
+      vi.useFakeTimers();
+      speech(t.capture, { type: "user_language", text: "de", language: "de" });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(t.spoken()).toHaveLength(1);
+      t.capture.emit({ type: "session_end", sessionId: SESSION });
+      await vi.advanceTimersByTimeAsync(WAIT_SPEECH_TIMEOUT_MS + 1000);
+      expect(t.vlc()).toEqual([]);
     });
 
     it("keeps the delayed English echo", async () => {

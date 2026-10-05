@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-10-05
+
 ### Added
 
 - **`prepareVoiceLanguage(sessionId, options)`** — warms the pools for a language switch (same options as `setVoiceLanguage`) and resolves `{ ok, ready, reason, language? }` without changing anything. Resolves `reason: "timeout"` after 50 s on runners that do not support it.

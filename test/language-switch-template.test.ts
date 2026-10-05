@@ -8,9 +8,12 @@ type Capture = ReturnType<typeof installProcessMessageCapture>;
 
 const SESSION = "ls-1";
 
-async function startTemplate(
-  env: Record<string, string>,
-): Promise<{ capture: Capture; spoken: () => string[]; vlc: () => unknown[] }> {
+async function startTemplate(env: Record<string, string>): Promise<{
+  capture: Capture;
+  spoken: () => string[];
+  speaks: () => unknown[];
+  vlc: () => unknown[];
+}> {
   vi.resetModules();
   resetAgentIpcStateForTests();
   const capture = installProcessMessageCapture();
@@ -28,6 +31,7 @@ async function startTemplate(
       sent()
         .filter((m) => m.type === "speak")
         .map((m) => m.text as string),
+    speaks: () => sent().filter((m) => m.type === "speak"),
     vlc: () => sent().filter((m) => m.type === "voice_language_control"),
   };
 }
@@ -170,6 +174,10 @@ describe("language-switch template", () => {
           "Guten Tag. Ich antworte jetzt auf Deutsch.",
         ]),
       );
+      // Only the wait message is protected from barge-in.
+      const speaks = t.speaks() as Array<Record<string, unknown>>;
+      expect(speaks[0]!.interruptible).toBe(false);
+      expect("interruptible" in speaks[1]!).toBe(false);
       // The utterance that revealed the language is not echoed back.
       speech(t.capture, { type: "user_speech_final", text: "guten tag" });
       await new Promise((r) => setTimeout(r, 50));

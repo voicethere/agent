@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- **`speak(sessionId, text, { interruptible: false })`** — optional third argument so the caller's speech (barge-in) does not cut that utterance. Needs a runner that supports the field; older runners ignore it and behave as before.
+
+### Fixed
+
+- **`language-switch` template** — the manual-switch wait message is no longer cut by barge-in when early language detection fires while the caller is still talking.
+
 ## [0.9.3] - 2026-10-04
 
 ### Changed

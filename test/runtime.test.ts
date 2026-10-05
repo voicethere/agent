@@ -1088,6 +1088,36 @@ describe("speak", () => {
     });
   });
 
+  it("speak sends interruptible false when requested", () => {
+    sendMock = installProcessSendMock();
+    speak("peer-1", "Hello there", { interruptible: false });
+    expect(sendMock.send).toHaveBeenCalledWith({
+      type: "speak",
+      sessionId: "peer-1",
+      text: "Hello there",
+      interruptible: false,
+    });
+  });
+
+  it("speak without options sends no interruptible field", () => {
+    sendMock = installProcessSendMock();
+    speak("peer-1", "Hello there");
+    const msg = sendMock.send.mock.calls[0]![0] as Record<string, unknown>;
+    expect(msg).toStrictEqual({
+      type: "speak",
+      sessionId: "peer-1",
+      text: "Hello there",
+    });
+    expect("interruptible" in msg).toBe(false);
+  });
+
+  it("speak with interruptible true sends no field", () => {
+    sendMock = installProcessSendMock();
+    speak("peer-1", "Hello there", { interruptible: true });
+    const msg = sendMock.send.mock.calls[0]![0] as Record<string, unknown>;
+    expect("interruptible" in msg).toBe(false);
+  });
+
   it("does not speak after session_end for the same session", async () => {
     const capture = installProcessMessageCapture();
     const onSessionEnd = vi.fn();

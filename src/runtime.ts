@@ -1318,8 +1318,21 @@ export function resetAgentIpcStateForTests(): void {
   clearPendingVoiceLanguageAcks("reset");
 }
 
+export interface SpeakOptions {
+  /** Default true. false: the caller's speech (barge-in) does not cut this utterance. */
+  interruptible?: boolean;
+}
+
 /** Ask the runner parent to synthesize speech for the session. */
-export function speak(sessionId: string, text: string): void {
+export function speak(
+  sessionId: string,
+  text: string,
+  options?: SpeakOptions,
+): void {
+  if (options?.interruptible === false) {
+    sendParentMessage({ type: "speak", sessionId, text, interruptible: false });
+    return;
+  }
   sendParentMessage({ type: "speak", sessionId, text });
 }
 

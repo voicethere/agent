@@ -180,20 +180,20 @@ On plans that include project Redis, the runner injects **`AGENT_REDIS_URL`** in
 
 For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in project settings. The runner forwards the exact request bytes on process-wide **`onWebhook`** IPC (not session-queued). Verify HMAC on `ctx.body` before `JSON.parse` — VoiceThere does not verify signatures in the SDK. See [`templates/webhooks/agent.ts`](./templates/webhooks/agent.ts).
 
-| Export                                                                                       | Purpose                                                                                                 |
-| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `defineAgent`                                                                                | Register handlers including `onUserLanguage`, `onVoiceLanguageChanged`, `onSessionStart`, …             |
-| `SpeechEvent`, `SpeechEventType`                                                             | Re-exported **types** from `@node-webrtc-rust/sdk/voice` (includes `voice_language_changed`, …)         |
-| `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                   |
-| `speak`                                                                                      | Request parent TTS                                                                                      |
-| `setVoiceLanguage`                                                                           | Change STT, TTS, or the vendor for one live session (`scope`, Sherpa catalog ids, cloud vendors).       |
-| `getVoiceLanguage`                                                                           | Last known ISO 639-1 from a successful switch ack or LID / `voice_language_changed` events.             |
-| `isVoiceLanguageSwitchAvailable`                                                             | `true` when `session_start.voiceLanguageSwitchAvailable` was set (runner supports agent IPC).           |
-| `isRunnerLidAutoSwitchEnabled`                                                               | `true` when `session_start.env.SHERPA_LID_AUTO_SWITCH` is truthy (runner auto-switch; optional in env). |
-| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording`                    | Request parent conversation recording control                                                           |
-| `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Stop or resume conversation history storage for one session                                             |
-| `agentLog`                                                                                   | Forward structured logs to parent                                                                       |
-| `ParentToChildMessage` / `ChildToParentMessage`                                              | IPC contract shared with the VoiceThere agent runner                                                    |
+| Export                                                                                       | Purpose                                                                                                    |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `defineAgent`                                                                                | Register handlers including `onUserLanguage`, `onVoiceLanguageChanged`, `onSessionStart`, …                |
+| `SpeechEvent`, `SpeechEventType`                                                             | Re-exported **types** from `@node-webrtc-rust/sdk/voice` (includes `voice_language_changed`, …)            |
+| `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                      |
+| `speak`                                                                                      | Request parent TTS; `speak(sessionId, text, { interruptible: false })` keeps caller speech from cutting it |
+| `setVoiceLanguage`                                                                           | Change STT, TTS, or the vendor for one live session (`scope`, Sherpa catalog ids, cloud vendors).          |
+| `getVoiceLanguage`                                                                           | Last known ISO 639-1 from a successful switch ack or LID / `voice_language_changed` events.                |
+| `isVoiceLanguageSwitchAvailable`                                                             | `true` when `session_start.voiceLanguageSwitchAvailable` was set (runner supports agent IPC).              |
+| `isRunnerLidAutoSwitchEnabled`                                                               | `true` when `session_start.env.SHERPA_LID_AUTO_SWITCH` is truthy (runner auto-switch; optional in env).    |
+| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording`                    | Request parent conversation recording control                                                              |
+| `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Stop or resume conversation history storage for one session                                                |
+| `agentLog`                                                                                   | Forward structured logs to parent                                                                          |
+| `ParentToChildMessage` / `ChildToParentMessage`                                              | IPC contract shared with the VoiceThere agent runner                                                       |
 
 ### Runner runtime subpath (minimal shared sandbox API)
 

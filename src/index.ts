@@ -125,5 +125,6 @@ export {
   type PlayOptions,
   type AudioPosition,
   type SpeakAndChatOptions,
+  type SpeakOptions,
   PLAY_BYTES_MAX_DECODED_LENGTH,
 } from "./runtime.js";

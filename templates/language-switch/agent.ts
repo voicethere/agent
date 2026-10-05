@@ -301,9 +301,17 @@ defineAgent({
     prepareLanguageTransition(state);
 
     // The runner plays nothing for manual switches and the target pools may be
-    // cold, so tell the user first, in the language being left.
+    // cold, so tell the user first, in the language being left. Early LID can
+    // fire while the caller is still talking, so the wait message must not be
+    // cut by barge-in.
     const previous = state.language;
-    speak(sessionId, pickMessage(WAIT_MESSAGES, state.waitOverrides, previous));
+    speak(
+      sessionId,
+      pickMessage(WAIT_MESSAGES, state.waitOverrides, previous),
+      {
+        interruptible: false,
+      },
+    );
 
     // `speak` is fire-and-forget and the runner swaps the TTS without draining
     // it, so the switch must wait until the wait message has been spoken

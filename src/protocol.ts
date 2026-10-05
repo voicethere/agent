@@ -34,6 +34,8 @@ export type ParentToChildMessage =
   | MixControlAckMessage
   | SttControlAckMessage
   | VoiceLanguageControlAckMessage
+  | VoiceLanguagePrepareResultMessage
+  | VoiceReplayLastResultMessage
   | WebhookMessage;
 
 /**
@@ -53,6 +55,8 @@ export type ChildToParentMessage =
   | MixControlMessage
   | SttControlMessage
   | VoiceLanguageControlMessage
+  | VoiceLanguagePrepareMessage
+  | VoiceReplayLastMessage
   | AgentLogMessage
   | AgentErrorMessage
   | SendToClientMessage
@@ -100,6 +104,11 @@ export interface SessionStartMessage {
    * treat as `false`. Project auto-switch from LID is separate (runner-owned).
    */
   voiceLanguageSwitchAvailable?: boolean;
+  /**
+   * Language-switch settings of the project (wait and ready messages). Absent on
+   * older runners — use your own defaults then.
+   */
+  voiceLanguageSwitch?: VoiceLanguageSwitchSettings;
   /**
    * When `true`, TTS pose / listener pose / positional panning APIs are available
    * (voice or Voice+Data). Absent on data-only or older runners — treat as `false`.
@@ -591,6 +600,76 @@ export interface VoiceLanguageControlAckMessage {
   sttProvider?: string;
   /** Public vendor id that the speaking voice uses after this call. */
   ttsProvider?: string;
+}
+
+/**
+ * Ask the runner to warm up the pools for a language without switching.
+ * `options` has the same shape as {@link VoiceLanguageControlMessage} minus the ids.
+ */
+export interface VoiceLanguagePrepareMessage {
+  type: "voice_language_prepare";
+  sessionId: string;
+  requestId: string;
+  options: Omit<
+    VoiceLanguageControlMessage,
+    "type" | "requestId" | "sessionId"
+  >;
+}
+
+/** Runner answer to a {@link VoiceLanguagePrepareMessage}. */
+export interface VoiceLanguagePrepareResultMessage {
+  type: "voice_language_prepare_result";
+  sessionId: string;
+  requestId: string;
+  ok: boolean;
+  ready: boolean;
+  reason: string;
+  language?: string;
+}
+
+/** Ask the runner to replay the caller's last utterance through the current STT. */
+export interface VoiceReplayLastMessage {
+  type: "voice_replay_last";
+  sessionId: string;
+  requestId: string;
+}
+
+/** Runner answer to a {@link VoiceReplayLastMessage}. */
+export interface VoiceReplayLastResultMessage {
+  type: "voice_replay_last_result";
+  sessionId: string;
+  requestId: string;
+  ok: boolean;
+  reason: string;
+}
+
+/** Result returned by {@link prepareVoiceLanguage}. */
+export type VoiceLanguagePrepareResult = {
+  ok: boolean;
+  ready: boolean;
+  reason: string;
+  language?: string;
+};
+
+/** Result returned by {@link replayLastUtterance}. */
+export type VoiceReplayResult = { ok: boolean; reason: string };
+
+/** How the project wants the wait message played during a language switch. */
+export type VoiceLanguageWaitMessageMode =
+  "end_of_utterance" | "immediate" | "off";
+
+/** Language-switch settings the runner sends with `session_start`. */
+export interface VoiceLanguageSwitchSettings {
+  /** Runner values: `end_of_utterance`, `immediate`, `off`. */
+  waitMessageMode: VoiceLanguageWaitMessageMode | (string & {});
+  /** Skip the wait message when the new language is already ready. */
+  waitMessageSkipWhenReady: boolean;
+  /** Wait message per ISO 639-1 code, spoken in the language being left. */
+  waitMessages: Record<string, string>;
+  /** Minimum time from detection before a ready message is worth playing. */
+  readyMessageMinMs: number;
+  /** Ready message per ISO 639-1 code, spoken in the new voice. */
+  readyMessages: Record<string, string>;
 }
 
 /** Result returned by {@link setVoiceLanguage}. */

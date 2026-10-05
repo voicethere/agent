@@ -31,7 +31,12 @@ import type {
   SttControlResult,
   VoiceControlScope,
   VoiceLanguageControlAckMessage,
+  VoiceLanguagePrepareResult,
+  VoiceLanguagePrepareResultMessage,
   VoiceLanguageResult,
+  VoiceLanguageSwitchSettings,
+  VoiceReplayLastResultMessage,
+  VoiceReplayResult,
   VoiceVendorSelection,
   WebhookMessage,
 } from "./protocol.js";
@@ -65,6 +70,11 @@ export interface SessionContext {
 export interface SpeechContext {
   sessionId: string;
   text: string;
+  /**
+   * `true` for a final the runner replayed through the new STT after a language
+   * switch (see {@link replayLastUtterance}). Absent on older runners.
+   */
+  replay?: boolean;
 }
 
 /** Spoken-language identification result (`speech.type` is `user_language`). */
@@ -251,6 +261,27 @@ function isVoiceLanguageControlAckMessage(
   );
 }
 
+function isVoiceLanguagePrepareResultMessage(
+  value: unknown,
+): value is VoiceLanguagePrepareResultMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return (
+    msg.type === "voice_language_prepare_result" &&
+    typeof msg.requestId === "string"
+  );
+}
+
+function isVoiceReplayLastResultMessage(
+  value: unknown,
+): value is VoiceReplayLastResultMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return (
+    msg.type === "voice_replay_last_result" && typeof msg.requestId === "string"
+  );
+}
+
 function isWebhookMessage(value: unknown): value is WebhookMessage {
   if (!value || typeof value !== "object") return false;
   const msg = value as {
@@ -317,6 +348,8 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "mix_control_ack" ||
     msg.type === "stt_control_ack" ||
     msg.type === "voice_language_control_ack" ||
+    msg.type === "voice_language_prepare_result" ||
+    msg.type === "voice_replay_last_result" ||
     msg.type === "webhook"
   );
 }
@@ -334,6 +367,8 @@ type SessionScopedParentMessage = Exclude<
   | MixControlAckMessage
   | SttControlAckMessage
   | VoiceLanguageControlAckMessage
+  | VoiceLanguagePrepareResultMessage
+  | VoiceReplayLastResultMessage
 >;
 
 function isSessionScopedParentMessage(
@@ -445,6 +480,31 @@ type PendingVoiceLanguageAck = {
 };
 
 const pendingVoiceLanguageAcks = new Map<string, PendingVoiceLanguageAck>();
+
+/** Older runners never answer prepare / replay, so these stay short. */
+const VOICE_LANGUAGE_PREPARE_TIMEOUT_MS = 50_000;
+const VOICE_REPLAY_TIMEOUT_MS = 10_000;
+
+const pendingVoiceLanguagePrepares = new Map<
+  string,
+  {
+    resolve: (result: VoiceLanguagePrepareResult) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
+const pendingVoiceReplays = new Map<
+  string,
+  {
+    resolve: (result: VoiceReplayResult) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
+
+/** Cached from `session_start.voiceLanguageSwitch` until `session_end`. */
+const voiceLanguageSwitchSettingsBySessionId = new Map<
+  string,
+  VoiceLanguageSwitchSettings
+>();
 
 function handleRecordingControlAck(message: RecordingControlAckMessage): void {
   const pending = pendingRecordingAcks.get(message.requestId);
@@ -630,11 +690,46 @@ function handleVoiceLanguageControlAck(
   });
 }
 
+function handleVoiceLanguagePrepareResult(
+  message: VoiceLanguagePrepareResultMessage,
+): void {
+  const pending = pendingVoiceLanguagePrepares.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingVoiceLanguagePrepares.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    ready: message.ready,
+    reason: message.reason,
+    ...(message.language ? { language: message.language } : {}),
+  });
+}
+
+function handleVoiceReplayLastResult(
+  message: VoiceReplayLastResultMessage,
+): void {
+  const pending = pendingVoiceReplays.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingVoiceReplays.delete(message.requestId);
+  pending.resolve({ ok: message.ok, reason: message.reason });
+}
+
 function clearPendingVoiceLanguageAcks(reason: string): void {
   for (const [requestId, pending] of pendingVoiceLanguageAcks) {
     clearTimeout(pending.timer);
     pendingVoiceLanguageAcks.delete(requestId);
     pending.resolve({ ok: false, reason, requestId });
+  }
+  for (const [requestId, pending] of pendingVoiceLanguagePrepares) {
+    clearTimeout(pending.timer);
+    pendingVoiceLanguagePrepares.delete(requestId);
+    pending.resolve({ ok: false, ready: false, reason });
+  }
+  for (const [requestId, pending] of pendingVoiceReplays) {
+    clearTimeout(pending.timer);
+    pendingVoiceReplays.delete(requestId);
+    pending.resolve({ ok: false, reason });
   }
 }
 
@@ -791,7 +886,9 @@ function sendParentMessage(message: unknown): void {
   if (
     msgType === "mix_control" ||
     msgType === "stt_control" ||
-    msgType === "voice_language_control"
+    msgType === "voice_language_control" ||
+    msgType === "voice_language_prepare" ||
+    msgType === "voice_replay_last"
   ) {
     process.send?.(message as never);
     return;
@@ -946,6 +1043,14 @@ async function handleParentMessage(
         message.sessionId,
         message.ttsPoseAvailable ?? false,
       );
+      if (message.voiceLanguageSwitch) {
+        voiceLanguageSwitchSettingsBySessionId.set(
+          message.sessionId,
+          message.voiceLanguageSwitch,
+        );
+      } else {
+        voiceLanguageSwitchSettingsBySessionId.delete(message.sessionId);
+      }
       const sessionStartInitDelayMs = resolveSessionStartInitDelayMs();
       if (sessionStartInitDelayMs > 0) {
         await new Promise((resolve) =>
@@ -981,6 +1086,9 @@ async function handleParentMessage(
         await handlers.onUserSpeechFinal?.({
           sessionId: message.sessionId,
           text: message.event.text.trim(),
+          ...((message.event as { replay?: unknown }).replay === true
+            ? { replay: true }
+            : {}),
         });
       }
       if ((message.event.type as string) === "user_language") {
@@ -1033,6 +1141,7 @@ async function handleParentMessage(
       conversationHistoryAvailableBySessionId.delete(message.sessionId);
       mixAvailableBySessionId.delete(message.sessionId);
       voiceLanguageSwitchAvailableBySessionId.delete(message.sessionId);
+      voiceLanguageSwitchSettingsBySessionId.delete(message.sessionId);
       lastVoiceLanguageBySessionId.delete(message.sessionId);
       ttsPoseAvailableBySessionId.delete(message.sessionId);
       await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
@@ -1096,6 +1205,14 @@ export function defineAgent(handlers: AgentHandlers): void {
     }
     if (isVoiceLanguageControlAckMessage(message)) {
       handleVoiceLanguageControlAck(message);
+      return;
+    }
+    if (isVoiceLanguagePrepareResultMessage(message)) {
+      handleVoiceLanguagePrepareResult(message);
+      return;
+    }
+    if (isVoiceReplayLastResultMessage(message)) {
+      handleVoiceReplayLastResult(message);
       return;
     }
     if (isWebhookMessage(message)) {
@@ -1301,6 +1418,7 @@ export function resetAgentIpcStateForTests(): void {
   conversationHistoryAvailableBySessionId.clear();
   mixAvailableBySessionId.clear();
   voiceLanguageSwitchAvailableBySessionId.clear();
+  voiceLanguageSwitchSettingsBySessionId.clear();
   lastVoiceLanguageBySessionId.clear();
   ttsPoseAvailableBySessionId.clear();
   inboundQueueAuthority = null;
@@ -1772,6 +1890,101 @@ export function setVoiceLanguage(
       ...(ttsVendor ? { ttsVendor } : {}),
     });
   });
+}
+
+/**
+ * Ask the runner to warm up the STT and TTS pools for a switch without
+ * changing anything. Takes the same options as {@link setVoiceLanguage} and
+ * resolves when the pools are ready, not ready yet, or the runner failed.
+ * Older runners never answer, so this resolves `{ ok: false, ready: false,
+ * reason: "timeout" }` after 50 seconds.
+ */
+export function prepareVoiceLanguage(
+  sessionId: string,
+  options: SetVoiceLanguageOptions,
+): Promise<VoiceLanguagePrepareResult> {
+  const scope = options.scope;
+  if (scope && scope !== "stt" && scope !== "tts" && scope !== "both") {
+    return Promise.resolve({
+      ok: false,
+      ready: false,
+      reason: "invalid_scope",
+    });
+  }
+  const language = options.language?.trim() ?? "";
+  const sttVendor = cleanVendor(options.sttVendor);
+  const ttsVendor = cleanVendor(options.ttsVendor);
+  if (!(
+    language ||
+    options.voice?.trim() ||
+    options.stt?.trim() ||
+    sttVendor ||
+    ttsVendor
+  )) {
+    return Promise.resolve({
+      ok: false,
+      ready: false,
+      reason: "nothing_to_apply",
+    });
+  }
+  if (!isVoicethereAgentChild()) {
+    return Promise.resolve({ ok: true, ready: true, reason: "local_mock" });
+  }
+  const requestId = randomUUID();
+  return new Promise<VoiceLanguagePrepareResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingVoiceLanguagePrepares.delete(requestId);
+      resolve({ ok: false, ready: false, reason: "timeout" });
+    }, VOICE_LANGUAGE_PREPARE_TIMEOUT_MS);
+    pendingVoiceLanguagePrepares.set(requestId, { resolve, timer });
+    sendParentMessage({
+      type: "voice_language_prepare",
+      sessionId,
+      requestId,
+      options: {
+        ...(language ? { language } : {}),
+        ...(scope ? { scope } : {}),
+        ...(options.voice?.trim() ? { voice: options.voice.trim() } : {}),
+        ...(options.stt?.trim() ? { stt: options.stt.trim() } : {}),
+        ...(sttVendor ? { sttVendor } : {}),
+        ...(ttsVendor ? { ttsVendor } : {}),
+      },
+    });
+  });
+}
+
+/**
+ * Ask the runner to run the caller's last utterance through the current STT
+ * again, typically right after {@link setVoiceLanguage} changed the listening
+ * language. The replayed final arrives as a normal `onUserSpeechFinal` with
+ * `replay: true`. Older runners never answer, so this resolves
+ * `{ ok: false, reason: "timeout" }` after 10 seconds.
+ */
+export function replayLastUtterance(
+  sessionId: string,
+): Promise<VoiceReplayResult> {
+  if (!isVoicethereAgentChild()) {
+    return Promise.resolve({ ok: true, reason: "local_mock" });
+  }
+  const requestId = randomUUID();
+  return new Promise<VoiceReplayResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingVoiceReplays.delete(requestId);
+      resolve({ ok: false, reason: "timeout" });
+    }, VOICE_REPLAY_TIMEOUT_MS);
+    pendingVoiceReplays.set(requestId, { resolve, timer });
+    sendParentMessage({ type: "voice_replay_last", sessionId, requestId });
+  });
+}
+
+/**
+ * Language-switch settings of the project for this session (wait and ready
+ * messages, timing), or `undefined` on runners that do not send them.
+ */
+export function getVoiceLanguageSwitchSettings(
+  sessionId: string,
+): VoiceLanguageSwitchSettings | undefined {
+  return voiceLanguageSwitchSettingsBySessionId.get(sessionId);
 }
 
 async function sendRecordingControl(

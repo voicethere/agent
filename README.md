@@ -186,7 +186,7 @@ For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in proje
 | `SpeechEvent`, `SpeechEventType`                                                             | Re-exported **types** from `@node-webrtc-rust/sdk/voice` (includes `voice_language_changed`, …)                      |
 | `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                                |
 | `speak`                                                                                      | Request parent TTS; `speak(sessionId, text, { interruptible: false })` keeps caller speech from cutting it           |
-| `setVoiceLanguage`                                                                           | Change STT, TTS, or the vendor for one live session (`scope`, Sherpa catalog ids, cloud vendors).                    |
+| `setVoiceLanguage`                                                                           | Change STT, TTS, or the vendor for one live session (`scope`, VoiceThere catalog ids, cloud vendors).                |
 | `prepareVoiceLanguage`                                                                       | Warm the pools for a language without switching; resolves `{ ok, ready, reason }` (50 s timeout on older runners).   |
 | `replayLastUtterance`                                                                        | Run the caller's last utterance through the current STT again; the final arrives with `replay: true` (10 s timeout). |
 | `getVoiceLanguageSwitchSettings`                                                             | Project wait/ready messages and timing from `session_start`; `undefined` on older runners.                           |
@@ -234,7 +234,7 @@ Copy [`templates/voice-starter/agent.ts`](./templates/voice-starter/agent.ts) as
 
 ### Spoken-language switching
 
-Sherpa **voice** and **STT** catalog ids (for example `de`, `en-lessac`, `en-small`) are documented on VoiceThere at `/docs/spoken-language`.
+The built-in speech vendor is VoiceThere (id `local-sherpa`). Its **voice** and **STT** catalog ids (for example `de`, `en-lessac`, `en-small`) are documented on VoiceThere at `/docs/spoken-language`.
 
 | Approach                | Who changes STT/TTS                                                   | Agent hooks                                                                                                       |
 | ----------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |

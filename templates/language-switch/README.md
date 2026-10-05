@@ -37,13 +37,13 @@ Detection and chat commands are unchanged: `/tts` and `/stt` still call `setVoic
 
 Chat commands change one vendor while the session stays connected. API keys are project secrets on the running deploy, not arguments:
 
-- `/tts sherpa de` — Sherpa TTS only
-- `/stt sherpa de` — Sherpa STT only
+- `/tts sherpa de` — VoiceThere TTS only
+- `/stt sherpa de` — VoiceThere STT only
 - `/tts elevenlabs` — ElevenLabs TTS, current STT stays
 - `/stt deepgram de` — Deepgram STT, current voice stays
 
 In manual mode, finals are echoed as `you said: …` (in the current language) after a short wait, so a language event for the same utterance can cancel the echo. The switch utterance is not spoken back as an English transcript; its replay is answered in the new language.
 
-`voice` and `stt` are Sherpa catalog ids (`de`, `en-lessac`, `en-small`), listed in the spoken-language docs. Vendor ids are `local-sherpa`, `openai`, `deepgram`, `assemblyai`, `google`, `elevenlabs`, and `cartesia`.
+`voice` and `stt` are VoiceThere catalog ids (`de`, `en-lessac`, `en-small`), listed in the spoken-language docs. Vendor ids are `local-sherpa`, `openai`, `deepgram`, `assemblyai`, `google`, `elevenlabs`, and `cartesia`.
 
 Entry: `templates/language-switch/agent.ts`.

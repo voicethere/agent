@@ -183,7 +183,7 @@ export interface SpeakMessage {
   sessionId: string;
   /** UTF-8 text passed to the parent TTS vendor. */
   text: string;
-  /** When false, the caller's speech does not interrupt this utterance (runner ≥ <next runner release>; older runners ignore it). */
+  /** When false, the caller's speech does not interrupt this utterance. Runners that predate the option ignore it and speak as usual. */
   interruptible?: boolean;
 }
 

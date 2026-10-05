@@ -12,6 +12,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 - **`replayLastUtterance(sessionId)`** — asks the runner to run the caller's last utterance through the current STT again. The replayed final reaches `onUserSpeechFinal` with `replay: true`. Resolves `reason: "timeout"` after 10 s on older runners.
 - **`getVoiceLanguageSwitchSettings(sessionId)`** — the project's wait and ready messages and timing from `session_start` (`voiceLanguageSwitch`), or `undefined` on older runners.
 
+### Changed
+
+- **`language-switch` template** — manual mode now runs the full switch flow without interrupting the caller. It warms the target pools when the language is detected, leaves the switch utterance unanswered, swaps STT and TTS after the caller stops, and has the runner replay that utterance in the new language. A wait message (current voice) plays only when the pools are not ready, a ready message (new voice) only when the switch was slow, and every step logs a `language_switch.<decision>` line. A per-language `PROFILES` map selects other vendors. Older runners without the new primitives time out and the agent apologises in the old language.
+
 ## [0.9.5] - 2026-10-05
 
 ### Changed

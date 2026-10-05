@@ -12,7 +12,7 @@ Leave the project **spoken-language auto-switch** setting off. The agent runs th
 
 When the switch took at least `readyMessageMinMs` (default 2000) and no wait message was played, the agent speaks a short ready message in the new voice (`Okay, machen wir auf Deutsch weiter.`) before the replay. The project can also set `waitMessageMode`: `end_of_utterance` (default), `immediate` (wait message at detection, not interruptible) or `off`. The settings come from `getVoiceLanguageSwitchSettings`; without them (older runner) the defaults above apply.
 
-If anything fails (prepare, swap or replay), the agent speaks a short fallback in the old language and stays. A second language event during a switch is ignored.
+The swap waits until the wait message has finished playing (at most 8 seconds). If the language is detected after the caller's last final is already unanswered, that final is the switch utterance and the switch starts at once. If prepare or the swap fails, the agent speaks a short fallback in the old language and stays. If only the replay fails, the voice is already the new one, so the agent asks the caller in the new language to repeat (`REPEAT_MESSAGES`) and stays in it. A second language event during a switch is ignored.
 
 The built-in speech vendor is VoiceThere (id `local-sherpa`). Edit `PROFILES` in `agent.ts` to apply other vendors per target language, for example Deepgram for listening and ElevenLabs for speaking; the file has a commented example. Keys stay in project secrets.
 

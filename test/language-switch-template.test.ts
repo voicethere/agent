@@ -279,6 +279,7 @@ describe("language-switch template", () => {
       expect("interruptible" in t.speaks()[0]!).toBe(false);
       expect(t.vlc()).toHaveLength(0);
       await answerPrepare(t, { ok: true, ready: true, reason: "ready" });
+      speech(t.capture, { type: "agent_speaking_end" });
       await ackSwap(t);
       await answerReplay(t);
       await vi.waitFor(() =>
@@ -303,6 +304,7 @@ describe("language-switch template", () => {
       detect(t);
       await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
       expect(t.speaks()[0]!.interruptible).toBe(false);
+      speech(t.capture, { type: "agent_speaking_end" });
       await answerPrepare(t, { ok: true, ready: true, reason: "ready" });
       final(t);
       await ackSwap(t);
@@ -380,7 +382,7 @@ describe("language-switch template", () => {
       expect(t.spoken()[1]).toContain("Sorry");
     });
 
-    it("(g) replay fails: logs failed with step replay", async () => {
+    it("replay failure after the swap asks to repeat in the new language", async () => {
       const t = await startTemplate({}, SETTINGS);
       capture = t.capture;
       detect(t);
@@ -398,7 +400,16 @@ describe("language-switch template", () => {
         step: "replay",
         reason: "nothing_to_replay",
       });
+      expect(failed.fields).toMatchObject({ recovered: "asked_to_repeat" });
+      expect(t.spoken()).toEqual([
+        "Entschuldigung, können Sie das bitte wiederholen?",
+      ]);
+      expect(t.speaks()[0]!.interruptible).toBe(false);
       expect(logNames(t)).not.toContain("language_switch.committed");
+      // The language stays German: the next replay-free final echoes in German.
+      final(t, "hallo", { replay: true });
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(2));
+      expect(t.spoken()[1]).toBe("Du hast gesagt: hallo");
     });
 
     it("(g2) swap fails: apologises and does not replay", async () => {
@@ -488,6 +499,7 @@ describe("language-switch template", () => {
       final(t, "my secret phrase");
       await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
       await answerPrepare(t, { ok: true, ready: true, reason: "ready" });
+      speech(t.capture, { type: "agent_speaking_end" });
       await ackSwap(t);
       await answerReplay(t);
       await vi.waitFor(() =>
@@ -502,12 +514,77 @@ describe("language-switch template", () => {
         "language_switch.detected",
         "language_switch.wait_message",
         "language_switch.prepare",
+        "language_switch.wait_message",
         "language_switch.swap",
         "language_switch.ready_message",
         "language_switch.replay",
         "language_switch.committed",
       ]);
       expect(JSON.stringify(t.logs())).not.toContain("secret phrase");
+    });
+
+    it("setVoiceLanguage is not called until the wait message finished", async () => {
+      const t = await startTemplate({}, SETTINGS);
+      capture = t.capture;
+      detect(t);
+      await vi.waitFor(() => expect(t.prepares()).toHaveLength(1));
+      final(t);
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
+      // Prepare resolves while the wait message is still playing.
+      await answerPrepare(t, { ok: true, ready: true, reason: "ready" });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(t.vlc()).toHaveLength(0);
+      speech(t.capture, { type: "agent_speaking_end" });
+      await vi.waitFor(() => expect(t.vlc()).toHaveLength(1));
+      const types = t.capture.send.mock.calls.map((c) => c[0].type as string);
+      expect(types.indexOf("speak")).toBeLessThan(
+        types.indexOf("voice_language_control"),
+      );
+      const waited = t
+        .logs()
+        .find(
+          (l) =>
+            l.message === "language_switch.wait_message" &&
+            (l.fields as Sent).reason === "finished",
+        )!;
+      expect(waited.fields).toMatchObject({ played: true });
+      expect(typeof (waited.fields as Sent).waitedMs).toBe("number");
+    });
+
+    it("does not wait again when the immediate wait message already finished", async () => {
+      const t = await startTemplate(
+        {},
+        { ...SETTINGS, waitMessageMode: "immediate" },
+      );
+      capture = t.capture;
+      detect(t);
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
+      speech(t.capture, { type: "agent_speaking_end" });
+      await answerPrepare(t, { ok: true, ready: true, reason: "ready" });
+      final(t);
+      await ackSwap(t);
+    });
+
+    it("language detected after an unanswered final switches using that final", async () => {
+      const t = await startTemplate({}, SETTINGS);
+      capture = t.capture;
+      final(t, "guten tag");
+      await new Promise((r) => setTimeout(r, 30));
+      detect(t);
+      await vi.waitFor(() => expect(t.prepares()).toHaveLength(1));
+      const detected = t
+        .logs()
+        .find((l) => l.message === "language_switch.detected")!;
+      expect(detected.fields).toMatchObject({ afterFinal: true });
+      // No second final is needed: the switch is already running.
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
+      await answerPrepare(t, { ok: true, ready: true, reason: "ready" });
+      speech(t.capture, { type: "agent_speaking_end" });
+      await ackSwap(t);
+      await answerReplay(t);
+      await vi.waitFor(() =>
+        expect(logNames(t)).toContain("language_switch.committed"),
+      );
     });
 
     it("clears the speech waiter on session end so no replay is requested", async () => {

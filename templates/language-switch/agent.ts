@@ -144,6 +144,18 @@ const LANGUAGE_NAMES: Record<string, string> = {
   hi: "Hindi",
 };
 
+/** Spoken in the new voice when the replay fails after the swap. */
+export const REPEAT_MESSAGES: Record<string, string> = {
+  en: "Sorry, could you say that again?",
+  de: "Entschuldigung, können Sie das bitte wiederholen?",
+  es: "Perdón, ¿puede repetirlo?",
+  fr: "Pardon, pouvez-vous répéter ?",
+  it: "Scusi, può ripetere?",
+  pt: "Desculpe, pode repetir?",
+  nl: "Sorry, kunt u dat herhalen?",
+  pl: "Przepraszam, czy może Pan/Pani powtórzyć?",
+};
+
 /** Used when the project settings carry no ready-message timing. */
 export const DEFAULT_READY_MESSAGE_MIN_MS = 2000;
 
@@ -217,6 +229,8 @@ type SwitchInFlight = {
   /** Set when the prepare call settled; undefined while the pools are warming. */
   prepareResult: VoiceLanguagePrepareResult | undefined;
   waitMessagePlayed: boolean;
+  /** Set once the wait message finished (`agent_speaking_end`). */
+  waitSpeechEnded: boolean;
   /** `awaiting_utterance` until the caller's next final starts the swap. */
   phase: "awaiting_utterance" | "running";
 };
@@ -225,6 +239,8 @@ type SessionLanguage = {
   language: string;
   runnerAutoSwitch: boolean;
   echoTimer: ReturnType<typeof setTimeout> | undefined;
+  /** When the final behind `echoTimer` arrived (an unanswered final). */
+  pendingFinalAtMs: number | undefined;
   active: SwitchInFlight | undefined;
   speechWaiter:
     { resolve: () => void; timer: ReturnType<typeof setTimeout> } | undefined;
@@ -244,6 +260,7 @@ function stateFor(
     language: "en",
     runnerAutoSwitch: env ? isRunnerLidAutoSwitchEnabled(env) : false,
     echoTimer: undefined,
+    pendingFinalAtMs: undefined,
     active: undefined,
     speechWaiter: undefined,
     waitOverrides: parseMessageOverrides(env?.[WAIT_MESSAGES_ENV]),
@@ -335,6 +352,29 @@ function failSwitch(
   );
 }
 
+/** Replay failed after the swap: stay in the new language and ask to repeat. */
+function failReplay(
+  sessionId: string,
+  sw: SwitchInFlight,
+  reason: string,
+): void {
+  agentLog(
+    "warn",
+    "language_switch.failed",
+    {
+      from: sw.from,
+      to: sw.to,
+      step: "replay",
+      reason,
+      recovered: "asked_to_repeat",
+    },
+    sessionId,
+  );
+  speak(sessionId, REPEAT_MESSAGES[sw.to] ?? REPEAT_MESSAGES.en!, {
+    interruptible: false,
+  });
+}
+
 /**
  * The caller finished the switch utterance. Swap the voices (waiting for the
  * pools if needed), then have the runner replay the utterance in the new
@@ -389,6 +429,25 @@ async function runSwitch(
       prepared.ok ? "not_ready" : prepared.reason,
     );
     return;
+  }
+
+  // The runner swaps the voice without draining it, so let the wait message
+  // finish first.
+  if (sw.waitMessagePlayed) {
+    const waitStart = Date.now();
+    if (!sw.waitSpeechEnded) await waitForSpeechEnd(state);
+    if (!alive()) return;
+    agentLog(
+      "info",
+      "language_switch.wait_message",
+      {
+        played: true,
+        reason: "finished",
+        language: sw.from,
+        waitedMs: Date.now() - waitStart,
+      },
+      sessionId,
+    );
   }
 
   const swapped = await setVoiceLanguage(sessionId, sw.profile);
@@ -450,7 +509,7 @@ async function runSwitch(
     sessionId,
   );
   if (!replay.ok) {
-    failSwitch(sessionId, state, sw, "replay", replay.reason);
+    failReplay(sessionId, sw, replay.reason);
     return;
   }
   agentLog(
@@ -459,6 +518,29 @@ async function runSwitch(
     { from: sw.from, to: sw.to, totalMs: Date.now() - sw.detectedAtMs },
     sessionId,
   );
+}
+
+/** Run the switch without blocking the inbound handler. */
+function startRun(
+  sessionId: string,
+  state: SessionLanguage,
+  sw: SwitchInFlight,
+  finalAtMs: number,
+): void {
+  void runSwitch(sessionId, state, sw, finalAtMs).catch((error: unknown) => {
+    if (state.active === sw) state.active = undefined;
+    agentLog(
+      "warn",
+      "language_switch.failed",
+      {
+        from: sw.from,
+        to: sw.to,
+        step: "unexpected",
+        reason: String(error),
+      },
+      sessionId,
+    );
+  });
 }
 
 defineAgent({
@@ -502,9 +584,13 @@ defineAgent({
     // A switch is already in flight.
     if (state.active) return;
 
+    const unansweredFinalAtMs = state.echoTimer
+      ? state.pendingFinalAtMs
+      : undefined;
     if (state.echoTimer) {
       clearTimeout(state.echoTimer);
       state.echoTimer = undefined;
+      state.pendingFinalAtMs = undefined;
     }
 
     // Warm the target pools now, while the caller is still talking. Nothing is
@@ -520,6 +606,7 @@ defineAgent({
       prepare: undefined as unknown as Promise<VoiceLanguagePrepareResult>,
       prepareResult: undefined,
       waitMessagePlayed: false,
+      waitSpeechEnded: false,
       phase: "awaiting_utterance",
     };
     sw.prepare = prepareVoiceLanguage(sessionId, profile).then((result) => {
@@ -542,7 +629,11 @@ defineAgent({
     agentLog(
       "info",
       "language_switch.detected",
-      { from, to: language },
+      {
+        from,
+        to: language,
+        ...(unansweredFinalAtMs !== undefined ? { afterFinal: true } : {}),
+      },
       sessionId,
     );
 
@@ -560,11 +651,21 @@ defineAgent({
         sessionId,
       );
     }
+
+    // The caller's last final is still unanswered: it is the switch utterance.
+    if (unansweredFinalAtMs !== undefined) {
+      sw.phase = "running";
+      startRun(sessionId, state, sw, unansweredFinalAtMs);
+    }
   },
 
   onSpeechEvent({ sessionId }, event) {
     if (event.type !== "agent_speaking_end") return;
-    sessions.get(sessionId)?.speechWaiter?.resolve();
+    const state = sessions.get(sessionId);
+    if (!state) return;
+    const sw = state.active;
+    if (sw?.waitMessagePlayed) sw.waitSpeechEnded = true;
+    state.speechWaiter?.resolve();
   },
 
   async onVoiceLanguageChanged({ sessionId, language }) {
@@ -639,23 +740,7 @@ defineAgent({
       // The switch utterance: do not answer it. The runner replays it through
       // the new STT once the swap is done.
       sw.phase = "running";
-      const finalAtMs = Date.now();
-      void runSwitch(sessionId, state, sw, finalAtMs).catch(
-        (error: unknown) => {
-          if (state.active === sw) state.active = undefined;
-          agentLog(
-            "warn",
-            "language_switch.failed",
-            {
-              from: sw.from,
-              to: sw.to,
-              step: "unexpected",
-              reason: String(error),
-            },
-            sessionId,
-          );
-        },
-      );
+      startRun(sessionId, state, sw, Date.now());
       return;
     }
     if (replay) {
@@ -664,8 +749,10 @@ defineAgent({
       return;
     }
     if (state.echoTimer) clearTimeout(state.echoTimer);
+    state.pendingFinalAtMs = Date.now();
     state.echoTimer = setTimeout(() => {
       state.echoTimer = undefined;
+      state.pendingFinalAtMs = undefined;
       speak(sessionId, `${echoPrefixFor(state.language)} ${text}`.trim());
     }, ECHO_WAIT_MS);
   },

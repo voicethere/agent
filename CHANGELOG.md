@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-10-05
+
 ### Added
 
 - **`speak(sessionId, text, { interruptible: false })`** — optional third argument so the caller's speech (barge-in) does not cut that utterance. Needs a runner that supports the field; older runners ignore it and behave as before.

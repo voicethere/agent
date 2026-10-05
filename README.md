@@ -180,20 +180,23 @@ On plans that include project Redis, the runner injects **`AGENT_REDIS_URL`** in
 
 For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in project settings. The runner forwards the exact request bytes on process-wide **`onWebhook`** IPC (not session-queued). Verify HMAC on `ctx.body` before `JSON.parse` — VoiceThere does not verify signatures in the SDK. See [`templates/webhooks/agent.ts`](./templates/webhooks/agent.ts).
 
-| Export                                                                                       | Purpose                                                                                                    |
-| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `defineAgent`                                                                                | Register handlers including `onUserLanguage`, `onVoiceLanguageChanged`, `onSessionStart`, …                |
-| `SpeechEvent`, `SpeechEventType`                                                             | Re-exported **types** from `@node-webrtc-rust/sdk/voice` (includes `voice_language_changed`, …)            |
-| `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                      |
-| `speak`                                                                                      | Request parent TTS; `speak(sessionId, text, { interruptible: false })` keeps caller speech from cutting it |
-| `setVoiceLanguage`                                                                           | Change STT, TTS, or the vendor for one live session (`scope`, Sherpa catalog ids, cloud vendors).          |
-| `getVoiceLanguage`                                                                           | Last known ISO 639-1 from a successful switch ack or LID / `voice_language_changed` events.                |
-| `isVoiceLanguageSwitchAvailable`                                                             | `true` when `session_start.voiceLanguageSwitchAvailable` was set (runner supports agent IPC).              |
-| `isRunnerLidAutoSwitchEnabled`                                                               | `true` when `session_start.env.SHERPA_LID_AUTO_SWITCH` is truthy (runner auto-switch; optional in env).    |
-| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording`                    | Request parent conversation recording control                                                              |
-| `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Stop or resume conversation history storage for one session                                                |
-| `agentLog`                                                                                   | Forward structured logs to parent                                                                          |
-| `ParentToChildMessage` / `ChildToParentMessage`                                              | IPC contract shared with the VoiceThere agent runner                                                       |
+| Export                                                                                       | Purpose                                                                                                              |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `defineAgent`                                                                                | Register handlers including `onUserLanguage`, `onVoiceLanguageChanged`, `onSessionStart`, …                          |
+| `SpeechEvent`, `SpeechEventType`                                                             | Re-exported **types** from `@node-webrtc-rust/sdk/voice` (includes `voice_language_changed`, …)                      |
+| `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                                |
+| `speak`                                                                                      | Request parent TTS; `speak(sessionId, text, { interruptible: false })` keeps caller speech from cutting it           |
+| `setVoiceLanguage`                                                                           | Change STT, TTS, or the vendor for one live session (`scope`, Sherpa catalog ids, cloud vendors).                    |
+| `prepareVoiceLanguage`                                                                       | Warm the pools for a language without switching; resolves `{ ok, ready, reason }` (50 s timeout on older runners).   |
+| `replayLastUtterance`                                                                        | Run the caller's last utterance through the current STT again; the final arrives with `replay: true` (10 s timeout). |
+| `getVoiceLanguageSwitchSettings`                                                             | Project wait/ready messages and timing from `session_start`; `undefined` on older runners.                           |
+| `getVoiceLanguage`                                                                           | Last known ISO 639-1 from a successful switch ack or LID / `voice_language_changed` events.                          |
+| `isVoiceLanguageSwitchAvailable`                                                             | `true` when `session_start.voiceLanguageSwitchAvailable` was set (runner supports agent IPC).                        |
+| `isRunnerLidAutoSwitchEnabled`                                                               | `true` when `session_start.env.SHERPA_LID_AUTO_SWITCH` is truthy (runner auto-switch; optional in env).              |
+| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording`                    | Request parent conversation recording control                                                                        |
+| `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Stop or resume conversation history storage for one session                                                          |
+| `agentLog`                                                                                   | Forward structured logs to parent                                                                                    |
+| `ParentToChildMessage` / `ChildToParentMessage`                                              | IPC contract shared with the VoiceThere agent runner                                                                 |
 
 ### Runner runtime subpath (minimal shared sandbox API)
 
@@ -237,6 +240,25 @@ Sherpa **voice** and **STT** catalog ids (for example `de`, `en-lessac`, `en-sma
 | ----------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | **Manual (default)**    | Your code calls `setVoiceLanguage` per side or vendor                 | `onUserLanguage` → `setVoiceLanguage`; use `isVoiceLanguageSwitchAvailable` before relying on IPC                 |
 | **Project auto-switch** | Runner when LID detects a new language (opt-in project voice setting) | `onUserLanguage` / `onVoiceLanguageChanged` for prompts; do not double-call `setVoiceLanguage` on every detection |
+
+#### Switching without interrupting the caller
+
+Three primitives let your agent run the whole switch while the caller keeps talking. `prepareVoiceLanguage(sessionId, options)` takes the same options as `setVoiceLanguage`, warms the target pools, and resolves `{ ok, ready, reason }` without changing anything. `setVoiceLanguage` then swaps the voices. `replayLastUtterance(sessionId)` runs the caller's last utterance through the new STT, and the result reaches `onUserSpeechFinal` with `replay: true`.
+
+```ts
+onUserLanguage: async ({ sessionId, language }) => {
+  const profile = { scope: "both", language, voice: language, stt: language } as const;
+  const prepare = prepareVoiceLanguage(sessionId, profile); // start early, while the caller talks
+  // ... when the caller's utterance is final:
+  const ready = await prepare;
+  if (ready.ok && ready.ready) {
+    await setVoiceLanguage(sessionId, profile);
+    await replayLastUtterance(sessionId);
+  }
+},
+```
+
+`getVoiceLanguageSwitchSettings(sessionId)` returns the project's `waitMessageMode` (`end_of_utterance`, `immediate` or `off`), wait messages, ready messages and `readyMessageMinMs`. The speech vendor that ships with VoiceThere has the id `local-sherpa`; `profile` can name other vendors with `sttVendor` / `ttsVendor`. Older runners never answer `prepareVoiceLanguage` or `replayLastUtterance`, so both resolve with `reason: "timeout"` (50 s and 10 s) and `getVoiceLanguageSwitchSettings` returns `undefined`; fall back to your own texts and call `setVoiceLanguage` directly.
 
 See [`templates/language-switch`](./templates/language-switch/README.md) for both modes.
 

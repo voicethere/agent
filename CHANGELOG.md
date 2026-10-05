@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- **`prepareVoiceLanguage(sessionId, options)`** — warms the pools for a language switch (same options as `setVoiceLanguage`) and resolves `{ ok, ready, reason, language? }` without changing anything. Resolves `reason: "timeout"` after 50 s on runners that do not support it.
+- **`replayLastUtterance(sessionId)`** — asks the runner to run the caller's last utterance through the current STT again. The replayed final reaches `onUserSpeechFinal` with `replay: true`. Resolves `reason: "timeout"` after 10 s on older runners.
+- **`getVoiceLanguageSwitchSettings(sessionId)`** — the project's wait and ready messages and timing from `session_start` (`voiceLanguageSwitch`), or `undefined` on older runners.
+
 ## [0.9.5] - 2026-10-05
 
 ### Changed

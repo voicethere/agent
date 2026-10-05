@@ -8,8 +8,11 @@ import {
   disconnectClient,
   enableConversationHistory,
   getPlay,
+  getVoiceLanguageSwitchSettings,
   pauseRecording,
   play,
+  prepareVoiceLanguage,
+  replayLastUtterance,
   resetAgentIpcStateForTests,
   resumeRecording,
   sendBinaryToClient,
@@ -2237,5 +2240,177 @@ describe("generation-aware outbound guards", () => {
           (call[0] as { message?: string }).message === "stale-log",
       ),
     ).toBe(false);
+  });
+});
+
+describe("voice switch primitives", () => {
+  let capture: ReturnType<typeof installProcessMessageCapture>;
+  const childBundleEnv = process.env.__CHILD_BUNDLE_PATH__;
+
+  beforeEach(() => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    capture = installProcessMessageCapture();
+    defineAgent({});
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    capture.restore();
+    resetAgentIpcStateForTests();
+    if (childBundleEnv === undefined) delete process.env.__CHILD_BUNDLE_PATH__;
+    else process.env.__CHILD_BUNDLE_PATH__ = childBundleEnv;
+  });
+
+  const sentOf = (type: string) =>
+    capture.send.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .filter((m) => m.type === type);
+
+  it("prepareVoiceLanguage sends voice_language_prepare with the options and resolves on the result", async () => {
+    const promise = prepareVoiceLanguage("s1", {
+      scope: "both",
+      language: "de",
+      voice: "de",
+      stt: "de",
+    });
+    await vi.waitFor(() =>
+      expect(sentOf("voice_language_prepare")).toHaveLength(1),
+    );
+    const sent = sentOf("voice_language_prepare")[0]!;
+    expect(sent).toEqual({
+      type: "voice_language_prepare",
+      sessionId: "s1",
+      requestId: expect.any(String),
+      options: { language: "de", scope: "both", voice: "de", stt: "de" },
+    });
+    capture.emit({
+      type: "voice_language_prepare_result",
+      sessionId: "s1",
+      requestId: sent.requestId,
+      ok: true,
+      ready: true,
+      reason: "ready",
+      language: "de",
+    });
+    await expect(promise).resolves.toEqual({
+      ok: true,
+      ready: true,
+      reason: "ready",
+      language: "de",
+    });
+  });
+
+  it("prepareVoiceLanguage times out after 50 s when the runner never answers", async () => {
+    vi.useFakeTimers();
+    const promise = prepareVoiceLanguage("s1", { language: "de" });
+    let settled = false;
+    void promise.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(49_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(promise).resolves.toEqual({
+      ok: false,
+      ready: false,
+      reason: "timeout",
+    });
+  });
+
+  it("prepareVoiceLanguage rejects an invalid scope and empty options without sending", async () => {
+    await expect(
+      prepareVoiceLanguage("s1", { language: "de", scope: "x" as never }),
+    ).resolves.toMatchObject({ ok: false, reason: "invalid_scope" });
+    await expect(prepareVoiceLanguage("s1", {})).resolves.toMatchObject({
+      ok: false,
+      reason: "nothing_to_apply",
+    });
+    expect(sentOf("voice_language_prepare")).toHaveLength(0);
+  });
+
+  it("replayLastUtterance sends voice_replay_last and resolves on the result", async () => {
+    const promise = replayLastUtterance("s1");
+    await vi.waitFor(() => expect(sentOf("voice_replay_last")).toHaveLength(1));
+    const sent = sentOf("voice_replay_last")[0]!;
+    expect(sent).toEqual({
+      type: "voice_replay_last",
+      sessionId: "s1",
+      requestId: expect.any(String),
+    });
+    capture.emit({
+      type: "voice_replay_last_result",
+      sessionId: "s1",
+      requestId: sent.requestId,
+      ok: true,
+      reason: "replayed",
+    });
+    await expect(promise).resolves.toEqual({ ok: true, reason: "replayed" });
+  });
+
+  it("replayLastUtterance times out after 10 s", async () => {
+    vi.useFakeTimers();
+    const promise = replayLastUtterance("s1");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(promise).resolves.toEqual({ ok: false, reason: "timeout" });
+  });
+
+  it("resolves pending prepare and replay calls on reset", async () => {
+    const prepare = prepareVoiceLanguage("s1", { language: "de" });
+    const replay = replayLastUtterance("s1");
+    resetAgentIpcStateForTests();
+    await expect(prepare).resolves.toEqual({
+      ok: false,
+      ready: false,
+      reason: "reset",
+    });
+    await expect(replay).resolves.toEqual({ ok: false, reason: "reset" });
+  });
+
+  it("getVoiceLanguageSwitchSettings reads session_start and clears on session_end; absent means undefined", async () => {
+    const settings = {
+      waitMessageMode: "immediate",
+      waitMessageSkipWhenReady: true,
+      waitMessages: { en: "Wait" },
+      readyMessageMinMs: 1500,
+      readyMessages: { de: "Weiter" },
+    };
+    capture.emit({
+      type: "session_start",
+      sessionId: "s1",
+      env: {},
+      voiceLanguageSwitch: settings,
+    });
+    capture.emit({ type: "session_start", sessionId: "s2", env: {} });
+    await vi.waitFor(() => expect(sentOf("session_start_ack")).toHaveLength(2));
+    expect(getVoiceLanguageSwitchSettings("s1")).toEqual(settings);
+    expect(getVoiceLanguageSwitchSettings("s2")).toBeUndefined();
+    capture.emit({ type: "session_end", sessionId: "s1" });
+    await vi.waitFor(() =>
+      expect(getVoiceLanguageSwitchSettings("s1")).toBeUndefined(),
+    );
+  });
+
+  it("passes replay: true from the speech event to onUserSpeechFinal", async () => {
+    resetAgentIpcStateForTests();
+    const finals: Array<{ text: string; replay?: boolean }> = [];
+    defineAgent({
+      onUserSpeechFinal: (ctx) => {
+        finals.push({ text: ctx.text, replay: ctx.replay });
+      },
+    });
+    capture.emit({ type: "session_start", sessionId: "s1", env: {} });
+    capture.emit({
+      type: "speech_event",
+      sessionId: "s1",
+      event: { type: "user_speech_final", text: "hallo", replay: true },
+    });
+    capture.emit({
+      type: "speech_event",
+      sessionId: "s1",
+      event: { type: "user_speech_final", text: "hi" },
+    });
+    await vi.waitFor(() => expect(finals).toHaveLength(2));
+    expect(finals[0]).toEqual({ text: "hallo", replay: true });
+    expect(finals[1]).toEqual({ text: "hi", replay: undefined });
   });
 });

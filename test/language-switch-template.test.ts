@@ -150,21 +150,11 @@ describe("language-switch template", () => {
         "One moment please, I'm switching to your language.",
       ]);
       const first = t.vlc()[0] as { requestId: string; scope: string };
-      expect(first.scope).toBe("tts");
+      expect(first.scope).toBe("both");
       t.capture.emit({
         type: "voice_language_control_ack",
         sessionId: SESSION,
         requestId: first.requestId,
-        ok: true,
-        language: "de",
-      });
-      await vi.waitFor(() => expect(t.vlc()).toHaveLength(2));
-      const second = t.vlc()[1] as { requestId: string; scope: string };
-      expect(second.scope).toBe("stt");
-      t.capture.emit({
-        type: "voice_language_control_ack",
-        sessionId: SESSION,
-        requestId: second.requestId,
         ok: true,
         language: "de",
       });
@@ -184,6 +174,20 @@ describe("language-switch template", () => {
       expect(t.spoken()).toHaveLength(2);
     });
 
+    it("manual switch sends one scope both request", async () => {
+      const t = await startTemplate({});
+      capture = t.capture;
+      await detectAndFinishWait(t, "de");
+      await vi.waitFor(() => expect(t.vlc()).toHaveLength(1));
+      const req = t.vlc()[0] as Record<string, unknown>;
+      expect(req.scope).toBe("both");
+      expect(req.language).toBe("de");
+      expect(req.voice).toBe("de");
+      expect(req.stt).toBe("de");
+      await new Promise((r) => setTimeout(r, 50));
+      expect(t.vlc()).toHaveLength(1);
+    });
+
     it("waits in the language being left on the second switch", async () => {
       const t = await startTemplate({});
       capture = t.capture;
@@ -200,7 +204,6 @@ describe("language-switch template", () => {
       };
       await detectAndFinishWait(t, "de");
       await ack(1, "de");
-      await ack(2, "de");
       await vi.waitFor(() => expect(t.spoken()).toHaveLength(2));
       await detectAndFinishWait(t, "fr");
       expect(t.spoken()[2]).toBe(
@@ -227,15 +230,6 @@ describe("language-switch template", () => {
         type: "voice_language_control_ack",
         sessionId: SESSION,
         requestId: first.requestId,
-        ok: false,
-        reason: "timeout",
-      });
-      await vi.waitFor(() => expect(t.vlc()).toHaveLength(2));
-      const second = t.vlc()[1] as { requestId: string };
-      t.capture.emit({
-        type: "voice_language_control_ack",
-        sessionId: SESSION,
-        requestId: second.requestId,
         ok: false,
         reason: "timeout",
       });

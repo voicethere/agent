@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Changed
+
+- **`language-switch` template** — switches voice and STT in one `setVoiceLanguage` call (`scope: "both"`) so both pools start together instead of one after the other.
+
 ## [0.9.4] - 2026-10-05
 
 ### Added

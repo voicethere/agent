@@ -225,21 +225,17 @@ async function runSwitch(
   language: string,
   previous: string,
 ): Promise<void> {
-  const tts = await setVoiceLanguage(sessionId, {
-    scope: "tts",
+  // One call for both sides so the TTS and STT pools resolve in parallel.
+  const result = await setVoiceLanguage(sessionId, {
+    scope: "both",
     language,
     voice: language,
-  });
-  logSwitch(sessionId, "tts", tts);
-
-  const stt = await setVoiceLanguage(sessionId, {
-    scope: "stt",
-    language,
     stt: language,
   });
-  logSwitch(sessionId, "stt", stt);
+  logSwitch(sessionId, "tts", result);
+  logSwitch(sessionId, "stt", result);
 
-  if (!tts.ok) {
+  if (!result.ok) {
     state.suppressNextFinal = false;
     // Switch failed (for example a timeout): the voice is unchanged, so
     // apologise in the old language and stay.

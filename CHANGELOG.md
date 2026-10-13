@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Changed
+
+- **`language-switch` template** — manual mode now names the target language in the holding message it speaks in the current voice when the pools are not ready ("One moment, switching to German."; texts in `HOLDING_MESSAGES`, `{language}` is replaced in project and env texts too). If the pools did not start within 20 seconds, the agent repeats the holding message and prepares once more. If that also times out, or `setVoiceLanguage` answers `language_unavailable`, it says in the current voice that the language isn't available (`UNAVAILABLE_MESSAGES`, override with `LANGUAGE_SWITCH_UNAVAILABLE_MESSAGES_JSON`) and the call stays in the old language, about 40 seconds in total. `WAIT_MESSAGES` remains as another name for `HOLDING_MESSAGES`. New log lines: `language_switch.retry` and `language_switch.unavailable`.
+
 ## [0.9.6] - 2026-10-05
 
 ### Added

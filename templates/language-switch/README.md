@@ -7,23 +7,26 @@ Spoken-language detection tells the agent which ISO 639-1 code it heard. It does
 Leave the project **spoken-language auto-switch** setting off. The agent runs the whole switch with three primitives, and the caller is not interrupted:
 
 1. `onUserLanguage` fires while the caller is still talking. The agent calls `prepareVoiceLanguage` so the target voice and STT pools warm up, and waits.
-2. The caller's next final is the switch utterance. The agent does not answer it. If the pools are ready it calls `setVoiceLanguage` at once. If not, it first speaks a wait message in the current voice (`One moment please, I'm switching to your language.`), awaits the pools, then swaps.
+2. The caller's next final is the switch utterance. The agent does not answer it. If the pools are ready it calls `setVoiceLanguage` at once. If not, it first speaks a holding message in the current voice that names the target language (`One moment, switching to German.`), awaits the pools, then swaps.
 3. `replayLastUtterance` makes the runner run that utterance through the new STT. The replayed final arrives with `replay: true` and is answered in the new language.
+
+One `prepareVoiceLanguage` attempt waits 20 seconds. If the pools did not start (`reason: "timeout"`), the agent logs `language_switch.retry`, speaks the holding message again once the first one has finished, and prepares once more at once. If the second attempt also times out, or `setVoiceLanguage` answers `language_unavailable`, the agent says in the current voice that the language isn't available (`Sorry, that language isn't available right now. Let's continue in English.`) and the call stays in the old language. That takes about 40 seconds in total. The runner makes `setVoiceLanguage` wait up to 2 x 20 seconds as well, so a pool that never starts ends in the same notice.
 
 When the switch took at least `readyMessageMinMs` (default 2000) and no wait message was played, the agent speaks a short ready message in the new voice (`Okay, machen wir auf Deutsch weiter.`) before the replay. The project can also set `waitMessageMode`: `end_of_utterance` (default), `immediate` (wait message at detection, not interruptible) or `off`. The settings come from `getVoiceLanguageSwitchSettings`; without them (older runner) the defaults above apply.
 
-The swap waits until the wait message has finished playing (at most 8 seconds). If the language is detected after the caller's last final is already unanswered, that final is the switch utterance and the switch starts at once. If prepare or the swap fails, the agent speaks a short fallback in the old language and stays. If only the replay fails, the voice is already the new one, so the agent asks the caller in the new language to repeat (`REPEAT_MESSAGES`) and stays in it. A second language event during a switch is ignored.
+The swap waits until the holding message has finished playing (at most 8 seconds). If the language is detected after the caller's last final is already unanswered, that final is the switch utterance and the switch starts at once. If prepare or the swap fails for any other reason, the agent speaks a short fallback in the old language and stays. If only the replay fails, the voice is already the new one, so the agent asks the caller in the new language to repeat (`REPEAT_MESSAGES`) and stays in it. A second language event during a switch is ignored.
 
 The built-in speech vendor is VoiceThere (id `local-sherpa`). Edit `PROFILES` in `agent.ts` to apply other vendors per target language, for example Deepgram for listening and ElevenLabs for speaking; the file has a commented example. Keys stay in project secrets.
 
-Texts, in order of precedence: the env override, the project settings (`waitMessages`, `readyMessages`), then the maps in `agent.ts` (`WAIT_MESSAGES`, `READY_MESSAGES`, `FAILED_MESSAGES`; en, de, es, fr, it, pt, nl, pl, ru). Override per language with a JSON object in the session env, keyed by ISO 639-1 code:
+Texts, in order of precedence: the env override, the project settings (`waitMessages`, `readyMessages`), then the maps in `agent.ts` (`HOLDING_MESSAGES`, `READY_MESSAGES`, `FAILED_MESSAGES`, `UNAVAILABLE_MESSAGES`; en, de, es, fr, it, pt, nl, pl, ru, except the ready and unavailable maps, which have no ru). `WAIT_MESSAGES` is kept as another name for `HOLDING_MESSAGES`. In a holding message, `{language}` is replaced by the target language's name, written in the language being left (`Intl.DisplayNames`), so project texts and the env override can use it too. Override per language with a JSON object in the session env, keyed by ISO 639-1 code:
 
-- `LANGUAGE_SWITCH_WAIT_MESSAGES_JSON` — wait message, for example `{"en":"Hold on, switching languages."}`
+- `LANGUAGE_SWITCH_WAIT_MESSAGES_JSON` — holding message, for example `{"en":"Hold on, switching to {language}."}`
 - `LANGUAGE_SWITCH_FAILED_MESSAGES_JSON` — fallback after a failed switch
+- `LANGUAGE_SWITCH_UNAVAILABLE_MESSAGES_JSON` — notice when the language never became available
 
 Invalid JSON or non-string values are ignored. A language without a text falls back to English.
 
-Every step logs a `language_switch.<decision>` line with structured fields and never the caller's words: `session_start`, `detected`, `prepare`, `wait_message`, `swap`, `ready_message`, `replay`, `committed`, `failed`.
+Every step logs a `language_switch.<decision>` line with structured fields and never the caller's words: `session_start`, `detected`, `prepare`, `wait_message`, `retry`, `unavailable`, `swap`, `ready_message`, `replay`, `committed`, `failed`.
 
 A VoiceThere language with no STT id (`it`, `pt`, `nl`, `pl`, `hi`) fails the STT call and still switches TTS.
 

@@ -88,7 +88,12 @@ async function answerPrepare(
   });
 }
 
-async function ackSwap(t: T, ok = true, n = 1): Promise<void> {
+async function ackSwap(
+  t: T,
+  ok = true,
+  n = 1,
+  reason = "timeout",
+): Promise<void> {
   await vi.waitFor(() => expect(t.vlc()).toHaveLength(n));
   const req = t.vlc()[n - 1]!;
   t.capture.emit({
@@ -96,7 +101,7 @@ async function ackSwap(t: T, ok = true, n = 1): Promise<void> {
     sessionId: SESSION,
     requestId: req.requestId,
     ok,
-    ...(ok ? { language: "de" } : { reason: "timeout" }),
+    ...(ok ? { language: "de" } : { reason }),
   });
 }
 
@@ -111,6 +116,21 @@ async function answerReplay(t: T, ok = true): Promise<void> {
   });
 }
 
+const TIMEOUT = { ok: true, ready: false, reason: "timeout" } as const;
+
+/** Both prepare attempts time out; returns once the unavailable notice is spoken. */
+async function bothPreparesTimeOut(t: T): Promise<void> {
+  detect(t);
+  await vi.waitFor(() => expect(t.prepares()).toHaveLength(1));
+  final(t);
+  await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
+  speech(t.capture, { type: "agent_speaking_end" });
+  await answerPrepare(t, TIMEOUT, 1);
+  await vi.waitFor(() => expect(t.spoken()).toHaveLength(2));
+  await answerPrepare(t, TIMEOUT, 2);
+  await vi.waitFor(() => expect(t.spoken()).toHaveLength(3));
+}
+
 const logNames = (t: T): string[] => t.logs().map((l) => l.message as string);
 
 describe("language-switch message helpers", () => {
@@ -121,6 +141,31 @@ describe("language-switch message helpers", () => {
     expect(pickMessage(WAIT_MESSAGES, { de: "X" }, "de")).toBe("X");
     expect(pickMessage(WAIT_MESSAGES, {}, "xx")).toBe(WAIT_MESSAGES.en);
     expect(pickMessage(WAIT_MESSAGES, { en: "Y" }, "xx")).toBe("Y");
+  });
+
+  it("holding message names the target in the language being left", async () => {
+    const { holdingMessageFor } =
+      await import("../templates/language-switch/agent.js");
+    const state = { waitOverrides: {} };
+    expect(holdingMessageFor(state, "en", "de", undefined)).toBe(
+      "One moment, switching to German.",
+    );
+    expect(holdingMessageFor(state, "de", "fr", undefined)).toBe(
+      "Einen Moment bitte, ich wechsle auf Französisch.",
+    );
+    // Unknown code: the code itself, never an empty or broken name.
+    expect(holdingMessageFor(state, "en", "xx", undefined)).toBe(
+      "One moment, switching to xx.",
+    );
+    expect(holdingMessageFor(state, "en", "x", undefined)).toBe(
+      "One moment, switching to x.",
+    );
+  });
+
+  it("keeps WAIT_MESSAGES as an alias of HOLDING_MESSAGES", async () => {
+    const { HOLDING_MESSAGES, WAIT_MESSAGES } =
+      await import("../templates/language-switch/agent.js");
+    expect(WAIT_MESSAGES).toBe(HOLDING_MESSAGES);
   });
 
   it("parses env overrides and ignores invalid input", async () => {
@@ -272,9 +317,7 @@ describe("language-switch template", () => {
       await vi.waitFor(() => expect(t.prepares()).toHaveLength(1));
       final(t);
       await vi.waitFor(() =>
-        expect(t.spoken()).toEqual([
-          "One moment please, I'm switching to your language.",
-        ]),
+        expect(t.spoken()).toEqual(["One moment, switching to German."]),
       );
       expect("interruptible" in t.speaks()[0]!).toBe(false);
       expect(t.vlc()).toHaveLength(0);
@@ -377,9 +420,196 @@ describe("language-switch template", () => {
       await vi.waitFor(() => expect(t.prepares()).toHaveLength(1));
       final(t);
       await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
-      await answerPrepare(t, { ok: false, ready: false, reason: "timeout" });
+      await answerPrepare(t, {
+        ok: false,
+        ready: false,
+        reason: "pool_failed",
+      });
       await vi.waitFor(() => expect(t.spoken()).toHaveLength(2));
       expect(t.spoken()[1]).toContain("Sorry");
+      expect(t.spoken()[1]).toContain("couldn't switch");
+    });
+
+    it("holding message names the target in the current language", async () => {
+      const t = await startTemplate({}, SETTINGS);
+      capture = t.capture;
+      detect(t, "de");
+      await vi.waitFor(() => expect(t.prepares()).toHaveLength(1));
+      final(t);
+      await vi.waitFor(() =>
+        expect(t.spoken()).toEqual(["One moment, switching to German."]),
+      );
+    });
+
+    it("first prepare times out: holding message repeats and prepare is called again; second prepare ready -> switch completes", async () => {
+      const t = await startTemplate({}, SETTINGS);
+      capture = t.capture;
+      detect(t);
+      await vi.waitFor(() => expect(t.prepares()).toHaveLength(1));
+      final(t);
+      await vi.waitFor(() =>
+        expect(t.spoken()).toEqual(["One moment, switching to German."]),
+      );
+      // The first prepare times out while the first holding message still plays.
+      await answerPrepare(t, TIMEOUT, 1);
+      // Re-prepare starts at once ...
+      await vi.waitFor(() => expect(t.prepares()).toHaveLength(2));
+      const retry = t
+        .logs()
+        .find((l) => l.message === "language_switch.retry")!;
+      expect(retry.fields).toMatchObject({
+        from: "en",
+        to: "de",
+        attempt: 2,
+        reason: "timeout",
+      });
+      // ... but the message is not repeated over the first one.
+      await new Promise((r) => setTimeout(r, 30));
+      expect(t.spoken()).toHaveLength(1);
+      speech(t.capture, { type: "agent_speaking_end" });
+      await vi.waitFor(() =>
+        expect(t.spoken()).toEqual([
+          "One moment, switching to German.",
+          "One moment, switching to German.",
+        ]),
+      );
+      expect(t.vlc()).toHaveLength(0);
+      await answerPrepare(t, { ok: true, ready: true, reason: "ready" }, 2);
+      // The swap waits for the repeated message to finish.
+      await new Promise((r) => setTimeout(r, 30));
+      expect(t.vlc()).toHaveLength(0);
+      speech(t.capture, { type: "agent_speaking_end" });
+      await ackSwap(t);
+      await answerReplay(t);
+      await vi.waitFor(() =>
+        expect(logNames(t)).toContain("language_switch.committed"),
+      );
+      expect(t.prepares()).toHaveLength(2);
+      expect(t.vlc()).toHaveLength(1);
+      expect(t.replays()).toHaveLength(1);
+      expect(t.spoken()).toHaveLength(2);
+      expect(logNames(t)).not.toContain("language_switch.unavailable");
+    });
+
+    it("both prepares time out: unavailable notice, no setVoiceLanguage, stays in English", async () => {
+      const t = await startTemplate({}, SETTINGS);
+      capture = t.capture;
+      await bothPreparesTimeOut(t);
+      expect(t.spoken()).toEqual([
+        "One moment, switching to German.",
+        "One moment, switching to German.",
+        "Sorry, that language isn't available right now. Let's continue in English.",
+      ]);
+      expect(t.prepares()).toHaveLength(2);
+      expect(t.vlc()).toHaveLength(0);
+      expect(t.replays()).toHaveLength(0);
+      const unavailable = t
+        .logs()
+        .find((l) => l.message === "language_switch.unavailable")!;
+      expect(unavailable.fields).toMatchObject({
+        from: "en",
+        to: "de",
+        attempts: 2,
+        reason: "timeout",
+      });
+      expect(logNames(t)).not.toContain("language_switch.failed");
+      // The language stays English: a replayed final is answered in English.
+      final(t, "hello", { replay: true });
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(4));
+      expect(t.spoken()[3]).toBe("you said: hello");
+    });
+
+    it("second prepare fails outright: unavailable notice", async () => {
+      const t = await startTemplate({}, SETTINGS);
+      capture = t.capture;
+      detect(t);
+      await vi.waitFor(() => expect(t.prepares()).toHaveLength(1));
+      final(t);
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
+      speech(t.capture, { type: "agent_speaking_end" });
+      await answerPrepare(t, TIMEOUT, 1);
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(2));
+      await answerPrepare(
+        t,
+        { ok: false, ready: false, reason: "pool_failed" },
+        2,
+      );
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(3));
+      expect(t.spoken()[2]).toContain("isn't available");
+      expect(t.vlc()).toHaveLength(0);
+    });
+
+    it("setVoiceLanguage returns language_unavailable: unavailable notice, not the generic failure text", async () => {
+      const t = await startTemplate({}, SETTINGS);
+      capture = t.capture;
+      detect(t);
+      await answerPrepare(t, { ok: true, ready: true, reason: "ready" });
+      final(t);
+      await ackSwap(t, false, 1, "language_unavailable");
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
+      expect(t.spoken()).toEqual([
+        "Sorry, that language isn't available right now. Let's continue in English.",
+      ]);
+      expect(t.replays()).toHaveLength(0);
+      expect(logNames(t)).toContain("language_switch.unavailable");
+      expect(logNames(t)).not.toContain("language_switch.failed");
+      const unavailable = t
+        .logs()
+        .find((l) => l.message === "language_switch.unavailable")!;
+      expect(unavailable.fields).toMatchObject({
+        from: "en",
+        to: "de",
+        reason: "language_unavailable",
+      });
+    });
+
+    it("project wait text with {language} is substituted", async () => {
+      const t = await startTemplate(
+        {},
+        {
+          ...SETTINGS,
+          waitMessages: { en: "Hold on, {language} is loading." },
+        },
+      );
+      capture = t.capture;
+      detect(t);
+      await vi.waitFor(() => expect(t.prepares()).toHaveLength(1));
+      final(t);
+      await vi.waitFor(() =>
+        expect(t.spoken()).toEqual(["Hold on, German is loading."]),
+      );
+    });
+
+    it("LANGUAGE_SWITCH_UNAVAILABLE_MESSAGES_JSON overrides the notice", async () => {
+      const t = await startTemplate(
+        {
+          LANGUAGE_SWITCH_UNAVAILABLE_MESSAGES_JSON: JSON.stringify({
+            en: "That language is not on offer.",
+          }),
+        },
+        SETTINGS,
+      );
+      capture = t.capture;
+      await bothPreparesTimeOut(t);
+      expect(t.spoken()[2]).toBe("That language is not on offer.");
+    });
+
+    it("off mode: the retry is silent and the unavailable notice is still spoken", async () => {
+      const t = await startTemplate(
+        {},
+        { ...SETTINGS, waitMessageMode: "off" },
+      );
+      capture = t.capture;
+      detect(t);
+      await vi.waitFor(() => expect(t.prepares()).toHaveLength(1));
+      final(t);
+      await vi.waitFor(() =>
+        expect(logNames(t)).toContain("language_switch.wait_message"),
+      );
+      await answerPrepare(t, TIMEOUT, 1);
+      await answerPrepare(t, TIMEOUT, 2);
+      await vi.waitFor(() => expect(t.spoken()).toHaveLength(1));
+      expect(t.spoken()[0]).toContain("isn't available");
     });
 
     it("replay failure after the swap asks to repeat in the new language", async () => {
@@ -434,9 +664,7 @@ describe("language-switch template", () => {
       await vi.waitFor(() => expect(t.prepares()).toHaveLength(1));
       final(t);
       await vi.waitFor(() =>
-        expect(t.spoken()).toEqual([
-          "One moment please, I'm switching to your language.",
-        ]),
+        expect(t.spoken()).toEqual(["One moment, switching to German."]),
       );
     });
 

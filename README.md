@@ -230,6 +230,8 @@ Forwarded from the runner voice pipeline as SDK `SpeechEvent` payloads on `speec
 | `vad_triggered`, `stt_stream_*`, `user_stt_*`                                          | Low-level pipeline hooks                                                                                                                     |
 | `error`                                                                                | Vendor or pipeline failure                                                                                                                   |
 
+`voice_language_switch_failed` carries `from`, `to`, `reason`, `error`, `fallbackLanguage` and `attempts`. When the new language's speech models do not start in time (two attempts of about 20 s), `reason` is `"language_unavailable"`, `error` holds the underlying cause (`pool_timeout` or `pool_unavailable`) and the session continues in `fallbackLanguage`. The event arrives before the caller's held speech is transcribed in the previous language. `setVoiceLanguage` resolves `{ ok: false, reason: "language_unavailable" }` in the same case.
+
 Copy [`templates/voice-starter/agent.ts`](./templates/voice-starter/agent.ts) as a starting point — exhaustive `switch` over speech event types with per-peer state stubs and `agentLog` tracing.
 
 ### Spoken-language switching

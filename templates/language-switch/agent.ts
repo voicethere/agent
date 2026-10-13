@@ -9,16 +9,26 @@
  *        (warms the target pools) and wait for the caller to finish.
  *     2. The next final is the switch utterance. The agent does not answer it.
  *        If the pools are ready it calls `setVoiceLanguage` at once; otherwise
- *        it speaks a wait message in the current voice and awaits the pools.
+ *        it speaks a holding message in the current voice that names the
+ *        target language ("One moment, switching to German.") and awaits the
+ *        pools. One `prepareVoiceLanguage` attempt waits 20 s. When it times
+ *        out the agent logs `language_switch.retry`, repeats the holding
+ *        message (after the first one finished) and prepares once more at
+ *        once. If the second attempt also times out, or `setVoiceLanguage`
+ *        answers `language_unavailable`, the agent says in the current voice
+ *        that the language isn't available and the call stays in the old
+ *        language (about 40 s in total).
  *     3. `replayLastUtterance` runs that utterance through the new STT. The
  *        replayed final (`replay: true`) is answered in the new language.
- *     A slow switch plays a ready message in the new voice; any failure speaks
- *     a short apology in the old language. Texts come from the project
- *     settings (`getVoiceLanguageSwitchSettings`), then WAIT_MESSAGES /
- *     READY_MESSAGES / FAILED_MESSAGES, and env vars
- *     LANGUAGE_SWITCH_WAIT_MESSAGES_JSON / LANGUAGE_SWITCH_FAILED_MESSAGES_JSON
- *     (JSON object, ISO 639-1 -> text) win. The built-in vendor is
- *     VoiceThere (id `local-sherpa`); edit PROFILES to use other vendors.
+ *     A slow switch plays a ready message in the new voice; any other failure
+ *     speaks a short apology in the old language. Texts come from the project
+ *     settings (`getVoiceLanguageSwitchSettings`), then HOLDING_MESSAGES
+ *     (`{language}` is replaced by the target's name) / READY_MESSAGES /
+ *     FAILED_MESSAGES / UNAVAILABLE_MESSAGES, and env vars
+ *     LANGUAGE_SWITCH_WAIT_MESSAGES_JSON / LANGUAGE_SWITCH_FAILED_MESSAGES_JSON /
+ *     LANGUAGE_SWITCH_UNAVAILABLE_MESSAGES_JSON (JSON object, ISO 639-1 ->
+ *     text) win. The built-in vendor is VoiceThere (id `local-sherpa`); edit
+ *     PROFILES to use other vendors.
  * (B) Project enables runner auto-switch — STT/TTS are runner-owned. The
  *     runner replays the utterance into the new language's STT, so the next
  *     final is the correctly recognized text. The agent never calls
@@ -93,18 +103,25 @@ const ECHO_PREFIXES: Record<string, string> = {
   ru: "Вы сказали:",
 };
 
-/** Spoken in the language being left, before a manual switch starts. */
-export const WAIT_MESSAGES: Record<string, string> = {
-  en: "One moment please, I'm switching to your language.",
-  de: "Einen Moment bitte, ich wechsle zu Ihrer Sprache.",
-  es: "Un momento, por favor, estoy cambiando a su idioma.",
-  fr: "Un instant, je passe dans votre langue.",
-  it: "Un momento, per favore, sto passando alla tua lingua.",
-  pt: "Um momento, por favor, estou mudando para o seu idioma.",
-  nl: "Een moment alstublieft, ik schakel over naar uw taal.",
-  pl: "Chwileczkę, przełączam się na Twój język.",
-  ru: "Одну минуту, я перехожу на ваш язык.",
+/**
+ * Spoken in the language being left, when the target pools are not ready at
+ * the end of the switch utterance. `{language}` is replaced by the target
+ * language's name, written in the language being left.
+ */
+export const HOLDING_MESSAGES: Record<string, string> = {
+  en: "One moment, switching to {language}.",
+  de: "Einen Moment bitte, ich wechsle auf {language}.",
+  es: "Un momento, por favor, cambio al {language}.",
+  fr: "Un instant, je passe en {language}.",
+  it: "Un momento, cambio lingua: {language}.",
+  pt: "Um momento, vou mudar para {language}.",
+  nl: "Een moment, ik schakel over naar het {language}.",
+  pl: "Chwileczkę, przełączam na język: {language}.",
+  ru: "Одну минуту, переключаюсь на {language}.",
 };
+
+/** Same map under its former name. */
+export const WAIT_MESSAGES = HOLDING_MESSAGES;
 
 /** Spoken in the old language when the switch fails and the agent stays. */
 export const FAILED_MESSAGES: Record<string, string> = {
@@ -117,6 +134,21 @@ export const FAILED_MESSAGES: Record<string, string> = {
   nl: "Sorry, het wisselen van taal is niet gelukt. Ik blijf Nederlands spreken.",
   pl: "Przepraszam, nie udało się zmienić języka. Zostaję przy polskim.",
   ru: "Извините, не удалось сменить язык. Продолжаю по-русски.",
+};
+
+/**
+ * Spoken in the old language when the target pools never started (two
+ * attempts, about 40 s) and the agent stays in the old language.
+ */
+export const UNAVAILABLE_MESSAGES: Record<string, string> = {
+  en: "Sorry, that language isn't available right now. Let's continue in English.",
+  de: "Entschuldigung, diese Sprache ist gerade nicht verfügbar. Machen wir auf Deutsch weiter.",
+  es: "Lo siento, ese idioma no está disponible ahora mismo. Sigamos en español.",
+  fr: "Désolé, cette langue n'est pas disponible pour le moment. Continuons en français.",
+  it: "Mi dispiace, questa lingua non è disponibile al momento. Continuiamo in italiano.",
+  pt: "Desculpe, esse idioma não está disponível agora. Vamos continuar em português.",
+  nl: "Sorry, die taal is nu niet beschikbaar. We gaan verder in het Nederlands.",
+  pl: "Przepraszam, ten język jest teraz niedostępny. Kontynuujmy po polsku.",
 };
 
 /** Spoken in the new voice when the switch was slow. */
@@ -173,6 +205,8 @@ export function readyMessageFor(
 
 export const WAIT_MESSAGES_ENV = "LANGUAGE_SWITCH_WAIT_MESSAGES_JSON";
 export const FAILED_MESSAGES_ENV = "LANGUAGE_SWITCH_FAILED_MESSAGES_JSON";
+export const UNAVAILABLE_MESSAGES_ENV =
+  "LANGUAGE_SWITCH_UNAVAILABLE_MESSAGES_JSON";
 
 /**
  * Parse a per-language override from a session env var. Accepts a JSON object
@@ -246,6 +280,7 @@ type SessionLanguage = {
     { resolve: () => void; timer: ReturnType<typeof setTimeout> } | undefined;
   waitOverrides: Record<string, string>;
   failedOverrides: Record<string, string>;
+  unavailableOverrides: Record<string, string>;
 };
 
 const sessions = new Map<string, SessionLanguage>();
@@ -265,6 +300,9 @@ function stateFor(
     speechWaiter: undefined,
     waitOverrides: parseMessageOverrides(env?.[WAIT_MESSAGES_ENV]),
     failedOverrides: parseMessageOverrides(env?.[FAILED_MESSAGES_ENV]),
+    unavailableOverrides: parseMessageOverrides(
+      env?.[UNAVAILABLE_MESSAGES_ENV],
+    ),
   };
   sessions.set(sessionId, created);
   return created;
@@ -319,16 +357,29 @@ function waitForSpeechEnd(state: SessionLanguage): Promise<void> {
   });
 }
 
-function waitMessageFor(
-  state: SessionLanguage,
-  language: string,
+/** The target language's name, written in the language being left. */
+function languageNameFor(from: string, to: string): string {
+  try {
+    const name = new Intl.DisplayNames([from], { type: "language" }).of(to);
+    if (name && name !== to) return name;
+  } catch {
+    // Unknown locale or code: use the English name below.
+  }
+  return LANGUAGE_NAMES[to] ?? to;
+}
+
+/** Holding message in the current voice, naming the target language. */
+export function holdingMessageFor(
+  state: Pick<SessionLanguage, "waitOverrides">,
+  from: string,
+  to: string,
   fromSettings: Record<string, string> | undefined,
 ): string {
-  return pickMessage(
-    WAIT_MESSAGES,
-    { ...fromSettings, ...state.waitOverrides },
-    language,
-  );
+  const overrides = { ...fromSettings, ...state.waitOverrides };
+  const text = pickMessage(HOLDING_MESSAGES, overrides, from);
+  const known = from in overrides || from in HOLDING_MESSAGES;
+  const name = languageNameFor(known ? from : "en", to);
+  return text.replace(/\{language\}/g, () => name);
 }
 
 /** Apologise in the old language and stay; logs the failed step. */
@@ -349,6 +400,30 @@ function failSwitch(
   speak(
     sessionId,
     pickMessage(FAILED_MESSAGES, state.failedOverrides, sw.from),
+  );
+}
+
+/**
+ * The target pools never started: say so in the old language and stay. Handles
+ * the unanswered switch utterance the same way `failSwitch` does.
+ */
+function unavailableSwitch(
+  sessionId: string,
+  state: SessionLanguage,
+  sw: SwitchInFlight,
+  attempts: number,
+  reason: string,
+): void {
+  if (state.active === sw) state.active = undefined;
+  agentLog(
+    "warn",
+    "language_switch.unavailable",
+    { from: sw.from, to: sw.to, attempts, reason },
+    sessionId,
+  );
+  speak(
+    sessionId,
+    pickMessage(UNAVAILABLE_MESSAGES, state.unavailableOverrides, sw.from),
   );
 }
 
@@ -375,6 +450,36 @@ function failReplay(
   });
 }
 
+/** `prepareVoiceLanguage` timed out (20 s on the runner, 50 s on older ones). */
+function isPrepareTimeout(result: VoiceLanguagePrepareResult): boolean {
+  return !result.ready && result.reason === "timeout";
+}
+
+/** One prepare attempt; logs `language_switch.prepare` when it settles. */
+function runPrepare(
+  sessionId: string,
+  sw: SwitchInFlight,
+  attempt: number,
+): Promise<VoiceLanguagePrepareResult> {
+  const startedAtMs = attempt === 1 ? sw.detectedAtMs : Date.now();
+  return prepareVoiceLanguage(sessionId, sw.profile).then((result) => {
+    agentLog(
+      "info",
+      "language_switch.prepare",
+      {
+        to: sw.to,
+        ok: result.ok,
+        ready: result.ready,
+        reason: result.reason,
+        attempt,
+        afterMs: Date.now() - startedAtMs,
+      },
+      sessionId,
+    );
+    return result;
+  });
+}
+
 /**
  * The caller finished the switch utterance. Swap the voices (waiting for the
  * pools if needed), then have the runner replay the utterance in the new
@@ -394,10 +499,14 @@ async function runSwitch(
   const alive = () => sessions.get(sessionId) === state;
 
   let prepared = sw.prepareResult;
+  let attempt = 1;
   if (!prepared) {
     // Not ready when the caller stopped: tell them, in the voice they hear now.
     if (mode !== "off" && !sw.waitMessagePlayed) {
-      speak(sessionId, waitMessageFor(state, sw.from, settings?.waitMessages));
+      speak(
+        sessionId,
+        holdingMessageFor(state, sw.from, sw.to, settings?.waitMessages),
+      );
       sw.waitMessagePlayed = true;
       agentLog(
         "info",
@@ -420,7 +529,49 @@ async function runSwitch(
     prepared = await sw.prepare;
     if (!alive()) return;
   }
+  if (isPrepareTimeout(prepared)) {
+    // One attempt waits 20 s. Prepare again at once and repeat the holding
+    // message, but never over the first one.
+    attempt = 2;
+    agentLog(
+      "info",
+      "language_switch.retry",
+      { from: sw.from, to: sw.to, attempt, reason: prepared.reason },
+      sessionId,
+    );
+    const retry = runPrepare(sessionId, sw, attempt);
+    if (mode !== "off") {
+      if (sw.waitMessagePlayed && !sw.waitSpeechEnded) {
+        await waitForSpeechEnd(state);
+        if (!alive()) return;
+      }
+      speak(
+        sessionId,
+        holdingMessageFor(state, sw.from, sw.to, settings?.waitMessages),
+      );
+      sw.waitMessagePlayed = true;
+      sw.waitSpeechEnded = false;
+      agentLog(
+        "info",
+        "language_switch.wait_message",
+        { played: true, reason: "retry", language: sw.from },
+        sessionId,
+      );
+    }
+    prepared = await retry;
+    if (!alive()) return;
+  }
   if (!prepared.ok || !prepared.ready) {
+    if (attempt === 2) {
+      unavailableSwitch(
+        sessionId,
+        state,
+        sw,
+        attempt,
+        prepared.reason || "not_ready",
+      );
+      return;
+    }
     failSwitch(
       sessionId,
       state,
@@ -466,6 +617,11 @@ async function runSwitch(
     sessionId,
   );
   if (!swapped.ok) {
+    if (swapped.reason === "language_unavailable") {
+      // The runner already retried once (2 x 20 s) before giving up.
+      unavailableSwitch(sessionId, state, sw, 2, swapped.reason);
+      return;
+    }
     failSwitch(sessionId, state, sw, "swap", swapped.reason ?? "unknown");
     return;
   }
@@ -609,20 +765,8 @@ defineAgent({
       waitSpeechEnded: false,
       phase: "awaiting_utterance",
     };
-    sw.prepare = prepareVoiceLanguage(sessionId, profile).then((result) => {
+    sw.prepare = runPrepare(sessionId, sw, 1).then((result) => {
       sw.prepareResult = result;
-      agentLog(
-        "info",
-        "language_switch.prepare",
-        {
-          to: language,
-          ok: result.ok,
-          ready: result.ready,
-          reason: result.reason,
-          afterMs: Date.now() - sw.detectedAtMs,
-        },
-        sessionId,
-      );
       return result;
     });
     state.active = sw;
@@ -640,9 +784,11 @@ defineAgent({
     const settings = getVoiceLanguageSwitchSettings(sessionId);
     if (settings?.waitMessageMode === "immediate") {
       // Not interruptible: the caller is still talking when this plays.
-      speak(sessionId, waitMessageFor(state, from, settings.waitMessages), {
-        interruptible: false,
-      });
+      speak(
+        sessionId,
+        holdingMessageFor(state, from, language, settings.waitMessages),
+        { interruptible: false },
+      );
       sw.waitMessagePlayed = true;
       agentLog(
         "info",

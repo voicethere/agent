@@ -23,6 +23,25 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 
 describe("agent template registry", () => {
+  it("every template has a non-empty title, summary and category", () => {
+    const categories = ["voice", "data", "voice-data", "integration", "debug"];
+    for (const template of AGENT_TEMPLATES) {
+      expect(template.title.trim(), template.id).not.toBe("");
+      expect(template.title.length, template.id).toBeLessThanOrEqual(40);
+      expect(template.summary.trim(), template.id).not.toBe("");
+      expect(template.summary.length, template.id).toBeLessThanOrEqual(160);
+      expect(template.summary, template.id).not.toContain("\n");
+      expect(categories, template.id).toContain(template.category);
+    }
+  });
+
+  it("titles are unique among product templates", () => {
+    const titles = AGENT_TEMPLATES.filter(
+      (template) => template.kind === "product",
+    ).map((template) => template.title);
+    expect(new Set(titles).size).toBe(titles.length);
+  });
+
   it("lists all registered templates", () => {
     expect(listTemplates()).toHaveLength(AGENT_TEMPLATES.length);
     expect(

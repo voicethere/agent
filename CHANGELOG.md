@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-10-13
+
+### Added
+
+- **Template registry** — every template definition now has `title` (short label), `summary` (one sentence for pickers) and `category` (`voice`, `data`, `voice-data`, `integration`, `debug`). The VoiceThere dashboard and CLI build their template lists from these fields.
+
 ## [0.9.7] - 2026-10-13
 
 ### Changed

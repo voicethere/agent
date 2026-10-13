@@ -1,5 +1,12 @@
 export type TemplateKind = "product" | "e2e";
 
+export type TemplateCategory =
+  | "voice"
+  | "data"
+  | "voice-data"
+  | "integration"
+  | "debug";
+
 export interface AgentTemplateDefinition {
   id: string;
   /** Path relative to `templates/` (e.g. `echo/agent.ts`, `redis-sync/agent.ts`). */
@@ -7,6 +14,12 @@ export interface AgentTemplateDefinition {
   kind: TemplateKind;
   /** When true, a prebuilt bundle is published at `dist/templates/<id>/agent.js`. */
   seedOnCreate: boolean;
+  /** Short label for template pickers. */
+  title: string;
+  /** One sentence for template pickers; `description` stays the long text. */
+  summary: string;
+  /** Picker grouping. */
+  category: TemplateCategory;
   description: string;
   /** All TypeScript sources for this template (project-relative paths). */
   sourceFiles: string[];
@@ -20,6 +33,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "echo/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "Echo (voice + chat)",
+    summary: "Echo debug agent with voice finals and DataChannel chat.",
+    category: "debug",
     description:
       "Full echo debug agent — voice finals and DataChannel chat with TTS playback.",
     sourceFiles: ["echo/agent.ts"],
@@ -29,6 +45,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "echo-dc/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "Echo debug (DC events only)",
+    summary: "Data-channel-only echo agent without TTS.",
+    category: "debug",
     description:
       "Data-channel-only echo — relays speech events and chat without TTS.",
     sourceFiles: ["echo-dc/agent.ts"],
@@ -38,6 +57,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "language-switch/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "Language switch",
+    summary: "Detects the caller's language and switches speech recognition and voice mid-call, with a holding message and an unavailable notice.",
+    category: "voice",
     description:
       "Switches STT and TTS independently from onUserLanguage, and can change one vendor mid-conversation. With project auto-switch on, the runner switches and replays the utterance, and the agent answers the recognized text in the new language. With auto-switch off, detection does not change either side until this agent calls setVoiceLanguage.",
     sourceFiles: ["language-switch/agent.ts"],
@@ -47,6 +69,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "voice-starter/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "Voice starter",
+    summary: "Starter agent covering every speech event.",
+    category: "voice",
     description:
       "Voice starter covering every speech event — customize onUserSpeechFinal for your LLM.",
     sourceFiles: ["voice-starter/agent.ts"],
@@ -56,6 +81,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "world-sync/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "World sync (JSON)",
+    summary: "Data-only pose broadcast over onDataChannelMessage. One agent, no Redis.",
+    category: "data",
     description:
       "Single-agent JSON world sync — onDataChannelMessage pose updates, in-memory, no Redis.",
     sourceFiles: ["world-sync/agent.ts"],
@@ -65,6 +93,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "world-sync-binary/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "World sync (binary)",
+    summary: "Data-only ArrayBuffer poses with onDataChannelBinary. One agent, no Redis.",
+    category: "data",
     description:
       "Single-agent binary world sync — onDataChannelBinary + sendBinaryToClient ArrayBuffer poses, no Redis.",
     sourceFiles: [
@@ -77,6 +108,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "game-sync/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "Game sync (multi-object DC)",
+    summary: "Authoritative multi-object sync sample for real-time games.",
+    category: "data",
     description:
       "Authoritative multi-object sync with binary world snapshots; uses Redis when AGENT_REDIS_URL is set.",
     sourceFiles: [
@@ -93,6 +127,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "voice-showcase/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "Voice showcase",
+    summary: "Conversational demo: greeting, name, menu (weather, count, recipes, fun facts).",
+    category: "voice",
     description:
       "Conversational voice showcase — greeting, name, menu (weather, count, recipe, fun fact).",
     sourceFiles: [
@@ -109,6 +146,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "recording-consent/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "Recording consent",
+    summary: "Asks recording consent on connect, pauses for name and birthdate, resumes only if allowed.",
+    category: "voice",
     description:
       "Recording consent flow — ask consent, pause capture for PII, resume when allowed.",
     sourceFiles: [
@@ -121,6 +161,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "positional-tts/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "Orbiting TTS",
+    summary: "Voice+Data demo: a TTS speaker circles each listener with per-client poses.",
+    category: "voice-data",
     description:
       "Voice+Data demo — TTS speaker orbits each listener with per-client setTtsPose.",
     sourceFiles: ["positional-tts/agent.ts", "positional-tts/orbit.ts"],
@@ -130,6 +173,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "spatial-showcase/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "Spatial audio showcase",
+    summary: "Voice+Data demo: orbiting sine tone and TTS, positional soundboard, and a proximity room via DataChannel join.",
+    category: "voice-data",
     description:
       "Spatial audio showcase — orbiting sine + TTS, positional clip soundboard, proximity room via DataChannel commands.",
     sourceFiles: [
@@ -147,6 +193,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "webhooks/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "Inbound webhooks",
+    summary: "Verifies inbound webhooks with HMAC, then fans out over DataChannel and speech.",
+    category: "integration",
     description:
       "Inbound webhook handler — HMAC verify on raw body, then DataChannel + speak fan-out.",
     sourceFiles: ["webhooks/agent.ts"],
@@ -156,6 +205,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "webhooks-redis/agent.ts",
     kind: "product",
     seedOnCreate: true,
+    title: "Inbound webhooks (Redis)",
+    summary: "Webhook handler with a Redis shared counter and DataChannel fan-out.",
+    category: "integration",
     description:
       "Webhook handler with Redis atomic shared counter plus DataChannel fan-out.",
     sourceFiles: ["webhooks-redis/agent.ts"],
@@ -166,6 +218,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "echo-smoke/agent.ts",
     kind: "e2e",
     seedOnCreate: false,
+    title: "Echo smoke",
+    summary: "Minimal echo agent for e2e voice-smoke, agent-smoke, and cli-smoke uploads.",
+    category: "debug",
     description:
       "Minimal echo agent for e2e voice-smoke, agent-smoke, and cli-smoke uploads.",
     sourceFiles: ["echo-smoke/agent.ts"],
@@ -175,6 +230,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "crash/agent.ts",
     kind: "e2e",
     seedOnCreate: false,
+    title: "Crash test",
+    summary: "Crash / echo agent for session-errors-smoke and agent-crash-policy smokes.",
+    category: "debug",
     description:
       "Crash / echo agent for session-errors-smoke and agent-crash-policy smokes.",
     sourceFiles: ["crash/agent.ts"],
@@ -184,6 +242,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "game-sync-smoke/agent.ts",
     kind: "e2e",
     seedOnCreate: false,
+    title: "Game sync smoke",
+    summary: "Minimal data-channel agent for deploy-smoke, shared-child, and idle smokes.",
+    category: "debug",
     description:
       "Minimal data-channel agent for deploy-smoke, shared-child, and idle smokes.",
     sourceFiles: ["game-sync-smoke/agent.ts"],
@@ -193,6 +254,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "redis-sync/agent.ts",
     kind: "e2e",
     seedOnCreate: false,
+    title: "Redis sync",
+    summary: "Redis-backed world buffer sync for redis-sync-smoke.",
+    category: "debug",
     description:
       "Redis-backed world buffer sync for redis-sync-smoke — binary 12-byte position frames + project Redis.",
     sourceFiles: ["redis-sync/agent.ts", "redis-sync/world-layout.ts"],
@@ -203,6 +267,9 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     entry: "mix-smoke/agent.ts",
     kind: "e2e",
     seedOnCreate: false,
+    title: "Mix smoke",
+    summary: "Positional mix DC commands for voice-data-mix-smoke (Voice+Data, shared child).",
+    category: "debug",
     description:
       "Positional mix DC commands for voice-data-mix-smoke (Voice+Data, shared child).",
     sourceFiles: ["mix-smoke/agent.ts"],

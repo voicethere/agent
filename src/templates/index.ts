@@ -15,6 +15,7 @@ import {
 export type {
   AgentTemplateDefinition,
   AgentTemplateId,
+  TemplateCategory,
   TemplateKind,
 } from "./registry.js";
 export {

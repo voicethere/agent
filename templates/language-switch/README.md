@@ -47,6 +47,6 @@ Chat commands change one vendor while the session stays connected. API keys are 
 
 In manual mode, finals are echoed as `you said: …` (in the current language) after a short wait, so a language event for the same utterance can cancel the echo. The switch utterance is not spoken back as an English transcript; its replay is answered in the new language.
 
-`voice` and `stt` are VoiceThere catalog ids (`de`, `en-lessac`, `en-small`), listed in the spoken-language docs. Vendor ids are `local-sherpa`, `openai`, `deepgram`, `assemblyai`, `google`, `elevenlabs`, and `cartesia`.
+`voice` and `stt` are VoiceThere catalog ids (`de`, `en-lessac`, `en-small`), listed in the spoken-language docs. Vendor ids are `local-sherpa`, `openai`, `deepgram`, `assemblyai`, `google`, `elevenlabs`, `cartesia`, and `fishaudio`.
 
 Entry: `templates/language-switch/agent.ts`.

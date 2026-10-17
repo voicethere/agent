@@ -1803,7 +1803,7 @@ export interface SetVoiceLanguageOptions {
   sttVendor?: VoiceVendorSelection;
   /**
    * Replace the TTS vendor for this session. Keys stay in project secrets.
-   * `provider`: `local-sherpa`, `openai`, `elevenlabs`, `cartesia`, or `google`.
+   * `provider`: `local-sherpa`, `openai`, `elevenlabs`, `cartesia`, `fishaudio`, or `google`.
    */
   ttsVendor?: VoiceVendorSelection;
   /**

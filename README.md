@@ -101,8 +101,8 @@ The script writes selected values into `agent/.env.live-test`.
 To use hosted providers instead of local Sherpa, set in `agent/.env.live-test`:
 
 - `VOICE_STT_PROVIDER` (`openai` | `deepgram` | `assemblyai` | `google`)
-- `VOICE_TTS_PROVIDER` (`openai` | `elevenlabs` | `cartesia` | `google`)
-- provider API keys (`OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, `ASSEMBLYAI_API_KEY`, `ELEVENLABS_API_KEY`, `CARTESIA_API_KEY`, `GOOGLE_API_KEY`)
+- `VOICE_TTS_PROVIDER` (`openai` | `elevenlabs` | `cartesia` | `fishaudio` | `google`)
+- provider API keys (`OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, `ASSEMBLYAI_API_KEY`, `ELEVENLABS_API_KEY`, `CARTESIA_API_KEY`, `FISH_API_KEY`, `GOOGLE_API_KEY`)
 - optional model/voice overrides: `VOICE_STT_MODEL`, `VOICE_TTS_MODEL`, `VOICE_TTS_VOICE`, `VOICE_STT_LANGUAGE`
 
 Vendor setup reference: https://github.com/akirilyuk/node-webrtc-rust#stttts-vendors-and-config

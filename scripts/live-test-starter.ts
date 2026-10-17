@@ -112,7 +112,7 @@ function resolveVoiceConfig(): { config: VoiceAgentConfig; label: string } {
         provider: resolvedTtsProvider,
         model: process.env.VOICE_TTS_MODEL?.trim() || undefined,
         voice: process.env.VOICE_TTS_VOICE?.trim() || undefined,
-        apiKey: process.env.OPENAI_API_KEY?.trim() || process.env.ELEVENLABS_API_KEY?.trim() || process.env.CARTESIA_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim() || undefined,
+        apiKey: process.env.OPENAI_API_KEY?.trim() || process.env.ELEVENLABS_API_KEY?.trim() || process.env.CARTESIA_API_KEY?.trim() || process.env.FISH_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim() || undefined,
       },
       events: { mode: "both" },
     },

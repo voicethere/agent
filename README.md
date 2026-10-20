@@ -248,7 +248,7 @@ The built-in speech vendor is VoiceThere (id `voicethere`). Its voice and STT ca
 | `ttsVendor`    | `{ provider, model?, voice?, language? }` | Replaces the TTS vendor. `provider` is required; `language` only works with `voicethere`. |
 | `voice`, `stt` | string                                    | Deprecated. Use `ttsVendor.voice` and `sttVendor.model`.                                  |
 
-STT providers are `voicethere`, `openai`, `deepgram`, `assemblyai`, `google`, `elevenlabs`, `fishaudio`, `groq`, `azure` and `aws`. TTS providers are `voicethere`, `openai`, `elevenlabs`, `cartesia`, `fishaudio`, `google`, `deepgram`, `groq`, `azure` and `aws`. Cloud providers read their key from the project secret `AGENT_<VENDOR>_API_KEY`; never put a key in the request.
+STT providers are `voicethere`, `openai`, `deepgram`, `assemblyai`, `google`, `elevenlabs`, `fishaudio`, `groq`, `azure` and `aws`. TTS providers are `voicethere`, `openai`, `elevenlabs`, `cartesia`, `fishaudio`, `google`, `deepgram`, `groq`, `azure` and `aws`. Cloud providers read their keys from project secrets, such as `AGENT_OPENAI_API_KEY`; a `missing_credentials` failure names the exact secret. Never put a key in the request.
 
 A model, voice or language you leave out falls back to that vendor's default for `vendor.language ?? language ?? the session's current language`. For `voicethere`, `model` is the STT catalog id (`en`, `en-small`) and `voice` is the TTS catalog id (`en-lessac`).
 

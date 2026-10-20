@@ -16,7 +16,7 @@ When the switch took at least `readyMessageMinMs` (default 2000) and no wait mes
 
 The swap waits until the holding message has finished playing (at most 8 seconds). If the language is detected after the caller's last final is already unanswered, that final is the switch utterance and the switch starts at once. If prepare or the swap fails for any other reason, the agent speaks a short fallback in the old language and stays. If only the replay fails, the voice is already the new one, so the agent asks the caller in the new language to repeat (`REPEAT_MESSAGES`) and stays in it. A second language event during a switch is ignored.
 
-The built-in speech vendor is VoiceThere (id `local-sherpa`). Edit `PROFILES` in `agent.ts` to apply other vendors per target language, for example Deepgram for listening and ElevenLabs for speaking; the file has a commented example. Keys stay in project secrets.
+The built-in speech vendor is VoiceThere (id `voicethere`). Edit `PROFILES` in `agent.ts` to apply other vendors per target language, for example Deepgram for listening and ElevenLabs for speaking; the file has a commented example. Keys stay in project secrets.
 
 Texts, in order of precedence: the env override, the project settings (`waitMessages`, `readyMessages`), then the maps in `agent.ts` (`HOLDING_MESSAGES`, `READY_MESSAGES`, `FAILED_MESSAGES`, `UNAVAILABLE_MESSAGES`; en, de, es, fr, it, pt, nl, pl, ru, except the ready and unavailable maps, which have no ru). `WAIT_MESSAGES` is kept as another name for `HOLDING_MESSAGES`. In a holding message, `{language}` is replaced by the target language's name, written in the language being left (`Intl.DisplayNames`), so project texts and the env override can use it too. Override per language with a JSON object in the session env, keyed by ISO 639-1 code:
 
@@ -40,13 +40,13 @@ Detection and chat commands are unchanged: `/tts` and `/stt` still call `setVoic
 
 Chat commands change one vendor while the session stays connected. API keys are project secrets on the running deploy, not arguments:
 
-- `/tts sherpa de` — VoiceThere TTS only
-- `/stt sherpa de` — VoiceThere STT only
+- `/tts voicethere de` — VoiceThere TTS only (`sherpa` also works)
+- `/stt voicethere de` — VoiceThere STT only (`sherpa` also works)
 - `/tts elevenlabs` — ElevenLabs TTS, current STT stays
 - `/stt deepgram de` — Deepgram STT, current voice stays
 
 In manual mode, finals are echoed as `you said: …` (in the current language) after a short wait, so a language event for the same utterance can cancel the echo. The switch utterance is not spoken back as an English transcript; its replay is answered in the new language.
 
-`voice` and `stt` are VoiceThere catalog ids (`de`, `en-lessac`, `en-small`), listed in the spoken-language docs. Vendor ids are `local-sherpa`, `openai`, `deepgram`, `assemblyai`, `google`, `elevenlabs`, `cartesia`, and `fishaudio`.
+The default profile asks for VoiceThere speech on both sides: `sttVendor: { provider: "voicethere", language }` and `ttsVendor: { provider: "voicethere", language }`. To pick a specific model or voice, set `sttVendor.model` (`de`, `en-small`) or `ttsVendor.voice` (`en-lessac`); the ids are listed in the spoken-language docs. Other vendor ids are `openai`, `deepgram`, `assemblyai`, `google`, `elevenlabs`, `cartesia`, `fishaudio`, `groq`, `azure`, and `aws`. A failed switch carries a `reason` and a `message` that says what to change.
 
 Entry: `templates/language-switch/agent.ts`.

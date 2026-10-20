@@ -254,8 +254,8 @@ describe("language-switch template", () => {
       expect(t.prepares()[0]!.options).toEqual({
         language: "de",
         scope: "both",
-        voice: "de",
-        stt: "de",
+        sttVendor: { provider: "local-sherpa", language: "de" },
+        ttsVendor: { provider: "local-sherpa", language: "de" },
       });
       expect(t.spoken()).toEqual([]);
       await answerPrepare(t, { ok: true, ready: true, reason: "ready" });
@@ -839,6 +839,56 @@ describe("language-switch template", () => {
       expect(t.spoken()).toEqual([]);
       await vi.advanceTimersByTimeAsync(4000);
       expect(t.spoken()).toEqual(["you said: hello"]);
+    });
+  });
+
+  describe("uniform request shape", () => {
+    it("profileFor builds the voicethere request", async () => {
+      vi.resetModules();
+      const { profileFor } =
+        await import("../templates/language-switch/agent.js");
+      expect(profileFor("de")).toEqual({
+        scope: "both",
+        language: "de",
+        sttVendor: { provider: "voicethere", language: "de" },
+        ttsVendor: { provider: "voicethere", language: "de" },
+      });
+    });
+
+    it.each(["/stt voicethere de", "/stt sherpa de"])(
+      "%s sends the uniform STT request",
+      async (command) => {
+        const t = await startTemplate({}, SETTINGS);
+        capture = t.capture;
+        t.capture.emit({
+          type: "data_channel_message",
+          sessionId: SESSION,
+          payload: JSON.stringify({ type: "chat", text: command }),
+        });
+        await vi.waitFor(() => expect(t.vlc()).toHaveLength(1));
+        expect(t.vlc()[0]).toMatchObject({
+          scope: "stt",
+          language: "de",
+          sttVendor: { provider: "local-sherpa", language: "de" },
+        });
+        expect(t.vlc()[0]!.ttsVendor).toBeUndefined();
+      },
+    );
+
+    it("/tts voicethere de sends the uniform TTS request", async () => {
+      const t = await startTemplate({}, SETTINGS);
+      capture = t.capture;
+      t.capture.emit({
+        type: "data_channel_message",
+        sessionId: SESSION,
+        payload: JSON.stringify({ type: "chat", text: "/tts voicethere de" }),
+      });
+      await vi.waitFor(() => expect(t.vlc()).toHaveLength(1));
+      expect(t.vlc()[0]).toMatchObject({
+        scope: "tts",
+        language: "de",
+        ttsVendor: { provider: "local-sherpa", language: "de" },
+      });
     });
   });
 });

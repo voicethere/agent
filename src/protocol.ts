@@ -545,17 +545,55 @@ export type SttControlResult = {
 export type VoiceControlScope = "stt" | "tts" | "both";
 
 /**
+ * Why a voice switch failed. The runtime may add reasons, so any string is
+ * accepted.
+ */
+export type VoiceSwitchFailureReason =
+  | "invalid_request"
+  | "invalid_scope"
+  | "missing_provider"
+  | "conflicting_fields"
+  | "scope_mismatch"
+  | "unsupported_field"
+  | "unknown_vendor"
+  | "unsupported_vendor"
+  | "nothing_to_apply"
+  | "unknown_stt"
+  | "unknown_voice"
+  | "missing_credentials"
+  | "invalid_language"
+  | "language_unavailable"
+  | "unavailable"
+  | "timeout"
+  | (string & {});
+
+/**
  * Vendor selection for a mid-conversation STT or TTS switch.
- * `provider` is a public id (`local-sherpa`, `deepgram`, `elevenlabs`, …).
- * Do not put API keys here — the runner reads project secrets.
+ *
+ * `provider` is `voicethere` (the built-in VoiceThere speech) or a cloud id.
+ * STT providers: `voicethere`, `openai`, `deepgram`, `assemblyai`, `google`,
+ * `elevenlabs`, `fishaudio`, `groq`, `azure`, `aws`. TTS providers:
+ * `voicethere`, `openai`, `elevenlabs`, `cartesia`, `fishaudio`, `google`,
+ * `deepgram`, `groq`, `azure`, `aws`. `local-sherpa` and `cluster-sherpa` are
+ * deprecated aliases of `voicethere`.
+ *
+ * An omitted `model`, `voice` or `language` means that vendor's default for
+ * `vendor.language ?? language ?? the session's current language`. Do not put
+ * API keys here: the runtime reads project secrets.
  */
 export interface VoiceVendorSelection {
   provider: string;
-  /** Cloud model id, or a Sherpa catalog id when `provider` is `local-sherpa`. */
+  /**
+   * Model id. For `voicethere` STT it is a catalog id (`en`, `en-small`); for
+   * `voicethere` TTS it is a voice catalog id (`en-lessac`).
+   */
   model?: string;
-  /** Cloud voice id, or a Sherpa TTS catalog id when `provider` is `local-sherpa`. */
+  /** Voice id. TTS only. For `voicethere` it is a voice catalog id (`en-lessac`). */
   voice?: string;
-  /** BCP-47 or ISO code passed through to the vendor. */
+  /**
+   * Language code for the vendor. On `ttsVendor` it applies only to the
+   * `voicethere` provider; pick a cloud voice with `voice` instead.
+   */
   language?: string;
 }
 
@@ -563,8 +601,10 @@ export interface VoiceVendorSelection {
  * Ask the runner to change STT, TTS, or both for one live session.
  * Spoken-language detection does not do this by itself.
  *
- * `voice` and `stt` are Sherpa catalog ids (`en`, `de`, `en-lessac`, `en-small`),
- * not model paths. `sttVendor` and `ttsVendor` replace that side's provider.
+ * `sttVendor` and `ttsVendor` replace that side's provider and carry the model
+ * and voice. The top-level `voice` and `stt` are deprecated catalog ids
+ * (`en-lessac`, `en-small`); they still work when the matching vendor object
+ * is not set.
  */
 export interface VoiceLanguageControlMessage {
   type: "voice_language_control";
@@ -591,12 +631,14 @@ export interface VoiceLanguageControlAckMessage {
   requestId: string;
   sessionId: string;
   ok: boolean;
-  reason?: string;
+  reason?: VoiceSwitchFailureReason;
+  /** Human-readable explanation of a failure: what to change. Field names and provider ids only. */
+  message?: string;
   language?: string;
   voice?: string;
   stt?: string;
   scope?: VoiceControlScope;
-  /** Public vendor id that listening uses after this call (`deepgram`, `local-sherpa`). */
+  /** Public vendor id that listening uses after this call (`deepgram`, `voicethere`). */
   sttProvider?: string;
   /** Public vendor id that the speaking voice uses after this call. */
   ttsProvider?: string;
@@ -624,6 +666,8 @@ export interface VoiceLanguagePrepareResultMessage {
   ok: boolean;
   ready: boolean;
   reason: string;
+  /** Human-readable explanation of a failure: what to change. Field names and provider ids only. */
+  message?: string;
   language?: string;
 }
 
@@ -648,6 +692,8 @@ export type VoiceLanguagePrepareResult = {
   ok: boolean;
   ready: boolean;
   reason: string;
+  /** Human-readable explanation of a failure: what to change. Field names and provider ids only. */
+  message?: string;
   language?: string;
 };
 
@@ -675,7 +721,9 @@ export interface VoiceLanguageSwitchSettings {
 /** Result returned by {@link setVoiceLanguage}. */
 export type VoiceLanguageResult = {
   ok: boolean;
-  reason?: string;
+  reason?: VoiceSwitchFailureReason;
+  /** Human-readable explanation of a failure: what to change. Field names and provider ids only. */
+  message?: string;
   requestId: string;
   language?: string;
   voice?: string;

@@ -27,7 +27,7 @@
  *     FAILED_MESSAGES / UNAVAILABLE_MESSAGES, and env vars
  *     LANGUAGE_SWITCH_WAIT_MESSAGES_JSON / LANGUAGE_SWITCH_FAILED_MESSAGES_JSON /
  *     LANGUAGE_SWITCH_UNAVAILABLE_MESSAGES_JSON (JSON object, ISO 639-1 ->
- *     text) win. The built-in vendor is VoiceThere (id `local-sherpa`); edit
+ *     text) win. The built-in vendor is VoiceThere (id `voicethere`); edit
  *     PROFILES to use other vendors.
  * (B) Project enables runner auto-switch — STT/TTS are runner-owned. The
  *     runner replays the utterance into the new language's STT, so the next
@@ -40,8 +40,8 @@
  *
  * Chat commands change a single vendor mid-conversation:
  *
- * - `/tts sherpa de` — VoiceThere TTS only
- * - `/stt sherpa de` — VoiceThere STT only
+ * - `/tts voicethere de` — VoiceThere TTS only (`sherpa` also works)
+ * - `/stt voicethere de` — VoiceThere STT only (`sherpa` also works)
  * - `/tts elevenlabs` — ElevenLabs TTS, current STT stays
  * - `/stt deepgram de` — Deepgram STT, current voice stays
  *
@@ -65,7 +65,7 @@ import {
 
 /**
  * What to apply per target language. The default is the built-in VoiceThere
- * vendor (`local-sherpa`): voice and STT model named after the language. A
+ * vendor (`voicethere`): voice and STT model chosen for the language. A
  * profile can name other vendors; keys stay in project secrets. Example:
  *
  *   de: {
@@ -82,8 +82,8 @@ export function profileFor(language: string): SetVoiceLanguageOptions {
     PROFILES[language] ?? {
       scope: "both",
       language,
-      voice: language,
-      stt: language,
+      sttVendor: { provider: "voicethere", language },
+      ttsVendor: { provider: "voicethere", language },
     }
   );
 }
@@ -324,7 +324,7 @@ function logSwitch(
   if (!result.ok) {
     agentLog(
       "warn",
-      `setVoiceLanguage ${side} failed: ${result.reason ?? "unknown"}`,
+      `setVoiceLanguage ${side} failed: ${result.reason ?? "unknown"}${result.message ? ` - ${result.message}` : ""}`,
     );
     return;
   }
@@ -832,21 +832,22 @@ defineAgent({
     const text = parseChatText(ctx.message);
     if (!text) return;
     const [command, vendor, language] = text.trim().split(/\s+/);
-    if (command === "/tts" && vendor === "sherpa" && language) {
+    const builtIn = vendor === "voicethere" || vendor === "sherpa";
+    if (command === "/tts" && builtIn && language) {
       const result = await setVoiceLanguage(ctx.sessionId, {
         scope: "tts",
         language,
-        ttsVendor: { provider: "local-sherpa", voice: language },
+        ttsVendor: { provider: "voicethere", language },
       });
       logSwitch(ctx.sessionId, "tts", result);
       if (result.ok) speak(ctx.sessionId, replyFor(language));
       return;
     }
-    if (command === "/stt" && vendor === "sherpa" && language) {
+    if (command === "/stt" && builtIn && language) {
       const result = await setVoiceLanguage(ctx.sessionId, {
         scope: "stt",
         language,
-        sttVendor: { provider: "local-sherpa", model: language },
+        sttVendor: { provider: "voicethere", language },
       });
       logSwitch(ctx.sessionId, "stt", result);
       return;

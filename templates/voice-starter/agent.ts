@@ -179,8 +179,11 @@ defineAgent({
   },
 
   onUserLanguage({ sessionId, language }) {
-    // Detection does not change TTS or STT. Call setVoiceLanguage with
-    // scope "tts" or "stt" — or pass sttVendor / ttsVendor to change vendor.
+    // Detection does not change TTS or STT. Call setVoiceLanguage, for example
+    //   { scope: "both", language,
+    //     sttVendor: { provider: "voicethere", language },
+    //     ttsVendor: { provider: "voicethere", language } }
+    // or name another provider (deepgram, elevenlabs, ...) per side.
     // See templates/language-switch/agent.ts.
     agentLog("info", `user_language ${sessionId} ${language}`);
   },

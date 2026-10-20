@@ -2314,6 +2314,7 @@ describe("voice switch primitives", () => {
       ok: false,
       ready: false,
       reason: "timeout",
+      message: "The voice switch did not finish in time; try again.",
     });
   });
 

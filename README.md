@@ -236,7 +236,74 @@ Copy [`templates/voice-starter/agent.ts`](./templates/voice-starter/agent.ts) as
 
 ### Spoken-language switching
 
-The built-in speech vendor is VoiceThere (id `local-sherpa`). Its **voice** and **STT** catalog ids (for example `de`, `en-lessac`, `en-small`) are documented on VoiceThere at `/docs/spoken-language`.
+The built-in speech vendor is VoiceThere (id `voicethere`). Its voice and STT catalog ids (for example `de`, `en-lessac`, `en-small`) are documented on VoiceThere at `/docs/spoken-language`.
+
+`setVoiceLanguage(sessionId, options)` and `prepareVoiceLanguage(sessionId, options)` take the same request:
+
+| Field          | Type                                      | Meaning                                                                                   |
+| -------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `language`     | string                                    | ISO 639-1 code such as `de`. Optional when you only change a cloud vendor.                |
+| `scope`        | `"stt"`, `"tts"` or `"both"`              | Which side changes. Omit it to infer the side from the vendor objects you pass.           |
+| `sttVendor`    | `{ provider, model?, language? }`         | Replaces the STT vendor. `provider` is required.                                          |
+| `ttsVendor`    | `{ provider, model?, voice?, language? }` | Replaces the TTS vendor. `provider` is required; `language` only works with `voicethere`. |
+| `voice`, `stt` | string                                    | Deprecated. Use `ttsVendor.voice` and `sttVendor.model`.                                  |
+
+STT providers are `voicethere`, `openai`, `deepgram`, `assemblyai`, `google`, `elevenlabs`, `fishaudio`, `groq`, `azure` and `aws`. TTS providers are `voicethere`, `openai`, `elevenlabs`, `cartesia`, `fishaudio`, `google`, `deepgram`, `groq`, `azure` and `aws`. Cloud providers read their keys from project secrets, such as `AGENT_OPENAI_API_KEY`; a `missing_credentials` failure names the exact secret. Never put a key in the request.
+
+A model, voice or language you leave out falls back to that vendor's default for `vendor.language ?? language ?? the session's current language`. For `voicethere`, `model` is the STT catalog id (`en`, `en-small`) and `voice` is the TTS catalog id (`en-lessac`).
+
+```ts
+// VoiceThere speech on both sides, in German
+await setVoiceLanguage(sessionId, {
+  scope: "both",
+  language: "de",
+  sttVendor: { provider: "voicethere", language: "de" },
+  ttsVendor: { provider: "voicethere", language: "de" },
+});
+
+// Cloud STT only
+await setVoiceLanguage(sessionId, {
+  scope: "stt",
+  sttVendor: { provider: "deepgram", model: "nova-3", language: "de" },
+});
+
+// Cloud TTS only
+await setVoiceLanguage(sessionId, {
+  scope: "tts",
+  ttsVendor: { provider: "openai", model: "tts-1", voice: "alloy" },
+});
+
+// VoiceThere STT with ElevenLabs TTS
+await setVoiceLanguage(sessionId, {
+  scope: "both",
+  language: "de",
+  sttVendor: { provider: "voicethere" },
+  ttsVendor: { provider: "elevenlabs" },
+});
+```
+
+The SDK checks the request before it sends anything, so a bad request fails the same way on every runtime version. A failed call resolves `{ ok: false, reason, message }`; `message` says what to change.
+
+| `reason`               | `message`                                                                                                                                                                                 |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_request`      | `setVoiceLanguage options must be an object; language, scope, voice and stt are strings; sttVendor and ttsVendor are objects.`                                                            |
+| `invalid_scope`        | `scope must be "stt", "tts" or "both".`                                                                                                                                                   |
+| `missing_provider`     | `sttVendor.provider is required.` or `ttsVendor.provider is required.`                                                                                                                    |
+| `conflicting_fields`   | `Pass the STT model as sttVendor.model, not stt, when sttVendor is set.` or `Pass the voice as ttsVendor.voice, not voice, when ttsVendor is set.`                                        |
+| `scope_mismatch`       | `scope "tts" cannot change sttVendor; use scope "both" or drop sttVendor.` or the same for `scope "stt"` and `ttsVendor`                                                                  |
+| `unsupported_field`    | `sttVendor has no voice field; set the voice with ttsVendor.voice.` or `ttsVendor.language only applies to provider "voicethere"; choose a voice for that language with ttsVendor.voice.` |
+| `nothing_to_apply`     | `Pass sttVendor, ttsVendor or language.`                                                                                                                                                  |
+| `unknown_vendor`       | Built by the runtime: `Unknown provider "<id>". STT providers: <list>. TTS providers: <list>.`                                                                                            |
+| `unsupported_vendor`   | Built by the runtime: `"<id>" cannot be used for stt.` or `… for tts.`                                                                                                                    |
+| `unknown_stt`          | `No VoiceThere STT model matches sttVendor.model or the language; use a catalog id such as "en" or "en-small".`                                                                           |
+| `unknown_voice`        | `No VoiceThere voice matches ttsVendor.voice or the language; use a catalog id such as "en-lessac".`                                                                                      |
+| `invalid_language`     | `language must be an ISO 639-1 code such as "en" or "de".`                                                                                                                                |
+| `language_unavailable` | `The models for this language did not start; try again later or pick another language.`                                                                                                   |
+| `unavailable`          | `Voice switching is not available for this session.`                                                                                                                                      |
+| `timeout`              | `The voice switch did not finish in time; try again.`                                                                                                                                     |
+| `missing_credentials`  | Built by the runtime: `Add the AGENT_<VENDOR>_API_KEY project secret for provider "<id>".`                                                                                                |
+
+The top-level `voice` and `stt` fields and the provider ids `local-sherpa` and `cluster-sherpa` still work, but they are deprecated. Use `ttsVendor.voice`, `sttVendor.model` and `voicethere`. Results show the built-in speech as `voicethere` in `sttProvider` and `ttsProvider`.
 
 | Approach                | Who changes STT/TTS                                                   | Agent hooks                                                                                                       |
 | ----------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -245,11 +312,16 @@ The built-in speech vendor is VoiceThere (id `local-sherpa`). Its **voice** and 
 
 #### Switching without interrupting the caller
 
-Three primitives let your agent run the whole switch while the caller keeps talking. `prepareVoiceLanguage(sessionId, options)` takes the same options as `setVoiceLanguage`, warms the target pools, and resolves `{ ok, ready, reason }` without changing anything. `setVoiceLanguage` then swaps the voices. `replayLastUtterance(sessionId)` runs the caller's last utterance through the new STT, and the result reaches `onUserSpeechFinal` with `replay: true`.
+Three primitives let your agent run the whole switch while the caller keeps talking. `prepareVoiceLanguage(sessionId, options)` takes the same options as `setVoiceLanguage`, warms the target pools, and resolves `{ ok, ready, reason, message? }` without changing anything. `setVoiceLanguage` then swaps the voices. `replayLastUtterance(sessionId)` runs the caller's last utterance through the new STT, and the result reaches `onUserSpeechFinal` with `replay: true`.
 
 ```ts
 onUserLanguage: async ({ sessionId, language }) => {
-  const profile = { scope: "both", language, voice: language, stt: language } as const;
+  const profile = {
+    scope: "both",
+    language,
+    sttVendor: { provider: "voicethere", language },
+    ttsVendor: { provider: "voicethere", language },
+  } as const;
   const prepare = prepareVoiceLanguage(sessionId, profile); // start early, while the caller talks
   // ... when the caller's utterance is final:
   const ready = await prepare;
@@ -260,7 +332,7 @@ onUserLanguage: async ({ sessionId, language }) => {
 },
 ```
 
-`getVoiceLanguageSwitchSettings(sessionId)` returns the project's `waitMessageMode` (`end_of_utterance`, `immediate` or `off`), wait messages, ready messages and `readyMessageMinMs`. The speech vendor that ships with VoiceThere has the id `local-sherpa`; `profile` can name other vendors with `sttVendor` / `ttsVendor`. Older runners never answer `prepareVoiceLanguage` or `replayLastUtterance`, so both resolve with `reason: "timeout"` (50 s and 10 s) and `getVoiceLanguageSwitchSettings` returns `undefined`; fall back to your own texts and call `setVoiceLanguage` directly.
+`getVoiceLanguageSwitchSettings(sessionId)` returns the project's `waitMessageMode` (`end_of_utterance`, `immediate` or `off`), wait messages, ready messages and `readyMessageMinMs`. `profile` can name other vendors with `sttVendor` / `ttsVendor`. Older runners never answer `prepareVoiceLanguage` or `replayLastUtterance`, so both resolve with `reason: "timeout"` (50 s and 10 s) and `getVoiceLanguageSwitchSettings` returns `undefined`; fall back to your own texts and call `setVoiceLanguage` directly.
 
 See [`templates/language-switch`](./templates/language-switch/README.md) for both modes.
 

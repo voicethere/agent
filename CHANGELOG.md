@@ -6,6 +6,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-20
+
+### Added
+
+- **`voicethere` provider id**: `sttVendor.provider` and `ttsVendor.provider` take `voicethere` for the built-in VoiceThere speech. Results show it as `voicethere` in `sttProvider` and `ttsProvider`. The SDK translates the id on the wire, so it also works with older VoiceThere runtimes.
+- **`message` on results**: `setVoiceLanguage` and `prepareVoiceLanguage` results carry a `message` that says what to change. When an older runtime sends only a `reason`, the SDK fills in the text for `unknown_stt`, `unknown_voice`, `invalid_language`, `language_unavailable`, `unavailable`, `timeout`, `nothing_to_apply` and `invalid_scope`.
+- **Request validation in the SDK**: both calls check the request before sending it and fail with a named `reason` (`invalid_request`, `invalid_scope`, `missing_provider`, `conflicting_fields`, `scope_mismatch`, `unsupported_field`, `nothing_to_apply`).
+- **`VoiceSwitchFailureReason`** type, plus `toWireProviderId` and `toPublicProviderId` helpers.
+- **Provider lists**: the docs and JSDoc now name every provider the runtime accepts, including `groq`, `azure` and `aws` on both sides.
+
+### Changed
+
+- **`language-switch` template**: the default profile asks for `voicethere` on both sides. The chat commands are `/tts voicethere <lang>` and `/stt voicethere <lang>`; `sherpa` still works as the vendor word. Failed switches log the `message`.
+
+### Deprecated
+
+- Top-level `voice` and `stt` in `setVoiceLanguage` options. Use `ttsVendor.voice` and `sttVendor.model`. Combined with the matching vendor object they fail with `conflicting_fields`.
+- The provider ids `local-sherpa` and `cluster-sherpa`. Use `voicethere`.
+
 ## [0.9.8] - 2026-10-13
 
 ### Added

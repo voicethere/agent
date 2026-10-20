@@ -57,6 +57,7 @@ export {
   type SttControlResult,
   type VoiceControlScope,
   type VoiceVendorSelection,
+  type VoiceSwitchFailureReason,
   type VoiceLanguageControlMessage,
   type VoiceLanguageControlAckMessage,
   type VoiceLanguageResult,
@@ -139,3 +140,4 @@ export {
   type SpeakOptions,
   PLAY_BYTES_MAX_DECODED_LENGTH,
 } from "./runtime.js";
+export { toPublicProviderId, toWireProviderId } from "./voice-provider-id.js";

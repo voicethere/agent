@@ -40,6 +40,11 @@ import type {
   VoiceVendorSelection,
   WebhookMessage,
 } from "./protocol.js";
+import { toPublicProviderId, toWireProviderId } from "./voice-provider-id.js";
+import {
+  localVoiceSwitchMessage,
+  validateVoiceRequest,
+} from "./voice-request-validation.js";
 import {
   MIX_REQUIRES_VOICE_PLUS_DATA,
   TTS_POSE_REQUIRES_VOICE,
@@ -677,16 +682,24 @@ function handleVoiceLanguageControlAck(
       message.language.trim(),
     );
   }
+  const text =
+    message.message ??
+    (message.ok ? undefined : localVoiceSwitchMessage(message.reason));
   pending.resolve({
     ok: message.ok,
     reason: message.reason,
+    ...(text ? { message: text } : {}),
     requestId: message.requestId,
     ...(message.language ? { language: message.language } : {}),
     ...(message.voice ? { voice: message.voice } : {}),
     ...(message.stt ? { stt: message.stt } : {}),
     ...(message.scope ? { scope: message.scope } : {}),
-    ...(message.sttProvider ? { sttProvider: message.sttProvider } : {}),
-    ...(message.ttsProvider ? { ttsProvider: message.ttsProvider } : {}),
+    ...(message.sttProvider
+      ? { sttProvider: toPublicProviderId(message.sttProvider) }
+      : {}),
+    ...(message.ttsProvider
+      ? { ttsProvider: toPublicProviderId(message.ttsProvider) }
+      : {}),
   });
 }
 
@@ -697,10 +710,16 @@ function handleVoiceLanguagePrepareResult(
   if (!pending) return;
   clearTimeout(pending.timer);
   pendingVoiceLanguagePrepares.delete(message.requestId);
+  const text =
+    message.message ??
+    (message.ok && message.ready
+      ? undefined
+      : localVoiceSwitchMessage(message.reason));
   pending.resolve({
     ok: message.ok,
     ready: message.ready,
     reason: message.reason,
+    ...(text ? { message: text } : {}),
     ...(message.language ? { language: message.language } : {}),
   });
 }
@@ -1786,24 +1805,27 @@ export interface SetVoiceLanguageOptions {
    */
   scope?: VoiceControlScope;
   /**
-   * Sherpa TTS catalog id (`de`, `en-lessac`, `de-thorsten-high`).
-   * On a TTS switch, omit it to use `language` when that id exists.
+   * @deprecated Use `ttsVendor.voice`. Still works when `ttsVendor` is not
+   * set; combined with it the call fails with `conflicting_fields`.
+   * VoiceThere voice catalog id (`de`, `en-lessac`, `de-thorsten-high`).
    */
   voice?: string;
   /**
-   * Sherpa STT catalog id (`de`, `en-small`). On an STT or both switch, omit
-   * it to use `language` when that id exists. Italian, Portuguese, Dutch,
-   * Polish, and Hindi have no STT id; a `both` switch still changes TTS.
+   * @deprecated Use `sttVendor.model`. Still works when `sttVendor` is not
+   * set; combined with it the call fails with `conflicting_fields`.
+   * VoiceThere STT catalog id (`de`, `en-small`).
    */
   stt?: string;
   /**
    * Replace the STT vendor for this session. Keys stay in project secrets.
-   * `provider`: `local-sherpa`, `openai`, `deepgram`, `assemblyai`, or `google`.
+   * `provider`: `voicethere`, `openai`, `deepgram`, `assemblyai`, `google`,
+   * `elevenlabs`, `fishaudio`, `groq`, `azure`, or `aws`.
    */
   sttVendor?: VoiceVendorSelection;
   /**
    * Replace the TTS vendor for this session. Keys stay in project secrets.
-   * `provider`: `local-sherpa`, `openai`, `elevenlabs`, `cartesia`, `fishaudio`, or `google`.
+   * `provider`: `voicethere`, `openai`, `elevenlabs`, `cartesia`, `fishaudio`,
+   * `google`, `deepgram`, `groq`, `azure`, or `aws`.
    */
   ttsVendor?: VoiceVendorSelection;
   /**
@@ -1818,7 +1840,7 @@ function cleanVendor(
   const provider = selection?.provider?.trim();
   if (!provider) return undefined;
   return {
-    provider,
+    provider: toWireProviderId(provider),
     ...(selection?.model?.trim() ? { model: selection.model.trim() } : {}),
     ...(selection?.voice?.trim() ? { voice: selection.voice.trim() } : {}),
     ...(selection?.language?.trim()
@@ -1839,31 +1861,19 @@ export function setVoiceLanguage(
   options: SetVoiceLanguageOptions,
 ): Promise<VoiceLanguageResult> {
   const requestId = randomUUID();
-  const language = options.language?.trim() ?? "";
-  const scope = options.scope;
-  if (scope && scope !== "stt" && scope !== "tts" && scope !== "both") {
+  const invalid = validateVoiceRequest(options);
+  if (!invalid.ok) {
     return Promise.resolve({
       ok: false,
-      reason: "invalid_scope",
+      reason: invalid.reason,
+      message: invalid.message,
       requestId,
     });
   }
+  const language = options.language?.trim() ?? "";
+  const scope = options.scope?.trim() as VoiceControlScope | undefined;
   const sttVendor = cleanVendor(options.sttVendor);
   const ttsVendor = cleanVendor(options.ttsVendor);
-  const hasWork = Boolean(
-    language ||
-    options.voice?.trim() ||
-    options.stt?.trim() ||
-    sttVendor ||
-    ttsVendor,
-  );
-  if (!hasWork) {
-    return Promise.resolve({
-      ok: false,
-      reason: "nothing_to_apply",
-      requestId,
-    });
-  }
   if (!isVoicethereAgentChild()) {
     return Promise.resolve({ ok: true, reason: "local_mock", requestId });
   }
@@ -1874,7 +1884,12 @@ export function setVoiceLanguage(
   return new Promise<VoiceLanguageResult>((resolve) => {
     const timer = setTimeout(() => {
       pendingVoiceLanguageAcks.delete(requestId);
-      resolve({ ok: false, reason: "timeout", requestId });
+      resolve({
+        ok: false,
+        reason: "timeout",
+        message: localVoiceSwitchMessage("timeout"),
+        requestId,
+      });
     }, ackTimeoutMs);
 
     pendingVoiceLanguageAcks.set(requestId, { resolve, timer });
@@ -1903,30 +1918,19 @@ export function prepareVoiceLanguage(
   sessionId: string,
   options: SetVoiceLanguageOptions,
 ): Promise<VoiceLanguagePrepareResult> {
-  const scope = options.scope;
-  if (scope && scope !== "stt" && scope !== "tts" && scope !== "both") {
+  const invalid = validateVoiceRequest(options);
+  if (!invalid.ok) {
     return Promise.resolve({
       ok: false,
       ready: false,
-      reason: "invalid_scope",
+      reason: invalid.reason,
+      message: invalid.message,
     });
   }
+  const scope = options.scope?.trim() as VoiceControlScope | undefined;
   const language = options.language?.trim() ?? "";
   const sttVendor = cleanVendor(options.sttVendor);
   const ttsVendor = cleanVendor(options.ttsVendor);
-  if (!(
-    language ||
-    options.voice?.trim() ||
-    options.stt?.trim() ||
-    sttVendor ||
-    ttsVendor
-  )) {
-    return Promise.resolve({
-      ok: false,
-      ready: false,
-      reason: "nothing_to_apply",
-    });
-  }
   if (!isVoicethereAgentChild()) {
     return Promise.resolve({ ok: true, ready: true, reason: "local_mock" });
   }
@@ -1934,7 +1938,12 @@ export function prepareVoiceLanguage(
   return new Promise<VoiceLanguagePrepareResult>((resolve) => {
     const timer = setTimeout(() => {
       pendingVoiceLanguagePrepares.delete(requestId);
-      resolve({ ok: false, ready: false, reason: "timeout" });
+      resolve({
+        ok: false,
+        ready: false,
+        reason: "timeout",
+        message: localVoiceSwitchMessage("timeout"),
+      });
     }, VOICE_LANGUAGE_PREPARE_TIMEOUT_MS);
     pendingVoiceLanguagePrepares.set(requestId, { resolve, timer });
     sendParentMessage({

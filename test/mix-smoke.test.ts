@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildMixSmokeInlineClipBase64,
+  CLIP_WAV_AMPLITUDE,
   CLIP_WAV_DURATION_MS,
+  CLIP_WAV_TONE_HZ,
   isMixCommand,
   isMixPose,
   type MixPose,
@@ -389,6 +391,31 @@ describe("buildMixSmokeInlineClipBase64", () => {
     const dataSize = decoded.readUInt32LE(40);
     const durationMs = (dataSize / 2 / 16_000) * 1000;
     expect(Math.round(durationMs)).toBe(CLIP_WAV_DURATION_MS);
+  });
+
+  it("inline clip is a tone, not a constant (Opus removes DC)", () => {
+    const decoded = Buffer.from(buildMixSmokeInlineClipBase64(), "base64");
+    const n = (decoded.byteLength - 44) / 2;
+    const samples: number[] = [];
+    for (let i = 0; i < n; i++) samples.push(decoded.readInt16LE(44 + i * 2));
+    const mean = samples.reduce((a, b) => a + b, 0) / n;
+    const rms = Math.sqrt(samples.reduce((a, b) => a + b * b, 0) / n);
+    let crossings = 0;
+    for (let i = 1; i < n; i++) {
+      if (samples[i - 1]! < 0 !== samples[i]! < 0) crossings++;
+    }
+    const expectedCrossings =
+      2 * CLIP_WAV_TONE_HZ * (CLIP_WAV_DURATION_MS / 1000);
+    expect(Math.abs(mean)).toBeLessThan(CLIP_WAV_AMPLITUDE * 0.01);
+    expect(Math.abs(rms - CLIP_WAV_AMPLITUDE / Math.SQRT2)).toBeLessThan(
+      (CLIP_WAV_AMPLITUDE / Math.SQRT2) * 0.05,
+    );
+    expect(Math.abs(crossings - expectedCrossings)).toBeLessThan(
+      expectedCrossings * 0.02,
+    );
+    expect(Math.max(...samples.map((v) => Math.abs(v)))).toBeLessThanOrEqual(
+      CLIP_WAV_AMPLITUDE,
+    );
   });
 });
 

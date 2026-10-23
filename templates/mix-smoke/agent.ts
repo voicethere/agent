@@ -41,9 +41,13 @@ export const FIXTURE_MARKER = "mix-smoke-fixture-a";
 /** Inline clip: 16 kHz mono s16le — decoded size stays under 64 KiB play cap. */
 export const CLIP_WAV_DURATION_MS = 2000;
 export const CLIP_WAV_AMPLITUDE = 14_000;
+export const CLIP_WAV_TONE_HZ = 440;
 export const INLINE_CLIP_DUMMY_URL = "https://example.com/inline-clip.wav";
 
-/** Loud mono WAV (s16le 16 kHz) for default inline clip play. */
+/**
+ * Loud 440 Hz tone, mono WAV (s16le 16 kHz) for default inline clip play.
+ * Not a constant value: Opus removes DC, so a constant would arrive as two clicks.
+ */
 export function buildMixSmokeInlineClipBase64(
   durationMs = CLIP_WAV_DURATION_MS,
   amplitude = CLIP_WAV_AMPLITUDE,
@@ -68,7 +72,12 @@ export function buildMixSmokeInlineClipBase64(
   buffer.write("data", 36);
   buffer.writeUInt32LE(dataSize, 40);
   for (let i = 0; i < numSamples; i++) {
-    buffer.writeInt16LE(amplitude, 44 + i * 2);
+    buffer.writeInt16LE(
+      Math.round(
+        amplitude * Math.sin((2 * Math.PI * CLIP_WAV_TONE_HZ * i) / sampleRate),
+      ),
+      44 + i * 2,
+    );
   }
   return buffer.toString("base64");
 }

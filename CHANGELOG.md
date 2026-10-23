@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-23
+
+### Fixed
+
+- **mix-smoke template**: the inline clip is a 440 Hz tone. It was a constant value, which Opus removes, so listeners heard two short clicks instead of a 2 s clip.
+
 ## [0.10.0] - 2026-10-20
 
 ### Added

@@ -7,23 +7,23 @@ export const LLM_PROVIDERS: Record<
   openai: {
     title: "OpenAI",
     defaultModel: "gpt-4o-mini",
-    apiKeyEnv: "OPENAI_API_KEY",
+    apiKeyEnv: "AGENT_OPENAI_API_KEY",
     docsUrl: "https://platform.openai.com/docs/api-reference/chat",
   },
   anthropic: {
     title: "Anthropic",
     defaultModel: "claude-haiku-5-5",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
+    apiKeyEnv: "AGENT_ANTHROPIC_API_KEY",
     docsUrl: "https://docs.anthropic.com/en/api/messages",
   },
   gemini: {
     title: "Google Gemini",
-    apiKeyEnv: "GEMINI_API_KEY",
+    apiKeyEnv: "AGENT_GEMINI_API_KEY",
     docsUrl: "https://ai.google.dev/gemini-api/docs",
   },
   openrouter: {
     title: "OpenRouter",
-    apiKeyEnv: "OPENROUTER_API_KEY",
+    apiKeyEnv: "AGENT_OPENROUTER_API_KEY",
     docsUrl: "https://openrouter.ai/docs/api-reference/overview",
   },
 };

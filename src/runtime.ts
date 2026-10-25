@@ -2893,3 +2893,42 @@ export function parseChatText(message: unknown): string | null {
   const trimmed = record.text.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
+
+export interface ProjectServiceInfo {
+  name: string;
+  url: string;
+  token: string;
+}
+
+/** The project service of this deployment, or null when the project has none. */
+export function getService(
+  env: Record<string, string | undefined> = process.env,
+): ProjectServiceInfo | null {
+  const url = env.AGENT_SERVICE_URL;
+  const token = env.AGENT_SERVICE_TOKEN;
+  if (!url || !token) return null;
+  return { name: env.AGENT_SERVICE_NAME || "service", url, token };
+}
+
+/** Fetch from the project service with its bearer token (15 s default timeout). */
+export async function serviceFetch(
+  path: string,
+  init?: RequestInit,
+  env: Record<string, string | undefined> = process.env,
+): Promise<Response> {
+  const svc = getService(env);
+  if (!svc) {
+    const err = new Error(
+      "This project has no service (AGENT_SERVICE_URL and AGENT_SERVICE_TOKEN are not set)",
+    ) as Error & { code?: string };
+    err.code = "AGENT_SERVICE_UNAVAILABLE";
+    throw err;
+  }
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${svc.token}`);
+  return fetch(`${svc.url}${path}`, {
+    ...init,
+    headers,
+    signal: init?.signal ?? AbortSignal.timeout(15_000),
+  });
+}

@@ -235,7 +235,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     const sources: McpToolSource[] = [];
     for (const src of config.toolSources ?? []) {
       if (src.kind === "service") {
-        const base = env.VOICETHERE_SERVICE_URL;
+        const base = env.AGENT_SERVICE_URL;
         if (!nonEmpty(base)) {
           agentLog(
             "warn",
@@ -244,11 +244,11 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
           continue;
         }
         const headers: Record<string, string> = {};
-        const token = env.VOICETHERE_SERVICE_TOKEN;
+        const token = env.AGENT_SERVICE_TOKEN;
         if (nonEmpty(token)) {
           headers.Authorization = `Bearer ${token}`;
         } else {
-          agentLog("warn", "toolSources: VOICETHERE_SERVICE_TOKEN is not set");
+          agentLog("warn", "toolSources: AGENT_SERVICE_TOKEN is not set");
         }
         const source = makeSource({
           name: "service",

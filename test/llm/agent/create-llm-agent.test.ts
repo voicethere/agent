@@ -91,7 +91,7 @@ function fakeProvider(scripts: Step[][]): {
 const BASE_CONFIG = {
   version: 1,
   provider: "openai",
-  apiKeySecret: "TEST_KEY",
+  apiKeySecret: "AGENT_TEST_KEY",
 };
 
 describe("createLlmAgent", () => {
@@ -137,7 +137,7 @@ describe("createLlmAgent", () => {
       config: { ...BASE_CONFIG, ...over.config },
       systemPrompt: "You are a test agent.",
       provider: fake.provider,
-      env: () => ({ TEST_KEY: "secret-value" }),
+      env: () => ({ AGENT_TEST_KEY: "secret-value" }),
       ...over.options,
       hooks: {
         onTurnEnd: (s) => {
@@ -365,7 +365,24 @@ describe("createLlmAgent", () => {
     ).catch((e: unknown) => e)) as Error & { code?: string };
     expect(err).toBeInstanceOf(Error);
     expect(err.code).toBe("LLM_API_KEY_MISSING");
-    expect(err.message).toContain("TEST_KEY");
+    expect(err.message).toContain("AGENT_TEST_KEY");
+  });
+
+  it("missing API key error names AGENT_OPENAI_API_KEY", async () => {
+    const handlers = createLlmAgent({
+      config: {
+        version: 1,
+        provider: "openai",
+        apiKeySecret: "AGENT_OPENAI_API_KEY",
+      },
+      systemPrompt: "p",
+      env: () => ({}),
+    });
+    const err = (await Promise.resolve(
+      handlers.onAgentStart!({ env: {} }),
+    ).catch((e: unknown) => e)) as Error & { code?: string };
+    expect(err.code).toBe("LLM_API_KEY_MISSING");
+    expect(err.message).toContain("AGENT_OPENAI_API_KEY");
   });
 
   it("invalid config throws LLM_CONFIG_INVALID with paths", () => {
@@ -552,7 +569,7 @@ describe("createLlmAgent", () => {
     });
   });
 
-  it("service tool source uses VOICETHERE_SERVICE_URL and the bearer token", async () => {
+  it("service tool source uses AGENT_SERVICE_URL and the bearer token", async () => {
     const sourceFactory = vi.fn((o: { name: string }) => ({
       name: o.name,
       status: "ready",
@@ -569,9 +586,9 @@ describe("createLlmAgent", () => {
       systemPrompt: "p",
       provider: fakeProvider([[done("x")]]).provider,
       env: () => ({
-        TEST_KEY: "k",
-        VOICETHERE_SERVICE_URL: "http://svc.internal:3000",
-        VOICETHERE_SERVICE_TOKEN: "tok-123",
+        AGENT_TEST_KEY: "k",
+        AGENT_SERVICE_URL: "http://svc.internal:3000",
+        AGENT_SERVICE_TOKEN: "tok-123",
       }),
       sourceFactory:
         sourceFactory as unknown as CreateLlmAgentOptions["sourceFactory"],

@@ -6,7 +6,7 @@ describe("llm catalog", () => {
     expect(resolveModel("openai")).toBe("gpt-4o-mini");
     expect(resolveModel("anthropic", "  ")).toBe("claude-haiku-5-5");
     expect(resolveModel("openai", " gpt-x ")).toBe("gpt-x");
-    expect(LLM_PROVIDERS.gemini.apiKeyEnv).toBe("GEMINI_API_KEY");
+    expect(LLM_PROVIDERS.gemini.apiKeyEnv).toBe("AGENT_GEMINI_API_KEY");
   });
 
   it("resolveModel requires a model for gemini and openrouter", () => {

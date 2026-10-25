@@ -8,7 +8,11 @@ import {
   validateLlmAgentConfig,
 } from "../../../src/llm/agent/config.js";
 
-const base = { version: 1, provider: "openai", apiKeySecret: "OPENAI_API_KEY" };
+const base = {
+  version: 1,
+  provider: "openai",
+  apiKeySecret: "AGENT_OPENAI_API_KEY",
+};
 
 function errorsOf(input: unknown) {
   const r = validateLlmAgentConfig(input);
@@ -20,6 +24,63 @@ describe("validateLlmAgentConfig", () => {
   it("accepts a minimal config", () => {
     const r = validateLlmAgentConfig(base);
     expect(r.ok).toBe(true);
+  });
+
+  it("rejects an apiKeySecret without the AGENT_ prefix", () => {
+    expect(
+      errorsOf({ ...base, apiKeySecret: "OPENAI_API_KEY" }),
+    ).toContainEqual({
+      path: "apiKeySecret",
+      message:
+        "must start with AGENT_ (only AGENT_* project secrets reach the agent)",
+    });
+  });
+
+  it("rejects an MCP bearer secret without the AGENT_ prefix", () => {
+    const errors = errorsOf({
+      ...base,
+      toolSources: [
+        {
+          kind: "mcp",
+          name: "ok",
+          url: "https://example.com/mcp",
+          auth: { type: "bearer", secret: "MCP_TOKEN" },
+        },
+        {
+          kind: "mcp",
+          name: "hdr",
+          url: "https://example.com/mcp2",
+          auth: { type: "headers", headers: { "X-Key": "MCP_KEY" } },
+        },
+      ],
+    });
+    expect(errors.map((e) => e.path)).toEqual([
+      "toolSources[0].auth.secret",
+      "toolSources[1].auth.headers.X-Key",
+    ]);
+    expect(errors[0].message).toContain("must start with AGENT_");
+  });
+
+  it("accepts AGENT_ names", () => {
+    expect(
+      validateLlmAgentConfig({
+        ...base,
+        toolSources: [
+          {
+            kind: "mcp",
+            name: "ok",
+            url: "https://example.com/mcp",
+            auth: { type: "bearer", secret: "AGENT_MCP_TOKEN" },
+          },
+          {
+            kind: "mcp",
+            name: "hdr",
+            url: "https://example.com/mcp2",
+            auth: { type: "headers", headers: { "X-Key": "AGENT_MCP_KEY" } },
+          },
+        ],
+      }).ok,
+    ).toBe(true);
   });
 
   it("accepts and ignores $schema", () => {
@@ -37,7 +98,7 @@ describe("validateLlmAgentConfig", () => {
       errorsOf({
         ...base,
         provider: "anthropic",
-        apiKeySecret: "ANTHROPIC_API_KEY",
+        apiKeySecret: "AGENT_ANTHROPIC_API_KEY",
         baseUrl: "https://example.com/v1",
       }),
     ).toContainEqual({

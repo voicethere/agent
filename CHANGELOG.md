@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-25
+
 ### Added
 
 - `@voicethere/agent/llm`: streaming provider adapters (OpenAI, Anthropic, Google Gemini, OpenRouter) with first-token and total timeouts.

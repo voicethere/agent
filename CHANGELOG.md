@@ -9,6 +9,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 ### Added
 
 - `@voicethere/agent/llm`: streaming provider adapters (OpenAI, Anthropic, Google Gemini, OpenRouter) with first-token and total timeouts.
+- `McpToolSource` (Streamable HTTP MCP client with reconnect) and `ToolRegistry` (custom + MCP tools, name rules, 128-tool cap, 16 KiB result cap).
 
 ## [0.11.0] - 2026-10-25
 

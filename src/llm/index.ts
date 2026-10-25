@@ -58,3 +58,21 @@ export type {
   LlmToolResult,
   LlmToolSpec,
 } from "./types.js";
+export {
+  MAX_RESULT_BYTES,
+  MAX_TOOLS,
+  McpToolSource,
+  ToolNameConflictError,
+  ToolRegistry,
+} from "./mcp/index.js";
+export type {
+  CustomTool,
+  McpCallResult,
+  McpLogFn,
+  McpSourceStatus,
+  McpToolInfo,
+  McpToolSourceOptions,
+  RegisteredTool,
+  ToolCallContext,
+  ToolCallResult,
+} from "./mcp/index.js";

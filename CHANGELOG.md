@@ -10,6 +10,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 - `@voicethere/agent/llm`: streaming provider adapters (OpenAI, Anthropic, Google Gemini, OpenRouter) with first-token and total timeouts.
 - `McpToolSource` (Streamable HTTP MCP client with reconnect) and `ToolRegistry` (custom + MCP tools, name rules, 128-tool cap, 16 KiB result cap).
+- `createLlmAgent` (`@voicethere/agent/llm`): a turn loop for LLM-driven agents. Streams sentences to `speak()` under one `turnId`, runs tool rounds (parallel calls, filler, round and timeout limits), handles barge-in through `onAgentInterrupted` (history keeps what the caller heard, with an interruption note), and takes chat input from the data channel. Never blocks the session queue.
+- `defineTool`, `LlmAgentHooks` (`onBeforeLlmCall`, `onAssistantText`, `onToolCall`, `onToolResult`, `onTurnEnd`, `respond`), `SentenceSplitter` and `ConversationHistory`.
+- `validateLlmAgentConfig`, `LLM_AGENT_CONFIG_DEFAULTS` and a JSON Schema for the config at `@voicethere/agent/llm/schema.json`.
 
 ## [0.11.0] - 2026-10-25
 

@@ -76,3 +76,26 @@ export type {
   ToolCallContext,
   ToolCallResult,
 } from "./mcp/index.js";
+export { createLlmAgent } from "./agent/create-llm-agent.js";
+export type { CreateLlmAgentOptions } from "./agent/create-llm-agent.js";
+export { defineTool } from "./agent/define-tool.js";
+export {
+  LLM_AGENT_CONFIG_DEFAULTS,
+  LLM_AGENT_CONFIG_JSON_SCHEMA,
+  validateLlmAgentConfig,
+} from "./agent/config.js";
+export type {
+  LlmAgentConfig,
+  LlmAgentConfigError,
+  LlmAgentConfigResult,
+  LlmAgentGreeting,
+  LlmAgentMcpAuth,
+  LlmAgentMcpSource,
+  LlmAgentServiceSource,
+  LlmAgentToolFiller,
+  LlmAgentToolSource,
+  LlmAgentToolsConfig,
+} from "./agent/config.js";
+export { SentenceSplitter } from "./agent/sentence-splitter.js";
+export { ConversationHistory } from "./agent/history.js";
+export type { LlmAgentHooks, TurnContext, TurnSummary } from "./agent/hooks.js";

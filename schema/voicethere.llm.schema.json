@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://voicethere.io/schema/voicethere.llm.schema.json",
+  "title": "VoiceThere LLM agent config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "provider",
+    "apiKeySecret"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "provider": {
+      "enum": [
+        "openai",
+        "anthropic",
+        "gemini",
+        "openrouter"
+      ]
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "apiKeySecret": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+      "description": "Name of an environment variable (secret), never its value."
+    },
+    "baseUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://",
+      "description": "Only allowed when provider is \"openai\"."
+    },
+    "temperature": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 2
+    },
+    "maxOutputTokens": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8192,
+      "default": 512
+    },
+    "greeting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "interruptible": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "bargeIn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "project",
+            "on",
+            "off"
+          ]
+        }
+      },
+      "default": {
+        "mode": "project"
+      }
+    },
+    "speechDuringNonInterruptible": {
+      "enum": [
+        "answer_after",
+        "discard"
+      ],
+      "default": "answer_after"
+    },
+    "history": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "turns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        },
+        "interruptionNote": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxRounds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 5
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "default": 15000
+        },
+        "maxResultBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65536,
+          "default": 16384
+        },
+        "filler": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "afterMs": {
+              "type": "integer",
+              "minimum": 500,
+              "maximum": 10000,
+              "default": 1500
+            },
+            "interruptible": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        }
+      }
+    },
+    "toolSources": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "service"
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^/",
+                "default": "/mcp"
+              },
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "deny": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "name",
+              "url"
+            ],
+            "properties": {
+              "kind": {
+                "const": "mcp"
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]{1,40}$"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "pattern": "^https://",
+                "description": "https only; local and private addresses are rejected."
+              },
+              "auth": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "none"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "secret"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "bearer"
+                      },
+                      "secret": {
+                        "type": "string",
+                        "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+                        "description": "Name of an environment variable (secret), never its value."
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "headers"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "headers"
+                      },
+                      "headers": {
+                        "type": "object",
+                        "propertyNames": {
+                          "pattern": "^[A-Za-z0-9-]{1,64}$"
+                        },
+                        "additionalProperties": {
+                          "type": "string",
+                          "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+                          "description": "Name of an environment variable (secret), never its value."
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "deny": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "interruptPolicy": {
+      "enum": [
+        "cancel",
+        "finish"
+      ],
+      "default": "cancel"
+    },
+    "serviceWaitMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 60000,
+      "default": 20000
+    },
+    "fallbackText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "default": "Sorry, something went wrong. Please try again."
+    },
+    "speakChatReplies": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

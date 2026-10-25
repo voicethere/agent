@@ -30,6 +30,26 @@ describe("llm-agent template", () => {
     }
   });
 
+  it("template bundle carries only the OpenAI SDK", async () => {
+    const { build } = await import("esbuild");
+    const result = await build({
+      entryPoints: [join(templateDir, "agent.ts")],
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      write: false,
+      metafile: true,
+      logLevel: "silent",
+      loader: { ".md": "text" },
+    });
+    const list = Object.keys(result.metafile.inputs);
+    expect(list.some((p) => p.includes("node_modules/openai/"))).toBe(true);
+    expect(list.some((p) => p.includes("@anthropic-ai/sdk"))).toBe(false);
+    expect(list.some((p) => p.includes("@google/genai"))).toBe(false);
+    const bytes = Object.values(result.metafile.outputs)[0]?.bytes ?? 0;
+    console.log(`llm-agent template bundle (openai only): ${bytes} bytes`);
+  }, 30_000);
+
   it("template config passes validateLlmAgentConfig", () => {
     const config = JSON.parse(
       readFileSync(join(templateDir, "voicethere.llm.json"), "utf8"),

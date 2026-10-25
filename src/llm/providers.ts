@@ -1,9 +1,6 @@
-import { createAnthropicProvider } from "./anthropic-provider.js";
 import { withStreamBounds } from "./bounded-provider.js";
-import { createGeminiProvider } from "./gemini-provider.js";
-import { createOpenAiCompatibleProvider } from "./openai-provider.js";
 import { LlmProviderError } from "./types.js";
-import type { LlmProvider, LlmProviderId } from "./types.js";
+import type { LlmProvider, LlmProviderId, LlmProviderModule } from "./types.js";
 
 export interface LlmProviderConfig {
   provider: LlmProviderId;
@@ -12,32 +9,39 @@ export interface LlmProviderConfig {
   bounds?: Parameters<typeof withStreamBounds>[1];
 }
 
-export function createLlmProvider(config: LlmProviderConfig): LlmProvider {
+/** Subpath of `@voicethere/agent/llm/` that serves a provider id. */
+export function moduleSubpath(
+  id: LlmProviderId,
+): "openai" | "anthropic" | "gemini" {
+  switch (id) {
+    case "openai":
+    case "openrouter":
+      return "openai";
+    case "anthropic":
+      return "anthropic";
+    case "gemini":
+      return "gemini";
+  }
+}
+
+export function createLlmProvider(
+  config: LlmProviderConfig,
+  modules: readonly LlmProviderModule[],
+): LlmProvider {
   if (!config.apiKey) {
     throw new LlmProviderError("LLM_AUTH_FAILED", "API key is empty");
   }
-  const { apiKey, baseUrl } = config;
-  let inner: LlmProvider;
-  switch (config.provider) {
-    case "openai":
-    case "openrouter":
-      inner = createOpenAiCompatibleProvider({
-        id: config.provider,
-        apiKey,
-        baseUrl,
-      });
-      break;
-    case "anthropic":
-      inner = createAnthropicProvider({ apiKey, baseUrl });
-      break;
-    case "gemini":
-      inner = createGeminiProvider({ apiKey, baseUrl });
-      break;
-    default:
-      throw new LlmProviderError(
-        "LLM_BAD_REQUEST",
-        `unknown provider ${String(config.provider)}`,
-      );
+  const mod = modules.find((m) => m.ids.includes(config.provider));
+  if (!mod) {
+    throw new LlmProviderError(
+      "LLM_BAD_REQUEST",
+      `provider ${String(config.provider)} is not registered; import it from @voicethere/agent/llm/${moduleSubpath(config.provider)} and pass it in providers`,
+    );
   }
+  const inner = mod.create({
+    id: config.provider,
+    apiKey: config.apiKey,
+    baseUrl: config.baseUrl,
+  });
   return withStreamBounds(inner, config.bounds);
 }

@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.13.0]
+
+### Breaking
+
+- `createLlmProvider(config, modules)` and `createLlmAgent({ providers })` now take the provider SDK modules explicitly. Import them from `@voicethere/agent/llm/openai`, `@voicethere/agent/llm/anthropic` or `@voicethere/agent/llm/gemini` (`openrouter` uses the `openai` module). A provider that is selected but not registered throws `LLM_CONFIG_INVALID` from `createLlmAgent()`, so the deploy check reports it.
+- Why: a bundle now carries only the selected provider's SDK. The `llm-agent` template bundle drops from 4.8 MB to about 1.8 MB before minification.
+
 ## [0.12.1] - 2026-10-25
 
 ### Added

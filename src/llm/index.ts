@@ -6,6 +6,7 @@ export type { StreamBounds } from "./bounded-provider.js";
 export { LlmProviderError } from "./types.js";
 export type {
   LlmErrorCode,
+  LlmProviderModule,
   LlmMessage,
   LlmProvider,
   LlmProviderId,

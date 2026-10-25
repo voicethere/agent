@@ -22,6 +22,24 @@
       "require": "./dist/host/index.js",
       "default": "./dist/host/index.js"
     },
+    "./llm/openai": {
+      "types": "./dist/llm/openai.d.ts",
+      "import": "./dist/llm/openai.js",
+      "require": "./dist/llm/openai.js",
+      "default": "./dist/llm/openai.js"
+    },
+    "./llm/anthropic": {
+      "types": "./dist/llm/anthropic.d.ts",
+      "import": "./dist/llm/anthropic.js",
+      "require": "./dist/llm/anthropic.js",
+      "default": "./dist/llm/anthropic.js"
+    },
+    "./llm/gemini": {
+      "types": "./dist/llm/gemini.d.ts",
+      "import": "./dist/llm/gemini.js",
+      "require": "./dist/llm/gemini.js",
+      "default": "./dist/llm/gemini.js"
+    },
     "./llm": {
       "types": "./dist/llm/index.d.ts",
       "import": "./dist/llm/index.js",

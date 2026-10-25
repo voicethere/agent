@@ -82,3 +82,14 @@ export class LlmProviderError extends Error {
     this.name = "LlmProviderError";
   }
 }
+
+/** One provider SDK adapter. Import it from its own subpath so a bundle carries only the SDKs it uses. */
+export interface LlmProviderModule {
+  /** Provider ids this module serves (`openai` module serves `openai` and `openrouter`). */
+  readonly ids: readonly LlmProviderId[];
+  create(opts: {
+    id: LlmProviderId;
+    apiKey: string;
+    baseUrl?: string;
+  }): LlmProvider;
+}

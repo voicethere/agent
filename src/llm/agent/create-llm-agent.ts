@@ -25,6 +25,7 @@ import { LlmProviderError } from "../types.js";
 import type {
   LlmMessage,
   LlmProvider,
+  LlmProviderModule,
   LlmStreamEvent,
   LlmToolResult,
 } from "../types.js";
@@ -47,6 +48,8 @@ export interface CreateLlmAgentOptions {
   env?: () => Record<string, string | undefined>;
   /** Test injection. */
   provider?: LlmProvider;
+  /** Provider SDK modules this agent may use, e.g. `[openai]` from `@voicethere/agent/llm/openai`. Must include the one `config.provider` selects. */
+  providers?: readonly LlmProviderModule[];
   now?: () => number;
   /** Test injection for MCP tool sources. */
   sourceFactory?: (opts: McpToolSourceOptions) => McpToolSource;
@@ -131,6 +134,18 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     );
   }
   const config: LlmAgentConfig = validated.config;
+  if (
+    !opts.provider &&
+    !(opts.providers ?? []).some((m) => m.ids.includes(config.provider))
+  ) {
+    // Quotes are interpolated so the eject copy's import scan sees no specifier here.
+    const sub = config.provider === "openrouter" ? "openai" : config.provider;
+    const q = '"';
+    throw configError(
+      `voicethere.llm.json selects provider ${q}${config.provider}${q}, but agent.ts does not register it. Add: import { ${sub} } from ${q}@voicethere/agent/llm/${sub}${q}; and pass providers: [${sub}]`,
+      "LLM_CONFIG_INVALID",
+    );
+  }
   const hooks = opts.hooks ?? {};
   const now = opts.now ?? Date.now;
   const getEnv = opts.env ?? (() => process.env);
@@ -821,11 +836,14 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         );
       }
       if (!provider) {
-        provider = createLlmProvider({
-          provider: config.provider,
-          apiKey,
-          baseUrl: config.baseUrl,
-        });
+        provider = createLlmProvider(
+          {
+            provider: config.provider,
+            apiKey,
+            baseUrl: config.baseUrl,
+          },
+          opts.providers ?? [],
+        );
       }
       buildRegistry(env);
     },

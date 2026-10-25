@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createLlmProvider } from "../../src/llm/index.js";
+import { openai } from "../../src/llm/openai.js";
 import type { LlmRequest } from "../../src/llm/types.js";
 import { collect, sseData, startMock, type MockServer } from "./mock-server.js";
 
@@ -27,12 +28,15 @@ describe("withStreamBounds", () => {
     mock = undefined;
   });
   const make = (bounds = {}) =>
-    createLlmProvider({
-      provider: "openai",
-      apiKey: "k",
-      baseUrl: mock!.baseUrl,
-      bounds: { retryDelayMs: 5, ...bounds },
-    });
+    createLlmProvider(
+      {
+        provider: "openai",
+        apiKey: "k",
+        baseUrl: mock!.baseUrl,
+        bounds: { retryDelayMs: 5, ...bounds },
+      },
+      [openai],
+    );
 
   it("retries once on 429 before any text", async () => {
     mock = await startMock([{ status: 429 }, { sse: OK_SSE }]);

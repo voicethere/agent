@@ -4,6 +4,7 @@ import { defineTool } from "../../../src/llm/agent/define-tool.js";
 import { createLlmAgent } from "../../../src/llm/agent/create-llm-agent.js";
 import type { CreateLlmAgentOptions } from "../../../src/llm/agent/create-llm-agent.js";
 import type { TurnSummary } from "../../../src/llm/agent/hooks.js";
+import { openai } from "../../../src/llm/openai.js";
 import { LlmProviderError } from "../../../src/llm/types.js";
 import type {
   LlmProvider,
@@ -358,6 +359,7 @@ describe("createLlmAgent", () => {
     const handlers = createLlmAgent({
       config: BASE_CONFIG,
       systemPrompt: "p",
+      providers: [openai],
       env: () => ({}),
     });
     const err = (await Promise.resolve(
@@ -376,6 +378,7 @@ describe("createLlmAgent", () => {
         apiKeySecret: "AGENT_OPENAI_API_KEY",
       },
       systemPrompt: "p",
+      providers: [openai],
       env: () => ({}),
     });
     const err = (await Promise.resolve(
@@ -383,6 +386,39 @@ describe("createLlmAgent", () => {
     ).catch((e: unknown) => e)) as Error & { code?: string };
     expect(err.code).toBe("LLM_API_KEY_MISSING");
     expect(err.message).toContain("AGENT_OPENAI_API_KEY");
+  });
+
+  it("throws at createLlmAgent when the selected provider module is not registered", () => {
+    let caught: (Error & { code?: string }) | undefined;
+    try {
+      createLlmAgent({
+        config: {
+          version: 1,
+          provider: "anthropic",
+          apiKeySecret: "AGENT_ANTHROPIC_API_KEY",
+        },
+        systemPrompt: "p",
+        providers: [openai],
+      });
+    } catch (e) {
+      caught = e as Error & { code?: string };
+    }
+    expect(caught?.code).toBe("LLM_CONFIG_INVALID");
+    expect(caught?.message).toContain("@voicethere/agent/llm/anthropic");
+  });
+
+  it("openrouter is served by the openai module", () => {
+    expect(() =>
+      createLlmAgent({
+        config: {
+          version: 1,
+          provider: "openrouter",
+          apiKeySecret: "AGENT_OPENROUTER_API_KEY",
+        },
+        systemPrompt: "p",
+        providers: [openai],
+      }),
+    ).not.toThrow();
   });
 
   it("invalid config throws LLM_CONFIG_INVALID with paths", () => {

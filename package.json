@@ -16,6 +16,12 @@
       "require": "./dist/runner.js",
       "default": "./dist/runner.js"
     },
+    "./host": {
+      "types": "./dist/host/index.d.ts",
+      "import": "./dist/host/index.js",
+      "require": "./dist/host/index.js",
+      "default": "./dist/host/index.js"
+    },
     "./verify": {
       "types": "./dist/verify/run-verify.d.ts",
       "import": "./dist/verify/run-verify.js",

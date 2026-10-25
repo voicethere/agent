@@ -30,7 +30,14 @@ for (const [subpath, spec] of Object.entries(pkg.exports ?? {})) {
 
 const requireFromPkg = createRequire(join(root, "package.json"));
 
-for (const subpath of ["", "/verify", "/templates", "/build", "/host"]) {
+for (const subpath of [
+  "",
+  "/verify",
+  "/templates",
+  "/build",
+  "/host",
+  "/llm",
+]) {
   const resolved = requireFromPkg.resolve(`${pkg.name}${subpath}`);
   if (!resolved.endsWith(".js")) {
     throw new Error(
@@ -77,6 +84,13 @@ for (const subpath of ["", "/verify", "/templates", "/build", "/host"]) {
       if (typeof mod[exportName] !== "function") {
         throw new Error(`@voicethere/agent/host must export ${exportName}`);
       }
+    }
+  } else if (subpath === "/llm") {
+    if (typeof mod.createLlmProvider !== "function") {
+      throw new Error("@voicethere/agent/llm must export createLlmProvider");
+    }
+    if (typeof mod.LLM_PROVIDERS !== "object" || mod.LLM_PROVIDERS == null) {
+      throw new Error("@voicethere/agent/llm must export LLM_PROVIDERS");
     }
   } else if (typeof mod !== "object" || mod == null) {
     throw new Error("@voicethere/agent root export must be an object");

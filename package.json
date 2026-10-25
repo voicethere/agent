@@ -22,6 +22,12 @@
       "require": "./dist/host/index.js",
       "default": "./dist/host/index.js"
     },
+    "./llm": {
+      "types": "./dist/llm/index.d.ts",
+      "import": "./dist/llm/index.js",
+      "require": "./dist/llm/index.js",
+      "default": "./dist/llm/index.js"
+    },
     "./verify": {
       "types": "./dist/verify/run-verify.d.ts",
       "import": "./dist/verify/run-verify.js",
@@ -99,17 +105,34 @@
     "esbuild": "0.25.12"
   },
   "peerDependencies": {
-    "@node-webrtc-rust/sdk": ">=0.9.0"
+    "@node-webrtc-rust/sdk": ">=0.9.0",
+    "openai": "7.43.0",
+    "@anthropic-ai/sdk": "1.3.0",
+    "@google/genai": "2.31.0"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "1.3.0",
+    "@google/genai": "2.31.0",
     "@node-webrtc-rust/helpers": "0.9.9",
     "@node-webrtc-rust/sdk": "0.9.9",
     "@node-webrtc-rust/signaling": "0.9.9",
     "@types/node": "22.20.1",
     "http-server": "14.1.1",
     "ioredis": "5.11.1",
+    "openai": "7.43.0",
     "tsx": "4.19.2",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
+  },
+  "peerDependenciesMeta": {
+    "openai": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@google/genai": {
+      "optional": true
+    }
   }
 }

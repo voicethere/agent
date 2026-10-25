@@ -176,18 +176,93 @@ describe("SessionSpeakController", () => {
   });
 
   it("flushPendingInterruption emits once with an elapsed-time estimate before the reply end arrives", () => {
+    clock = 0;
     accept("r1", "Your order ships tomorrow morning.", { turnId: "t" });
     ctl.onPlayStart("r1");
-    clock += 1000;
+    clock = 800;
     ctl.onBargeIn();
-    clock += 500;
+    clock = 2500;
     ctl.flushPendingInterruption();
     ctl.flushPendingInterruption();
     expect(interruptions()).toHaveLength(1);
-    expect(interruptions()[0]!.replyPlayedMs).toBe(1500);
+    expect(interruptions()[0]!.replyPlayedMs).toBe(800);
     ctl.onReplyEnd("r1", { playedMs: 900, interrupted: true });
     expect(interruptions()).toHaveLength(1);
     expect(results()).toHaveLength(1);
+  });
+
+  it("reply end arriving before barge_in still reports the cut text", () => {
+    accept("A", "Your order ships tomorrow morning.", { turnId: "t" });
+    accept("B", "Anything else?", { turnId: "t" });
+    ctl.onPlayStart("A");
+    ctl.onReplyEnd("A", {
+      interrupted: true,
+      playedMs: 1000,
+      synthesizedMs: 2000,
+      synthesisComplete: true,
+    });
+    ctl.onBargeIn();
+    expect(interruptions()).toHaveLength(1);
+    expect(interruptions()[0]).toMatchObject({
+      playedText: "Your order ships",
+      unplayedText: "tomorrow morning. Anything else?",
+      cancelledRequestIds: ["B"],
+      cutRequestId: "A",
+    });
+    expect(results().find((m) => m.requestId === "B")?.status).toBe(
+      "cancelled",
+    );
+  });
+
+  it("an interrupted reply end older than the window is not used as the cut", () => {
+    accept("A", "Your order ships tomorrow morning.", { turnId: "t" });
+    accept("B", "Anything else?", { turnId: "t" });
+    ctl.onPlayStart("A");
+    ctl.onReplyEnd("A", {
+      interrupted: true,
+      playedMs: 1000,
+      synthesizedMs: 2000,
+      synthesisComplete: true,
+    });
+    clock += 1500;
+    ctl.onBargeIn();
+    expect(interruptions()).toHaveLength(1);
+    expect(interruptions()[0]).toMatchObject({
+      playedText: "",
+      unplayedText: "Anything else?",
+    });
+  });
+
+  it("speak_cancel stop followed by no barge-in sends no agent_interrupted", () => {
+    accept("A", "Your order ships tomorrow morning.");
+    ctl.onPlayStart("A");
+    expect(ctl.cancel({ requestId: "A" })).toEqual({ stopCurrent: true });
+    ctl.onReplyEnd("A", { playedMs: 300, interrupted: true });
+    expect(results()).toHaveLength(1);
+    expect(results()[0]!.status).toBe("interrupted");
+    expect(interruptions()).toHaveLength(0);
+  });
+
+  it("settled entries are pruned beyond the cap", () => {
+    for (let i = 0; i < 200; i++) {
+      accept(`p${i}`, `Text ${i}.`);
+      ctl.onPlayStart(`p${i}`);
+      ctl.onReplyEnd(`p${i}`, { playedMs: 10, interrupted: false });
+    }
+    expect(ctl.sizeForTests).toBeLessThanOrEqual(64);
+    accept("last", "Your order ships tomorrow morning.", { turnId: "t" });
+    ctl.onPlayStart("last");
+    ctl.onBargeIn();
+    ctl.onReplyEnd("last", {
+      playedMs: 1000,
+      interrupted: true,
+      synthesizedMs: 2000,
+      synthesisComplete: true,
+    });
+    const i = interruptions();
+    expect(i).toHaveLength(1);
+    expect(i[0]!.playedText).toBe("Your order ships");
+    expect(results().filter((m) => m.requestId === "last")).toHaveLength(1);
   });
 
   it("cut before the first frame gives empty playedText", () => {

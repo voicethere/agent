@@ -23,7 +23,13 @@ interface Entry {
   synthesisComplete?: boolean;
 }
 
+/** A reply end with `interrupted` counts as the barge-in's cut if the barge-in follows within this window. */
+export const BARGE_IN_REPLY_END_WINDOW_MS = 1000;
+/** Settled entries kept per session; older ones are dropped. */
+export const MAX_SETTLED_ENTRIES = 64;
+
 interface PendingInterruption {
+  bargeInAt: number;
   cut: Entry;
   cancelled: Entry[];
   callerPartial?: string;
@@ -53,6 +59,7 @@ export class SessionSpeakController {
   private legacyCounter = 0;
   private bargeIn = true;
   private pending: PendingInterruption | null = null;
+  private lastInterrupted: { entry: Entry; at: number } | null = null;
   private rateChars = 0;
   private rateMs = 0;
 
@@ -66,6 +73,11 @@ export class SessionSpeakController {
 
   get bargeInEnabled(): boolean {
     return this.bargeIn;
+  }
+
+  /** @internal */
+  get sizeForTests(): number {
+    return this.entries.length;
   }
 
   setBargeInEnabled(enabled: boolean): void {
@@ -106,6 +118,9 @@ export class SessionSpeakController {
     if (!e || e.state !== "queued") return;
     e.state = "playing";
     e.startedAt = this.deps.now();
+    if (this.lastInterrupted && this.lastInterrupted.entry !== e) {
+      this.lastInterrupted = null;
+    }
   }
 
   onReplyEnd(
@@ -135,6 +150,8 @@ export class SessionSpeakController {
     this.settle(e, info.interrupted ? "interrupted" : "played");
     if (this.pending && this.pending.cut === e) {
       this.completeInterruption(e.playedMs);
+    } else if (info.interrupted) {
+      this.lastInterrupted = { entry: e, at: this.deps.now() };
     }
   }
 
@@ -169,11 +186,31 @@ export class SessionSpeakController {
         cancelled.push(e);
       }
     }
+    const now = this.deps.now();
     const cut = this.entries.find(
       (e) => e.state === "playing" && e.interruptible,
     );
+    const last = this.lastInterrupted;
+    if (
+      !cut &&
+      last &&
+      last.entry.interruptible &&
+      now - last.at <= BARGE_IN_REPLY_END_WINDOW_MS
+    ) {
+      this.pending = {
+        bargeInAt: now,
+        cut: last.entry,
+        cancelled,
+        ...(callerPartial !== undefined ? { callerPartial } : {}),
+        startedAt: last.entry.startedAt ?? now,
+      };
+      this.lastInterrupted = null;
+      this.completeInterruption(last.entry.playedMs);
+      return { stopCurrent: false };
+    }
     if (cut) {
       this.pending = {
+        bargeInAt: now,
         cut,
         cancelled,
         ...(callerPartial !== undefined ? { callerPartial } : {}),
@@ -204,12 +241,16 @@ export class SessionSpeakController {
   /** Call before forwarding a `user_speech_final` so the report precedes it. */
   flushPendingInterruption(): void {
     if (!this.pending) return;
-    const elapsed = Math.max(0, this.deps.now() - this.pending.startedAt);
+    const elapsed = Math.max(
+      0,
+      this.pending.bargeInAt - this.pending.startedAt,
+    );
     this.completeInterruption(elapsed);
   }
 
   endSession(): void {
     this.pending = null;
+    this.lastInterrupted = null;
     for (const e of this.entries) {
       if (e.state !== "settled") this.settle(e, "cancelled", "session_ended");
     }
@@ -228,6 +269,10 @@ export class SessionSpeakController {
   private settle(e: Entry, status: SpeakStatus, errorCode?: string): void {
     e.state = "settled";
     e.status = status;
+    if (status === "played" && this.lastInterrupted) {
+      this.lastInterrupted = null;
+    }
+    this.prune();
     if (e.legacy || this.resultSent.has(e.requestId)) return;
     this.resultSent.add(e.requestId);
     this.deps.send({
@@ -242,6 +287,28 @@ export class SessionSpeakController {
         : {}),
       ...(errorCode ? { errorCode } : {}),
     });
+  }
+
+  private prune(): void {
+    let settled = 0;
+    for (const e of this.entries) if (e.state === "settled") settled++;
+    if (settled <= MAX_SETTLED_ENTRIES) return;
+    let drop = settled - MAX_SETTLED_ENTRIES;
+    const keep = new Set<Entry>();
+    if (this.pending) keep.add(this.pending.cut);
+    if (this.lastInterrupted) keep.add(this.lastInterrupted.entry);
+    const next: Entry[] = [];
+    for (const e of this.entries) {
+      if (drop > 0 && e.state === "settled" && !keep.has(e)) {
+        drop--;
+        this.byId.delete(e.requestId);
+        this.resultSent.delete(e.requestId);
+      } else {
+        next.push(e);
+      }
+    }
+    this.entries.length = 0;
+    this.entries.push(...next);
   }
 
   private rate(): number {

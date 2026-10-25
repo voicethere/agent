@@ -1,4 +1,6 @@
 export {
+  BARGE_IN_REPLY_END_WINDOW_MS,
+  MAX_SETTLED_ENTRIES,
   SessionSpeakController,
   type SessionSpeakControllerDeps,
   type SessionSpeakControllerOptions,

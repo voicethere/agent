@@ -28,6 +28,11 @@
       "require": "./dist/llm/index.js",
       "default": "./dist/llm/index.js"
     },
+    "./llm/schema.json": {
+      "import": "./schema/voicethere.llm.schema.json",
+      "require": "./schema/voicethere.llm.schema.json",
+      "default": "./schema/voicethere.llm.schema.json"
+    },
     "./verify": {
       "types": "./dist/verify/run-verify.d.ts",
       "import": "./dist/verify/run-verify.js",
@@ -56,15 +61,17 @@
   "bin": "./dist/cli.js",
   "files": [
     "dist",
+    "schema",
     "templates",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build:lib": "tsc -p tsconfig.json && mkdir -p dist/sandbox && cp src/sandbox/loader-entry.js dist/sandbox/",
+    "build:schema": "node scripts/build-llm-schema.mjs",
     "build:templates": "node dist/templates/build-seed-bundles-cli.js",
     "build:example": "node dist/cli.js build --entry examples/agent.ts --outfile dist/agent.js",
-    "build": "npm run build:lib && npm run build:templates && npm run build:example",
+    "build": "npm run build:lib && npm run build:schema && npm run build:templates && npm run build:example",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:ci": "npm run typecheck && npm run build && npm run test && node scripts/ci/verify-package-exports.mjs",
@@ -124,7 +131,8 @@
     "openai": "7.43.0",
     "tsx": "4.19.2",
     "typescript": "5.9.3",
-    "vitest": "3.2.7"
+    "vitest": "3.2.7",
+    "zod": "4.6.7"
   },
   "peerDependenciesMeta": {
     "openai": {

@@ -131,7 +131,11 @@ async function bothPreparesTimeOut(t: T): Promise<void> {
   await vi.waitFor(() => expect(t.spoken()).toHaveLength(3));
 }
 
-const logNames = (t: T): string[] => t.logs().map((l) => l.message as string);
+const logNames = (t: T): string[] =>
+  t
+    .logs()
+    .map((l) => l.message as string)
+    .filter((m) => !m.startsWith("speak control not available"));
 
 describe("language-switch message helpers", () => {
   it("picks override, then default, then English", async () => {

@@ -36,6 +36,9 @@ export type ParentToChildMessage =
   | VoiceLanguageControlAckMessage
   | VoiceLanguagePrepareResultMessage
   | VoiceReplayLastResultMessage
+  | SpeakResultMessage
+  | BargeInControlAckMessage
+  | AgentInterruptedMessage
   | WebhookMessage;
 
 /**
@@ -46,6 +49,9 @@ export type ParentToChildMessage =
 export type ChildToParentMessage =
   | SessionStartAckMessage
   | SpeakMessage
+  | SpeakCancelMessage
+  | BargeInControlMessage
+  | AgentStateMessage
   | RecordingControlMessage
   | ConversationHistoryControlMessage
   | PlayMessage
@@ -114,6 +120,12 @@ export interface SessionStartMessage {
    * (voice or Voice+Data). Absent on data-only or older runners — treat as `false`.
    */
   ttsPoseAvailable?: boolean;
+  /**
+   * When `true`, the runner reports speak results, accepts speak cancellation and
+   * barge-in control, and sends interruption reports for this session. Absent on
+   * older runners — treat as `false`.
+   */
+  speakControlAvailable?: boolean;
 }
 
 /**
@@ -194,6 +206,102 @@ export interface SpeakMessage {
   text: string;
   /** When false, the caller's speech does not interrupt this utterance. Runners that predate the option ignore it and speak as usual. */
   interruptible?: boolean;
+  /**
+   * Correlates the utterance with {@link SpeakResultMessage.requestId}. Set by agents
+   * on runners that advertise `speakControlAvailable`. Old runners ignore it.
+   */
+  requestId?: string;
+  /**
+   * Groups several speaks into one reply. Set by agents on runners that advertise
+   * `speakControlAvailable`. Old runners ignore it.
+   */
+  turnId?: string;
+  /**
+   * Utterance id of the caller turn this reply answers. Set by agents on runners that
+   * advertise `speakControlAvailable`. Old runners ignore it.
+   */
+  inReplyTo?: string;
+}
+
+/** Final state of one {@link SpeakMessage}. */
+export type SpeakStatus = "played" | "interrupted" | "cancelled" | "failed";
+
+/** Parent report that one speak finished, was cut, cancelled or failed. */
+export interface SpeakResultMessage {
+  type: "speak_result";
+  sessionId: string;
+  /** Matches {@link SpeakMessage.requestId}. */
+  requestId: string;
+  turnId?: string;
+  status: SpeakStatus;
+  /** Milliseconds of this utterance that reached the caller. */
+  playedMs: number;
+  /** Milliseconds of audio synthesized for this utterance. */
+  synthesizedMs?: number;
+  errorCode?: string;
+}
+
+/** Cancel pending speech. Without ids, everything pending for the session. */
+export interface SpeakCancelMessage {
+  type: "speak_cancel";
+  sessionId: string;
+  requestId?: string;
+  turnId?: string;
+}
+
+/** Turn caller barge-in on or off for the session. */
+export interface BargeInControlMessage {
+  type: "barge_in_control";
+  sessionId: string;
+  /** Correlates with {@link BargeInControlAckMessage.requestId}. */
+  requestId: string;
+  enabled: boolean;
+}
+
+export interface BargeInControlAckMessage {
+  type: "barge_in_control_ack";
+  sessionId: string;
+  requestId: string;
+  enabled: boolean;
+  ok: boolean;
+  reason?: "applied" | "unsupported";
+}
+
+/** Coarse agent activity shown by the host. */
+export type AgentStateName =
+  "listening" | "thinking" | "tool_call" | "speaking";
+
+/** Agent activity report. `detail` is at most 64 characters and carries no customer content. */
+export interface AgentStateMessage {
+  type: "agent_state";
+  sessionId: string;
+  state: AgentStateName;
+  detail?: string;
+}
+
+/**
+ * Emitted once per barge-in that cut the agent's speech. Delivered in session order
+ * before the next `user_speech_final`.
+ */
+export interface AgentInterruptedMessage {
+  type: "agent_interrupted";
+  sessionId: string;
+  turnId?: string;
+  inReplyTo?: string;
+  /** Request id of the speak that was playing when the caller cut in. */
+  cutRequestId?: string;
+  /** Milliseconds of the reply that reached the caller. */
+  replyPlayedMs: number;
+  /** Text the caller heard. */
+  playedText: string;
+  /** Text the caller did not hear. */
+  unplayedText: string;
+  /** `false` when `playedText` is estimated from timing. */
+  playedTextExact: boolean;
+  /** Speaks dropped from the queue by this barge-in. */
+  cancelledRequestIds: string[];
+  /** What the caller had said so far when they cut in, if known. */
+  callerPartial?: string;
 }
 
 /**

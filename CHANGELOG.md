@@ -6,6 +6,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- **Speak results**: `speak()` returns a handle with `requestId`, `done` (resolves with `played`, `interrupted`, `cancelled`, `failed` or `unsupported`, plus `playedMs`) and `cancel()`.
+- **`turnId` and `inReplyTo`** options on `speak()` to group several speaks into one reply and tie it to the caller turn it answers.
+- **`announce()`**: a speak that the caller's speech never cuts or drops from the queue.
+- **`cancelSpeech()`**: cancel one speak, one turn, or everything pending for the session.
+- **`setBargeIn()` and `withoutBargeIn()`**: switch caller barge-in off for a stretch of work and back on, also when the work throws.
+- **`onAgentInterrupted`** handler: after a barge-in cut the agent's speech, reports `playedText`, `unplayedText`, `replyPlayedMs` and the cancelled speaks, in session order before the next `user_speech_final`.
+- **`setAgentState()`**: report `listening`, `thinking`, `tool_call` or `speaking` with an optional short detail.
+- **`isSpeakControlAvailable()`** and `SessionContext.speakControlAvailable`. On runners without speak control the old behaviour stays: `speak()` plays as before and its result is `unsupported`.
+- **`@voicethere/agent/host`**: transport-free host logic (`SessionSpeakController`, `estimatePlayedText`) that implements the parent-side rules for speak results, cancellation, barge-in flushing and the interruption report.
+
+### Changed
+
+- `speak()` returns a handle instead of `undefined`; `speakAndChat()` returns the handle (or `undefined` for empty text).
+
 ## [0.10.1] - 2026-10-23
 
 ### Fixed

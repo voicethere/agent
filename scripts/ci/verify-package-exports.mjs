@@ -30,7 +30,7 @@ for (const [subpath, spec] of Object.entries(pkg.exports ?? {})) {
 
 const requireFromPkg = createRequire(join(root, "package.json"));
 
-for (const subpath of ["", "/verify", "/templates", "/build"]) {
+for (const subpath of ["", "/verify", "/templates", "/build", "/host"]) {
   const resolved = requireFromPkg.resolve(`${pkg.name}${subpath}`);
   if (!resolved.endsWith(".js")) {
     throw new Error(
@@ -71,6 +71,12 @@ for (const subpath of ["", "/verify", "/templates", "/build"]) {
   } else if (subpath === "/build") {
     if (typeof mod.buildAgentBundle !== "function") {
       throw new Error("@voicethere/agent/build must export buildAgentBundle");
+    }
+  } else if (subpath === "/host") {
+    for (const exportName of ["SessionSpeakController", "estimatePlayedText"]) {
+      if (typeof mod[exportName] !== "function") {
+        throw new Error(`@voicethere/agent/host must export ${exportName}`);
+      }
     }
   } else if (typeof mod !== "object" || mod == null) {
     throw new Error("@voicethere/agent root export must be an object");

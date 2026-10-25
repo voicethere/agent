@@ -336,6 +336,94 @@ onUserLanguage: async ({ sessionId, language }) => {
 
 See [`templates/language-switch`](./templates/language-switch/README.md) for both modes.
 
+## Controlling agent speech
+
+`speak()` returns a handle. `done` never rejects and tells you how the utterance ended.
+
+```ts
+import { defineAgent, speak, announce, cancelSpeech } from "@voicethere/agent";
+
+defineAgent({
+  onUserSpeechFinal: async ({ sessionId, text }) => {
+    const first = speak(sessionId, "Let me check that for you.", {
+      turnId: "reply-1",
+    });
+    const second = speak(sessionId, "Your order ships tomorrow.", {
+      turnId: "reply-1",
+    });
+    const result = await second.done;
+    // result.status: "played" | "interrupted" | "cancelled" | "failed" | "unsupported"
+    // result.playedMs: how much of the utterance the caller heard
+    if (result.status === "interrupted") first.cancel();
+
+    // Never cut by the caller, never dropped from the queue.
+    announce(sessionId, "This call may be recorded.");
+
+    // Cancel by request, by turn, or everything pending for the session.
+    cancelSpeech(sessionId, { turnId: "reply-1" });
+  },
+});
+```
+
+`turnId` groups several speaks into one reply. `inReplyTo` names the caller turn the reply answers.
+
+### Barge-in control
+
+```ts
+import { setBargeIn, withoutBargeIn, speak } from "@voicethere/agent";
+
+await setBargeIn(sessionId, false); // { ok, reason }
+await setBargeIn(sessionId, true);
+
+// Barge-in is switched back on even when the body throws.
+await withoutBargeIn(sessionId, async () => {
+  await speak(sessionId, "Please hold while I read the terms.").done;
+});
+```
+
+### Knowing what the caller heard
+
+When the caller cuts in, the runner sends one report per interruption, in session order before the next final transcript. `playedText` is estimated from timing unless `playedTextExact` is true.
+
+```ts
+import { defineAgent } from "@voicethere/agent";
+
+const heard = new Map<string, string>();
+
+defineAgent({
+  onAgentInterrupted: ({ sessionId, playedText, unplayedText }) => {
+    heard.set(
+      sessionId,
+      `You said "${playedText}" and were cut off before "${unplayedText}".`,
+    );
+  },
+  onUserSpeechFinal: async ({ sessionId, text }) => {
+    const note = heard.get(sessionId);
+    heard.delete(sessionId);
+    const prompt = note ? `${note}\n${text}` : text;
+    // pass `prompt` to your model
+  },
+});
+```
+
+### Agent state
+
+```ts
+import { setAgentState } from "@voicethere/agent";
+
+setAgentState(sessionId, "tool_call", { detail: "order lookup" }); // detail is cut to 64 characters
+```
+
+Keep customer content out of `detail`.
+
+### Older runners
+
+Runners that do not advertise speak control (`isSpeakControlAvailable(ctx)` is `false`) keep the old behaviour. `speak()` still plays, its result is `unsupported`, and `cancelSpeech`, `setAgentState` and `onAgentInterrupted` do nothing. `setBargeIn` resolves `{ ok: false, reason: "unsupported" }`. A warning is logged once per session.
+
+### Host logic (`@voicethere/agent/host`)
+
+`SessionSpeakController` implements the parent-side rules: speak results, cancellation, flushing queued speaks on barge-in, and the interruption report. It has no transport, so the VoiceThere runner and local tooling both drive it with the same code.
+
 ## Multiplayer / shared state
 
 Each end-user connection must call **`startSession()`** once — one orchestrator session id per client (one signaling room per client). Do **not** join multiple browsers to the same session credentials.

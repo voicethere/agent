@@ -163,4 +163,75 @@ describe("protocol", () => {
     expect(message.type).toBe("webhook");
     expect(message.body.equals(body)).toBe(true);
   });
+
+  it("accepts speak control shapes", () => {
+    const speak: ChildToParentMessage = {
+      type: "speak",
+      sessionId: "peer-1",
+      text: "Hi",
+      requestId: "r1",
+      turnId: "t1",
+      inReplyTo: "u1",
+    };
+    const cancel: ChildToParentMessage = {
+      type: "speak_cancel",
+      sessionId: "peer-1",
+    };
+    const bargeIn: ChildToParentMessage = {
+      type: "barge_in_control",
+      sessionId: "peer-1",
+      requestId: "r2",
+      enabled: false,
+    };
+    const state: ChildToParentMessage = {
+      type: "agent_state",
+      sessionId: "peer-1",
+      state: "tool_call",
+      detail: "lookup",
+    };
+    const result: ParentToChildMessage = {
+      type: "speak_result",
+      sessionId: "peer-1",
+      requestId: "r1",
+      status: "interrupted",
+      playedMs: 400,
+      synthesizedMs: 1200,
+    };
+    const ack: ParentToChildMessage = {
+      type: "barge_in_control_ack",
+      sessionId: "peer-1",
+      requestId: "r2",
+      enabled: false,
+      ok: true,
+      reason: "applied",
+    };
+    const interrupted: ParentToChildMessage = {
+      type: "agent_interrupted",
+      sessionId: "peer-1",
+      turnId: "t1",
+      replyPlayedMs: 400,
+      playedText: "Hi",
+      unplayedText: "there",
+      playedTextExact: false,
+      cancelledRequestIds: ["r3"],
+    };
+    const start: ParentToChildMessage = {
+      type: "session_start",
+      sessionId: "peer-1",
+      env: {},
+      speakControlAvailable: true,
+    };
+    expect([speak, cancel, bargeIn, state].map((m) => m.type)).toEqual([
+      "speak",
+      "speak_cancel",
+      "barge_in_control",
+      "agent_state",
+    ]);
+    expect([result, ack, interrupted, start].map((m) => m.type)).toEqual([
+      "speak_result",
+      "barge_in_control_ack",
+      "agent_interrupted",
+      "session_start",
+    ]);
+  });
 });

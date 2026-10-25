@@ -4,7 +4,10 @@ import type { SpeechEvent } from "@node-webrtc-rust/sdk/voice";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import type {
+  AgentInterruptedMessage,
   AgentLogLevel,
+  AgentStateName,
+  BargeInControlAckMessage,
   AgentLogMessage,
   DataChannelKind,
   MixControlAckMessage,
@@ -22,6 +25,8 @@ import type {
   PlayStopAckMessage,
   GetPlayResult,
   StopPlayResult,
+  SpeakResultMessage,
+  SpeakStatus,
   RecordingControlAckMessage,
   RecordingControlAction,
   RecordingControlResult,
@@ -70,6 +75,8 @@ export interface SessionContext {
   voiceLanguageSwitchAvailable: boolean;
   /** `true` when TTS pose / listener pose APIs are available (voice or Voice+Data). */
   ttsPoseAvailable: boolean;
+  /** `true` when the runner reports speak results and accepts speak cancel / barge-in control. */
+  speakControlAvailable: boolean;
 }
 
 export interface SpeechContext {
@@ -95,6 +102,9 @@ export interface VoiceLanguageChangedContext {
   /** ISO 639-1 code after the runner applied STT/TTS (agent or auto-switch). */
   language: string;
 }
+
+/** Interruption report ({@link AgentInterruptedMessage} without `type`). */
+export type AgentInterruptedContext = Omit<AgentInterruptedMessage, "type">;
 
 export interface SpeechEventContext {
   sessionId: string;
@@ -162,6 +172,12 @@ export interface AgentHandlers {
   onVoiceLanguageChanged?: (
     ctx: VoiceLanguageChangedContext,
   ) => void | Promise<void>;
+  /**
+   * The caller cut the agent's speech. Reports what was heard and what was not,
+   * delivered in session order before the next `user_speech_final`. Only runners that
+   * advertise `speakControlAvailable` send it.
+   */
+  onAgentInterrupted?: (ctx: AgentInterruptedContext) => void | Promise<void>;
   /** Alias for {@link AgentHandlers.onSessionEnd}. */
   onClientLeave?: (ctx: { sessionId: string }) => void | Promise<void>;
   onSessionEnd?: (ctx: { sessionId: string }) => void | Promise<void>;
@@ -196,6 +212,22 @@ export interface AgentErrorContext {
   env: Record<string, string>;
   error: Error;
   customerContext?: Record<string, unknown>;
+}
+
+function isSpeakResultMessage(value: unknown): value is SpeakResultMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return msg.type === "speak_result" && typeof msg.requestId === "string";
+}
+
+function isBargeInControlAckMessage(
+  value: unknown,
+): value is BargeInControlAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return (
+    msg.type === "barge_in_control_ack" && typeof msg.requestId === "string"
+  );
 }
 
 function isPlayAckMessage(value: unknown): value is PlayAckMessage {
@@ -355,6 +387,9 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "voice_language_control_ack" ||
     msg.type === "voice_language_prepare_result" ||
     msg.type === "voice_replay_last_result" ||
+    msg.type === "speak_result" ||
+    msg.type === "barge_in_control_ack" ||
+    msg.type === "agent_interrupted" ||
     msg.type === "webhook"
   );
 }
@@ -374,6 +409,8 @@ type SessionScopedParentMessage = Exclude<
   | VoiceLanguageControlAckMessage
   | VoiceLanguagePrepareResultMessage
   | VoiceReplayLastResultMessage
+  | SpeakResultMessage
+  | BargeInControlAckMessage
 >;
 
 function isSessionScopedParentMessage(
@@ -403,12 +440,95 @@ const voiceLanguageSwitchAvailableBySessionId = new Map<string, boolean>();
 const lastVoiceLanguageBySessionId = new Map<string, string>();
 /** Cached from `session_start.ttsPoseAvailable` until `session_end`. */
 const ttsPoseAvailableBySessionId = new Map<string, boolean>();
+/** Cached from `session_start.speakControlAvailable` until `session_end`. */
+const speakControlAvailableBySessionId = new Map<string, boolean>();
+/** Sessions already warned that speak control is unavailable. */
+const speakControlWarnedSessionIds = new Set<string>();
 /** Sessions that received `session_end`; `speak()` becomes a no-op when no live gen. */
 const endedSessionIds = new Set<string>();
 
 const RECORDING_CONTROL_ACK_TIMEOUT_MS = 5000;
 const CONVERSATION_HISTORY_CONTROL_ACK_TIMEOUT_MS = 5000;
 const PLAY_CONTROL_ACK_TIMEOUT_MS = 5000;
+const BARGE_IN_CONTROL_ACK_TIMEOUT_MS = 5000;
+const SPEAK_RESULT_SAFETY_TIMEOUT_MS = 600_000;
+
+type PendingSpeakResult = {
+  sessionId: string;
+  turnId?: string;
+  resolve: (result: SpeakResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const pendingSpeakResults = new Map<string, PendingSpeakResult>();
+
+type PendingBargeInAck = {
+  sessionId: string;
+  resolve: (result: BargeInResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const pendingBargeInAcks = new Map<string, PendingBargeInAck>();
+
+export interface BargeInResult {
+  ok: boolean;
+  reason?: "applied" | "unsupported" | "timeout" | "session_ended";
+}
+
+function handleSpeakResult(message: SpeakResultMessage): void {
+  const pending = pendingSpeakResults.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingSpeakResults.delete(message.requestId);
+  pending.resolve({
+    requestId: message.requestId,
+    ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
+    status: message.status,
+    playedMs: message.playedMs,
+    ...(message.synthesizedMs !== undefined
+      ? { synthesizedMs: message.synthesizedMs }
+      : {}),
+    ...(message.errorCode !== undefined
+      ? { errorCode: message.errorCode }
+      : {}),
+  });
+}
+
+function handleBargeInControlAck(message: BargeInControlAckMessage): void {
+  const pending = pendingBargeInAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingBargeInAcks.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    ...(message.reason ? { reason: message.reason } : {}),
+  });
+}
+
+function clearPendingSpeakForSession(
+  sessionId: string,
+  errorCode: string,
+): void {
+  for (const [requestId, pending] of pendingSpeakResults) {
+    if (pending.sessionId !== sessionId) continue;
+    clearTimeout(pending.timer);
+    pendingSpeakResults.delete(requestId);
+    pending.resolve({
+      requestId,
+      ...(pending.turnId !== undefined ? { turnId: pending.turnId } : {}),
+      status: "cancelled",
+      playedMs: 0,
+      errorCode,
+    });
+  }
+  for (const [requestId, pending] of pendingBargeInAcks) {
+    if (pending.sessionId !== sessionId) continue;
+    clearTimeout(pending.timer);
+    pendingBargeInAcks.delete(requestId);
+    pending.resolve({ ok: false, reason: "session_ended" });
+  }
+  speakControlWarnedSessionIds.delete(sessionId);
+}
 
 /** Max decoded bytes for optional inline `bytes` on {@link play} (base64 in IPC). */
 export const PLAY_BYTES_MAX_DECODED_LENGTH = 64 * 1024;
@@ -1062,6 +1182,10 @@ async function handleParentMessage(
         message.sessionId,
         message.ttsPoseAvailable ?? false,
       );
+      speakControlAvailableBySessionId.set(
+        message.sessionId,
+        message.speakControlAvailable ?? false,
+      );
       if (message.voiceLanguageSwitch) {
         voiceLanguageSwitchSettingsBySessionId.set(
           message.sessionId,
@@ -1086,6 +1210,7 @@ async function handleParentMessage(
         voiceLanguageSwitchAvailable:
           message.voiceLanguageSwitchAvailable ?? false,
         ttsPoseAvailable: message.ttsPoseAvailable ?? false,
+        speakControlAvailable: message.speakControlAvailable ?? false,
       });
       sendParentMessage({
         type: "session_start_ack",
@@ -1131,6 +1256,11 @@ async function handleParentMessage(
         }
       }
       break;
+    case "agent_interrupted": {
+      const { type: _type, ...interrupted } = message;
+      await handlers.onAgentInterrupted?.(interrupted);
+      break;
+    }
     case "data_channel_message":
       await handlers.onDataChannelMessage?.({
         sessionId: message.sessionId,
@@ -1163,6 +1293,8 @@ async function handleParentMessage(
       voiceLanguageSwitchSettingsBySessionId.delete(message.sessionId);
       lastVoiceLanguageBySessionId.delete(message.sessionId);
       ttsPoseAvailableBySessionId.delete(message.sessionId);
+      speakControlAvailableBySessionId.delete(message.sessionId);
+      clearPendingSpeakForSession(message.sessionId, "session_ended");
       await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
         sessionId: message.sessionId,
       });
@@ -1196,6 +1328,14 @@ export function defineAgent(handlers: AgentHandlers): void {
     }
     if (isConversationHistoryControlAckMessage(message)) {
       handleConversationHistoryControlAck(message);
+      return;
+    }
+    if (isSpeakResultMessage(message)) {
+      handleSpeakResult(message);
+      return;
+    }
+    if (isBargeInControlAckMessage(message)) {
+      handleBargeInControlAck(message);
       return;
     }
     if (isPlayAckMessage(message)) {
@@ -1245,6 +1385,7 @@ export function defineAgent(handlers: AgentHandlers): void {
     // the leave hook only.
     if (message.type === "session_end") {
       endedSessionIds.add(message.sessionId);
+      clearPendingSpeakForSession(message.sessionId, "session_ended");
       clearPendingRecordingAcksForSession(message.sessionId, "session_ended");
       clearPendingConversationHistoryAcksForSession(
         message.sessionId,
@@ -1440,6 +1581,24 @@ export function resetAgentIpcStateForTests(): void {
   voiceLanguageSwitchSettingsBySessionId.clear();
   lastVoiceLanguageBySessionId.clear();
   ttsPoseAvailableBySessionId.clear();
+  speakControlAvailableBySessionId.clear();
+  speakControlWarnedSessionIds.clear();
+  for (const [requestId, pending] of pendingSpeakResults) {
+    clearTimeout(pending.timer);
+    pendingSpeakResults.delete(requestId);
+    pending.resolve({
+      requestId,
+      ...(pending.turnId !== undefined ? { turnId: pending.turnId } : {}),
+      status: "cancelled",
+      playedMs: 0,
+      errorCode: "reset",
+    });
+  }
+  for (const [requestId, pending] of pendingBargeInAcks) {
+    clearTimeout(pending.timer);
+    pendingBargeInAcks.delete(requestId);
+    pending.resolve({ ok: false, reason: "session_ended" });
+  }
   inboundQueueAuthority = null;
   for (const [requestId, pending] of pendingRecordingAcks) {
     clearTimeout(pending.timer);
@@ -1456,21 +1615,230 @@ export function resetAgentIpcStateForTests(): void {
 }
 
 export interface SpeakOptions {
-  /** Default true. false: the caller's speech (barge-in) does not cut this utterance. */
+  /** Default true. false: the caller's speech (barge-in) does not cut this utterance, and it is never dropped from the queue. */
   interruptible?: boolean;
+  /** Groups several speaks into one reply (one transcript row, one interruption report). */
+  turnId?: string;
+  /** Utterance id of the caller turn this reply answers. */
+  inReplyTo?: string;
 }
 
-/** Ask the runner parent to synthesize speech for the session. */
+export type SpeakResultStatus = SpeakStatus | "unsupported";
+
+export interface SpeakResult {
+  requestId: string;
+  turnId?: string;
+  status: SpeakResultStatus;
+  playedMs: number;
+  synthesizedMs?: number;
+  errorCode?: string;
+}
+
+export interface SpeakHandle {
+  readonly requestId: string;
+  /** Settles once with the final state. Never rejects. */
+  readonly done: Promise<SpeakResult>;
+  /** Cancel this utterance (no-op on runners without speak control). */
+  cancel(): void;
+}
+
+function speakControlAvailableFor(sessionId: string): boolean {
+  return speakControlAvailableBySessionId.get(sessionId) ?? false;
+}
+
+/** True when {@link SessionStartMessage.speakControlAvailable} was set for the session. */
+export function isSpeakControlAvailable(ctx: SessionContext): boolean {
+  return ctx.speakControlAvailable;
+}
+
+function warnSpeakControlUnavailable(sessionId: string): void {
+  if (speakControlWarnedSessionIds.has(sessionId)) return;
+  speakControlWarnedSessionIds.add(sessionId);
+  agentLog(
+    "warn",
+    "speak control not available on this runner; speak results, cancel and barge-in control are disabled",
+    sessionId,
+  );
+}
+
+/**
+ * Ask the runner parent to synthesize speech for the session.
+ *
+ * Returns a handle whose `done` promise reports how the utterance ended. On runners
+ * without speak control it resolves `unsupported` and the utterance plays as before.
+ */
 export function speak(
   sessionId: string,
   text: string,
   options?: SpeakOptions,
+): SpeakHandle {
+  const requestId = randomUUID();
+  const handle = (done: SpeakResult): SpeakHandle => ({
+    requestId,
+    done: Promise.resolve(done),
+    cancel: () => cancelSpeech(sessionId, { requestId }),
+  });
+
+  if (!isVoicethereAgentChild()) {
+    return handle({
+      requestId,
+      status: "unsupported",
+      playedMs: 0,
+      errorCode: "no_parent",
+    });
+  }
+  if (!allowOutboundForSession(sessionId)) {
+    return handle({
+      requestId,
+      status: "cancelled",
+      playedMs: 0,
+      errorCode: "session_ended",
+    });
+  }
+  if (!speakControlAvailableFor(sessionId)) {
+    sendParentMessage({
+      type: "speak",
+      sessionId,
+      text,
+      ...(options?.interruptible === false ? { interruptible: false } : {}),
+    });
+    warnSpeakControlUnavailable(sessionId);
+    return handle({ requestId, status: "unsupported", playedMs: 0 });
+  }
+
+  const turnId = options?.turnId;
+  const inReplyTo = options?.inReplyTo;
+  const done = new Promise<SpeakResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingSpeakResults.delete(requestId);
+      resolve({
+        requestId,
+        ...(turnId ? { turnId } : {}),
+        status: "failed",
+        playedMs: 0,
+        errorCode: "timeout",
+      });
+    }, SPEAK_RESULT_SAFETY_TIMEOUT_MS);
+    pendingSpeakResults.set(requestId, {
+      sessionId,
+      ...(turnId ? { turnId } : {}),
+      resolve,
+      timer,
+    });
+  });
+  sendParentMessage({
+    type: "speak",
+    sessionId,
+    text,
+    requestId,
+    ...(options?.interruptible === false ? { interruptible: false } : {}),
+    ...(turnId ? { turnId } : {}),
+    ...(inReplyTo ? { inReplyTo } : {}),
+  });
+  return {
+    requestId,
+    done,
+    cancel: () => cancelSpeech(sessionId, { requestId }),
+  };
+}
+
+/** Speak text that the caller's speech must not cut. Same as `speak` with `interruptible: false`. */
+export function announce(
+  sessionId: string,
+  text: string,
+  options?: Omit<SpeakOptions, "interruptible">,
+): SpeakHandle {
+  return speak(sessionId, text, { ...options, interruptible: false });
+}
+
+/**
+ * Cancel pending or playing speech. Without a target, everything pending for the
+ * session. No-op on runners without speak control.
+ */
+export function cancelSpeech(
+  sessionId: string,
+  target?: { requestId?: string; turnId?: string },
 ): void {
-  if (options?.interruptible === false) {
-    sendParentMessage({ type: "speak", sessionId, text, interruptible: false });
+  if (!isVoicethereAgentChild() || !allowOutboundForSession(sessionId)) return;
+  if (!speakControlAvailableFor(sessionId)) {
+    warnSpeakControlUnavailable(sessionId);
     return;
   }
-  sendParentMessage({ type: "speak", sessionId, text });
+  sendParentMessage({
+    type: "speak_cancel",
+    sessionId,
+    ...(target?.requestId ? { requestId: target.requestId } : {}),
+    ...(target?.turnId ? { turnId: target.turnId } : {}),
+  });
+}
+
+/**
+ * Turn caller barge-in on or off for the session. Resolves `unsupported` on runners
+ * without speak control.
+ */
+export function setBargeIn(
+  sessionId: string,
+  enabled: boolean,
+): Promise<BargeInResult> {
+  if (
+    !isVoicethereAgentChild() ||
+    !allowOutboundForSession(sessionId) ||
+    !speakControlAvailableFor(sessionId)
+  ) {
+    if (isVoicethereAgentChild() && allowOutboundForSession(sessionId)) {
+      warnSpeakControlUnavailable(sessionId);
+    }
+    return Promise.resolve({ ok: false, reason: "unsupported" });
+  }
+  const requestId = randomUUID();
+  return new Promise<BargeInResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingBargeInAcks.delete(requestId);
+      resolve({ ok: false, reason: "timeout" });
+    }, BARGE_IN_CONTROL_ACK_TIMEOUT_MS);
+    pendingBargeInAcks.set(requestId, { sessionId, resolve, timer });
+    sendParentMessage({
+      type: "barge_in_control",
+      sessionId,
+      requestId,
+      enabled,
+    });
+  });
+}
+
+/** Run `fn` with caller barge-in switched off, then switch it back on (also when `fn` throws). */
+export async function withoutBargeIn<T>(
+  sessionId: string,
+  fn: () => Promise<T> | T,
+): Promise<T> {
+  await setBargeIn(sessionId, false);
+  try {
+    return await fn();
+  } finally {
+    await setBargeIn(sessionId, true);
+  }
+}
+
+/** Report coarse agent activity to the host. `detail` is cut to 64 characters; keep customer content out of it. */
+export function setAgentState(
+  sessionId: string,
+  state: AgentStateName,
+  options?: { detail?: string },
+): void {
+  if (
+    !isVoicethereAgentChild() ||
+    !allowOutboundForSession(sessionId) ||
+    !speakControlAvailableFor(sessionId)
+  ) {
+    return;
+  }
+  const detail = options?.detail;
+  sendParentMessage({
+    type: "agent_state",
+    sessionId,
+    state,
+    ...(detail ? { detail: detail.slice(0, 64) } : {}),
+  });
 }
 
 export interface SpeakAndChatOptions {
@@ -1481,16 +1849,17 @@ export interface SpeakAndChatOptions {
 
 /**
  * Send a `chat_reply` to the client, then ask the runner to speak the same text.
- * Preserves send-then-play order for spoken captions.
+ * Preserves send-then-play order for spoken captions. Returns the speak handle, or
+ * `undefined` when the text is empty.
  */
 export function speakAndChat(
   sessionId: string,
   text: string,
   options?: SpeakAndChatOptions,
-): void {
+): SpeakHandle | undefined {
   const trimmed = text.trim();
   if (!trimmed) {
-    return;
+    return undefined;
   }
   const payload: {
     type: "chat_reply";
@@ -1503,7 +1872,7 @@ export function speakAndChat(
     payload.utteranceId = options.utteranceId ?? randomUUID();
   }
   sendToClient(sessionId, payload);
-  speak(sessionId, trimmed);
+  return speak(sessionId, trimmed);
 }
 
 /** True when {@link SessionStartMessage.recordingAvailable} was set for the session. */

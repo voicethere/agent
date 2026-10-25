@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-25
+
 ### Added
 
 - `getService()` / `serviceFetch()` for the project service.

@@ -22,6 +22,16 @@ describe("validateLlmAgentConfig", () => {
     expect(r.ok).toBe(true);
   });
 
+  it("accepts and ignores $schema", () => {
+    const r = validateLlmAgentConfig({
+      ...base,
+      $schema:
+        "./node_modules/@voicethere/agent/schema/voicethere.llm.schema.json",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(JSON.stringify(r.config)).not.toContain("$schema");
+  });
+
   it("rejects baseUrl for providers other than openai", () => {
     expect(
       errorsOf({

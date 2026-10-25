@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/@voicethere/agent/schema/voicethere.llm.schema.json",
+  "version": 1,
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "apiKeySecret": "OPENAI_API_KEY",
+  "maxOutputTokens": 300,
+  "greeting": {
+    "text": "Hi! How can I help you today?",
+    "interruptible": true
+  },
+  "bargeIn": { "mode": "project" },
+  "history": { "turns": 20, "interruptionNote": true },
+  "tools": {
+    "maxRounds": 5,
+    "timeoutMs": 15000,
+    "filler": { "text": "One moment." }
+  },
+  "toolSources": [],
+  "interruptPolicy": "cancel"
+}

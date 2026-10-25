@@ -8,14 +8,18 @@ describe("speakAndChat", () => {
 
   beforeEach(() => {
     resetAgentIpcStateForTests();
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
   });
 
   afterEach(() => {
+    delete process.env.__CHILD_BUNDLE_PATH__;
     sendMock?.restore();
   });
 
   function ipcCalls(): unknown[] {
-    return sendMock.send.mock.calls.map((call) => call[0]);
+    return sendMock.send.mock.calls
+      .map((call) => call[0] as { type?: string })
+      .filter((m) => m.type !== "log");
   }
 
   it("sends chat_reply before speak IPC", () => {

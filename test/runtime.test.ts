@@ -220,6 +220,7 @@ describe("defineAgent", () => {
         mixAvailable: false,
         voiceLanguageSwitchAvailable: false,
         ttsPoseAvailable: false,
+        speakControlAvailable: false,
       });
       expect(capture.send).toHaveBeenCalledWith({
         type: "session_start_ack",
@@ -262,6 +263,7 @@ describe("defineAgent", () => {
         mixAvailable: false,
         voiceLanguageSwitchAvailable: false,
         ttsPoseAvailable: false,
+        speakControlAvailable: false,
       });
     } finally {
       if (originalEnabled === undefined) {
@@ -312,6 +314,7 @@ describe("defineAgent", () => {
         mixAvailable: false,
         voiceLanguageSwitchAvailable: false,
         ttsPoseAvailable: false,
+        speakControlAvailable: false,
       });
     } finally {
       if (originalEnabled === undefined) {
@@ -355,6 +358,7 @@ describe("defineAgent", () => {
           mixAvailable: false,
           voiceLanguageSwitchAvailable: false,
           ttsPoseAvailable: false,
+          speakControlAvailable: false,
         });
       });
     } finally {
@@ -1075,10 +1079,12 @@ describe("speak", () => {
 
   beforeEach(() => {
     resetAgentIpcStateForTests();
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
   });
 
   afterEach(() => {
     sendMock?.restore();
+    delete process.env.__CHILD_BUNDLE_PATH__;
   });
 
   it("sends speak IPC to parent", () => {
@@ -1891,6 +1897,7 @@ describe("session_start recordingAvailable", () => {
       mixAvailable: false,
       voiceLanguageSwitchAvailable: false,
       ttsPoseAvailable: false,
+      speakControlAvailable: false,
     });
     capture.restore();
   });
@@ -1915,6 +1922,7 @@ describe("session_start recordingAvailable", () => {
       mixAvailable: false,
       voiceLanguageSwitchAvailable: false,
       ttsPoseAvailable: false,
+      speakControlAvailable: false,
     });
     capture.restore();
   });
@@ -2080,9 +2088,11 @@ describe("generation-aware outbound guards", () => {
 
   beforeEach(() => {
     process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = "false";
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
   });
 
   afterEach(() => {
+    delete process.env.__CHILD_BUNDLE_PATH__;
     capture?.restore();
     resetAgentIpcStateForTests();
     delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];

@@ -23,6 +23,8 @@ import {
   startRecording,
   stopPlay,
   stopRecording,
+  getService,
+  serviceFetch,
   PLAY_BYTES_MAX_DECODED_LENGTH,
   SESSION_START_INIT_DELAY_MS_ENV,
   SESSION_START_INIT_DELAY_ENABLED_ENV,
@@ -2423,5 +2425,58 @@ describe("voice switch primitives", () => {
     await vi.waitFor(() => expect(finals).toHaveLength(2));
     expect(finals[0]).toEqual({ text: "hallo", replay: true });
     expect(finals[1]).toEqual({ text: "hi", replay: undefined });
+  });
+});
+
+describe("project service", () => {
+  it("getService returns null without AGENT_SERVICE_URL", () => {
+    expect(getService({ AGENT_SERVICE_TOKEN: "t" })).toBeNull();
+    expect(getService({ AGENT_SERVICE_URL: "https://s" })).toBeNull();
+    expect(getService({})).toBeNull();
+  });
+
+  it("getService reads name, url and token", () => {
+    expect(
+      getService({
+        AGENT_SERVICE_NAME: "api",
+        AGENT_SERVICE_URL: "https://svc.internal",
+        AGENT_SERVICE_TOKEN: "tok",
+      }),
+    ).toEqual({ name: "api", url: "https://svc.internal", token: "tok" });
+    expect(
+      getService({ AGENT_SERVICE_URL: "https://s", AGENT_SERVICE_TOKEN: "t" })
+        ?.name,
+    ).toBe("service");
+  });
+
+  it("serviceFetch sends the bearer token and joins the path", async () => {
+    const fetchMock = vi.fn(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await serviceFetch(
+        "/hello",
+        { method: "POST" },
+        {
+          AGENT_SERVICE_URL: "https://svc.internal",
+          AGENT_SERVICE_TOKEN: "tok",
+        },
+      );
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [
+        string,
+        RequestInit,
+      ];
+      expect(url).toBe("https://svc.internal/hello");
+      expect(init.method).toBe("POST");
+      expect(new Headers(init.headers).get("Authorization")).toBe("Bearer tok");
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("serviceFetch throws AGENT_SERVICE_UNAVAILABLE without a service", async () => {
+    await expect(serviceFetch("/x", undefined, {})).rejects.toMatchObject({
+      code: "AGENT_SERVICE_UNAVAILABLE",
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -53,5 +53,28 @@ describe("buildAgentBundle", () => {
         outfile: "dist/agent.js",
       }),
     ).rejects.toThrow(/Entry not found/);
+  });
+
+  it("bundles .md imports as text", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "voicethere-agent-md-"));
+    try {
+      writeFileSync(
+        join(dir, "prompt.md"),
+        "You are a calm voice assistant.\n",
+      );
+      writeFileSync(
+        join(dir, "agent.ts"),
+        'import prompt from "./prompt.md";\nconsole.log(prompt);\n',
+      );
+      await buildAgentBundle({
+        cwd: dir,
+        entry: "agent.ts",
+        outfile: join(dir, "dist", "agent.js"),
+      });
+      const source = readFileSync(join(dir, "dist", "agent.js"), "utf8");
+      expect(source).toContain("You are a calm voice assistant.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -92,6 +92,7 @@ export async function buildAgentBundle(
     target: "node26",
     logLevel: "warning",
     banner: { js: AGENT_BUNDLE_BANNER },
+    loader: { ".md": "text", ".txt": "text" },
     plugins: [nodeBuiltinExternalPlugin(), bundleStubPlugin()],
   });
 }

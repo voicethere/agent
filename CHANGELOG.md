@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-25
+
 ### Added
 
 - **Speak results**: `speak()` returns a handle with `requestId`, `done` (resolves with `played`, `interrupted`, `cancelled`, `failed` or `unsupported`, plus `playedMs`) and `cancel()`.

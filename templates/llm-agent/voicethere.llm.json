@@ -3,7 +3,7 @@
   "version": 1,
   "provider": "openai",
   "model": "gpt-4o-mini",
-  "apiKeySecret": "OPENAI_API_KEY",
+  "apiKeySecret": "AGENT_OPENAI_API_KEY",
   "maxOutputTokens": 300,
   "greeting": {
     "text": "Hi! How can I help you today?",

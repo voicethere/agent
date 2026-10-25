@@ -92,7 +92,9 @@ export type LlmAgentConfigResult =
   | { ok: false; errors: LlmAgentConfigError[] };
 
 const PROVIDER_IDS = ["openai", "anthropic", "gemini", "openrouter"] as const;
-const ENV_NAME_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
+const ENV_NAME_RE = /^AGENT_[A-Z0-9_]{1,57}$/;
+const ENV_NAME_MESSAGE =
+  "must start with AGENT_ (only AGENT_* project secrets reach the agent)";
 const SOURCE_NAME_RE = /^[a-z0-9-]{1,40}$/;
 const MAX_SOURCES = 8;
 
@@ -256,7 +258,7 @@ function checkAuth(
     c.unknownKeys(o, ["type", "secret"], path);
     const secret = c.string(o.secret, `${path}.secret`, {
       re: ENV_NAME_RE,
-      reMessage: "must be an environment variable name (A-Z, 0-9, _)",
+      reMessage: ENV_NAME_MESSAGE,
     });
     return secret === undefined ? undefined : { type: "bearer", secret };
   }
@@ -272,7 +274,7 @@ function checkAuth(
       }
       const env = c.string(value, `${path}.headers.${name}`, {
         re: ENV_NAME_RE,
-        reMessage: "must be an environment variable name (A-Z, 0-9, _)",
+        reMessage: ENV_NAME_MESSAGE,
       });
       if (env !== undefined) headers[name] = env;
     }
@@ -416,7 +418,7 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
   }
   const secret = c.string(root.apiKeySecret, "apiKeySecret", {
     re: ENV_NAME_RE,
-    reMessage: "must be an environment variable name (A-Z, 0-9, _)",
+    reMessage: ENV_NAME_MESSAGE,
   });
   if (secret !== undefined) config.apiKeySecret = secret;
 
@@ -601,8 +603,9 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
 
 const envName = {
   type: "string",
-  pattern: "^[A-Z][A-Z0-9_]{0,63}$",
-  description: "Name of an environment variable (secret), never its value.",
+  pattern: "^AGENT_[A-Z0-9_]{1,57}$",
+  description:
+    "Name of an AGENT_* environment variable (project secret), never its value.",
 };
 const nameList = {
   type: "array",

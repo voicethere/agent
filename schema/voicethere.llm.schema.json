@@ -31,8 +31,8 @@
     },
     "apiKeySecret": {
       "type": "string",
-      "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
-      "description": "Name of an environment variable (secret), never its value."
+      "pattern": "^AGENT_[A-Z0-9_]{1,57}$",
+      "description": "Name of an AGENT_* environment variable (project secret), never its value."
     },
     "baseUrl": {
       "type": "string",
@@ -246,8 +246,8 @@
                       },
                       "secret": {
                         "type": "string",
-                        "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
-                        "description": "Name of an environment variable (secret), never its value."
+                        "pattern": "^AGENT_[A-Z0-9_]{1,57}$",
+                        "description": "Name of an AGENT_* environment variable (project secret), never its value."
                       }
                     }
                   },
@@ -269,8 +269,8 @@
                         },
                         "additionalProperties": {
                           "type": "string",
-                          "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
-                          "description": "Name of an environment variable (secret), never its value."
+                          "pattern": "^AGENT_[A-Z0-9_]{1,57}$",
+                          "description": "Name of an AGENT_* environment variable (project secret), never its value."
                         }
                       }
                     }

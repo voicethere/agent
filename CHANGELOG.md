@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- `getService()` / `serviceFetch()` for the project service.
+
+### Fixed
+
+- LLM agent env names use the `AGENT_` prefix (`AGENT_OPENAI_API_KEY`, `AGENT_SERVICE_URL`/`AGENT_SERVICE_TOKEN`); the config validator rejects secret names the sandbox would drop.
+
 ## [0.12.0] - 2026-10-25
 
 ### Added

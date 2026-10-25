@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { createLlmProvider } from "../../src/llm/index.js";
+import { openai } from "../../src/llm/openai.js";
 import { collect } from "./mock-server.js";
 
 describe.skipIf(process.env.LLM_LIVE_OPENAI !== "1")("live OpenAI", () => {
   const provider = () =>
-    createLlmProvider({
-      provider: "openai",
-      apiKey: process.env.OPENAI_API_KEY ?? "",
-    });
+    createLlmProvider(
+      {
+        provider: "openai",
+        apiKey: process.env.OPENAI_API_KEY ?? "",
+      },
+      [openai],
+    );
 
   it("live: OpenAI streams a short reply", async () => {
     const events = await collect(

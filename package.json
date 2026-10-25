@@ -56,6 +56,12 @@
       "import": "./templates/redis-sync/world-layout.ts",
       "require": "./templates/redis-sync/world-layout.ts",
       "default": "./templates/redis-sync/world-layout.ts"
+    },
+    "./llm/eject/loop.ts": {
+      "types": "./eject/llm/loop.ts",
+      "import": "./eject/llm/loop.ts",
+      "require": "./eject/llm/loop.ts",
+      "default": "./eject/llm/loop.ts"
     }
   },
   "bin": "./dist/cli.js",
@@ -63,15 +69,17 @@
     "dist",
     "schema",
     "templates",
+    "eject",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build:lib": "tsc -p tsconfig.json && mkdir -p dist/sandbox && cp src/sandbox/loader-entry.js dist/sandbox/",
     "build:schema": "node scripts/build-llm-schema.mjs",
+    "build:eject": "node scripts/build-llm-eject.mjs",
     "build:templates": "node dist/templates/build-seed-bundles-cli.js",
     "build:example": "node dist/cli.js build --entry examples/agent.ts --outfile dist/agent.js",
-    "build": "npm run build:lib && npm run build:schema && npm run build:templates && npm run build:example",
+    "build": "npm run build:lib && npm run build:schema && npm run build:eject && npm run build:templates && npm run build:example",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:ci": "npm run typecheck && npm run build && npm run test && node scripts/ci/verify-package-exports.mjs",

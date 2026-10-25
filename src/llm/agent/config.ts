@@ -367,6 +367,7 @@ function checkSources(c: Checker, v: unknown, path: string) {
 }
 
 const TOP_KEYS = [
+  "$schema",
   "version",
   "provider",
   "model",
@@ -616,6 +617,7 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
   additionalProperties: false,
   required: ["version", "provider", "apiKeySecret"],
   properties: {
+    $schema: { type: "string" },
     version: { const: 1 },
     provider: { enum: [...PROVIDER_IDS] },
     model: { type: "string", minLength: 1, maxLength: 200 },

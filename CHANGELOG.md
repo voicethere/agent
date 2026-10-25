@@ -13,6 +13,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 - `createLlmAgent` (`@voicethere/agent/llm`): a turn loop for LLM-driven agents. Streams sentences to `speak()` under one `turnId`, runs tool rounds (parallel calls, filler, round and timeout limits), handles barge-in through `onAgentInterrupted` (history keeps what the caller heard, with an interruption note), and takes chat input from the data channel. Never blocks the session queue.
 - `defineTool`, `LlmAgentHooks` (`onBeforeLlmCall`, `onAssistantText`, `onToolCall`, `onToolResult`, `onTurnEnd`, `respond`), `SentenceSplitter` and `ConversationHistory`.
 - `validateLlmAgentConfig`, `LLM_AGENT_CONFIG_DEFAULTS` and a JSON Schema for the config at `@voicethere/agent/llm/schema.json`.
+- `llm-agent` template (`agent.ts`, `voicethere.llm.json`, `prompt.md`, `tools.ts`, `hooks.ts`), created with a prebuilt seed bundle. The config accepts a top-level `$schema` string.
+- `buildAgentBundle` and `agent build` load `.md` and `.txt` imports as text.
+- Eject source for the turn loop at `@voicethere/agent/llm/eject/loop.ts` (generated into `eject/llm/loop.ts`), importing only `@voicethere/agent` and `@voicethere/agent/llm`.
 
 ## [0.11.0] - 2026-10-25
 

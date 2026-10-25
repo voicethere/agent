@@ -21,7 +21,7 @@ export interface AgentTemplateDefinition {
   /** Picker grouping. */
   category: TemplateCategory;
   description: string;
-  /** All TypeScript sources for this template (project-relative paths). */
+  /** All source files for this template (TypeScript, JSON, Markdown) (project-relative paths). */
   sourceFiles: string[];
   /** Extra npm dependencies for customer template workspaces (caret semver specs). */
   npmDependencies?: Record<string, string>;
@@ -212,6 +212,32 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
       "Webhook handler with Redis atomic shared counter plus DataChannel fan-out.",
     sourceFiles: ["webhooks-redis/agent.ts"],
     npmDependencies: { ioredis: "^5.11.1" },
+  },
+  {
+    id: "llm-agent",
+    entry: "llm-agent/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    title: "LLM agent",
+    summary:
+      "Voice and chat agent powered by an LLM, with tools and MCP servers.",
+    category: "voice-data",
+    description:
+      "Answers voice finals and chat messages with an LLM from OpenAI, Anthropic, Gemini or OpenRouter, streamed sentence by sentence into TTS. Settings live in voicethere.llm.json and the system prompt in prompt.md; tools, MCP servers and hooks extend it.",
+    sourceFiles: [
+      "llm-agent/agent.ts",
+      "llm-agent/voicethere.llm.json",
+      "llm-agent/prompt.md",
+      "llm-agent/tools.ts",
+      "llm-agent/hooks.ts",
+      "llm-agent/md.d.ts",
+    ],
+    npmDependencies: {
+      openai: "^7.43.0",
+      "@anthropic-ai/sdk": "^1.3.0",
+      "@google/genai": "^2.31.0",
+      "@modelcontextprotocol/sdk": "^1.32.2",
+    },
   },
   {
     id: "echo-smoke",

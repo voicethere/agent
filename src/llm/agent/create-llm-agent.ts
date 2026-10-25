@@ -16,7 +16,7 @@ import type {
   SessionContext,
 } from "../../runtime.js";
 import { resolveModel } from "../catalog.js";
-import { createLlmProvider } from "../index.js";
+import { createLlmProvider } from "../providers.js";
 import { McpToolSource } from "../mcp/mcp-tool-source.js";
 import type { McpToolSourceOptions } from "../mcp/mcp-tool-source.js";
 import { ToolRegistry } from "../mcp/tool-registry.js";

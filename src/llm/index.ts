@@ -47,6 +47,8 @@ export type {
   LlmAgentConfig,
   LlmAgentConfigError,
   LlmAgentConfigResult,
+  LlmAgentFillerSituation,
+  LlmAgentFillers,
   LlmAgentGreeting,
   LlmAgentMcpAuth,
   LlmAgentMcpSource,
@@ -55,6 +57,7 @@ export type {
   LlmAgentToolSource,
   LlmAgentToolsConfig,
 } from "./agent/config.js";
+export { CALL_AGENT_PROMPT_GUIDANCE } from "./agent/prompt-guidance.js";
 export { SentenceSplitter } from "./agent/sentence-splitter.js";
 export { ConversationHistory } from "./agent/history.js";
 export type { LlmAgentHooks, TurnContext, TurnSummary } from "./agent/hooks.js";

@@ -135,6 +135,8 @@
         },
         "filler": {
           "type": "object",
+          "deprecated": true,
+          "description": "Deprecated: use the top-level fillers block. Ignored when fillers is set.",
           "additionalProperties": false,
           "required": [
             "text"
@@ -156,6 +158,97 @@
               "default": false
             }
           }
+        }
+      }
+    },
+    "fillers": {
+      "type": "object",
+      "description": "Short sentences the agent speaks while the caller waits. Off when absent. At most 3 fillers per turn, never back to back.",
+      "additionalProperties": false,
+      "properties": {
+        "thinking": {
+          "type": "object",
+          "description": "Spoken when no sentence of the reply was spoken afterMs after the model call started. At most once per turn.",
+          "additionalProperties": false,
+          "properties": {
+            "phrases": {
+              "type": "array",
+              "description": "Phrases to pick from at random, never the same as the previous filler of the session. Empty or absent turns this situation off.",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              }
+            },
+            "afterMs": {
+              "type": "integer",
+              "description": "Wait for the first sentence of the reply, in milliseconds.",
+              "minimum": 300,
+              "maximum": 10000,
+              "default": 1500
+            }
+          }
+        },
+        "toolCall": {
+          "type": "object",
+          "description": "Spoken right when the model requests a tool call, only if nothing was spoken in the turn yet. At most once per turn.",
+          "additionalProperties": false,
+          "properties": {
+            "phrases": {
+              "type": "array",
+              "description": "Phrases to pick from at random, never the same as the previous filler of the session. Empty or absent turns this situation off.",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            }
+          }
+        },
+        "toolWait": {
+          "type": "object",
+          "description": "Spoken when a tool round is still running afterMs after it started. At most once per tool round, twice per turn.",
+          "additionalProperties": false,
+          "properties": {
+            "phrases": {
+              "type": "array",
+              "description": "Phrases to pick from at random, never the same as the previous filler of the session. Empty or absent turns this situation off.",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            },
+            "afterMs": {
+              "type": "integer",
+              "description": "How long a tool round runs before the filler, in milliseconds.",
+              "minimum": 1000,
+              "maximum": 30000,
+              "default": 4000
+            }
+          }
+        },
+        "interruptible": {
+          "type": "boolean",
+          "description": "Whether barge-in may cut a filler.",
+          "default": true
+        }
+      }
+    },
+    "speech": {
+      "type": "object",
+      "description": "How the reply is spoken.",
+      "additionalProperties": false,
+      "properties": {
+        "coalesceMs": {
+          "type": "integer",
+          "description": "Sentences that complete within this window are spoken as one utterance, so a reply that arrives at once has no gap between sentences. 0 speaks every sentence on its own.",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 150
         }
       }
     },

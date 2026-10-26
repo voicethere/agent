@@ -51,11 +51,19 @@ export interface CreateLlmAgentOptions {
   /** Provider SDK modules this agent may use, e.g. `[openai]` from `@voicethere/agent/llm/openai`. Must include the one `config.provider` selects. */
   providers?: readonly LlmProviderModule[];
   now?: () => number;
+  /** Test injection: random number in [0, 1) used to pick a filler phrase. */
+  random?: () => number;
   /** Test injection for MCP tool sources. */
   sourceFactory?: (opts: McpToolSourceOptions) => McpToolSource;
 }
 
 type Source = "voice" | "chat";
+type FillerKind = "thinking" | "toolCall" | "toolWait";
+
+const MAX_FILLERS_PER_TURN = 3;
+const MAX_TOOL_WAIT_FILLERS = 2;
+const TOOL_CALL_GAP_MS = 2_000;
+const COALESCE_MAX_CHARS = 400;
 
 interface TurnState {
   turnId: string;
@@ -76,6 +84,19 @@ interface TurnState {
   playedOverride?: string;
   spokeFirst: boolean;
   fillerSpoken: boolean;
+  /** Fillers from the `fillers` block spoken in this turn (cap 2). */
+  fillersSpoken: number;
+  thinkingSpoken: boolean;
+  toolCallSpoken: boolean;
+  toolWaitSpoken: number;
+  lastFillerAt?: number;
+  /** True once reply speech started after the last filler. */
+  replySinceFiller: boolean;
+  fillerTimers: Map<FillerKind, ReturnType<typeof setTimeout>>;
+  /** Sentences completed but not yet spoken (speech coalescing). */
+  pending: string[];
+  pendingChars: number;
+  coalesceTimer?: ReturnType<typeof setTimeout>;
   fallbackSpoken: boolean;
   status: TurnSummary["status"];
 }
@@ -92,6 +113,7 @@ interface SessionState {
   active?: ActiveTurn;
   queued?: { text: string; source: Source };
   announcing: number;
+  lastFillerPhrase?: string;
   chain: Promise<void>;
   lastInterruption?: {
     turnId: string;
@@ -148,6 +170,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
   }
   const hooks = opts.hooks ?? {};
   const now = opts.now ?? Date.now;
+  const random = opts.random ?? Math.random;
   const getEnv = opts.env ?? (() => process.env);
   const makeSource =
     opts.sourceFactory ?? ((o: McpToolSourceOptions) => new McpToolSource(o));
@@ -161,6 +184,19 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
   const useNote = config.history?.interruptionNote ?? D.interruptionNote;
   const historyTurns = config.history?.turns ?? D.historyTurns;
   const serviceWaitMs = config.serviceWaitMs ?? D.serviceWaitMs;
+  const fillerCfg = config.fillers;
+  const thinkingPhrases = fillerCfg?.thinking?.phrases ?? [];
+  const toolCallPhrases = fillerCfg?.toolCall?.phrases ?? [];
+  const toolWaitPhrases = fillerCfg?.toolWait?.phrases ?? [];
+  const thinkingAfterMs = fillerCfg?.thinking?.afterMs ?? D.thinkingAfterMs;
+  const toolWaitAfterMs = fillerCfg?.toolWait?.afterMs ?? D.toolWaitAfterMs;
+  const fillersInterruptible =
+    fillerCfg?.interruptible ?? D.fillersInterruptible;
+  const coalesceMs = config.speech?.coalesceMs ?? D.speechCoalesceMs;
+  const legacyToolFiller =
+    toolCallPhrases.length === 0 && toolWaitPhrases.length === 0
+      ? config.tools?.filler
+      : undefined;
 
   let provider: LlmProvider | undefined = opts.provider;
   let registry: ToolRegistry | undefined;
@@ -205,11 +241,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     text: string,
     interruptible = true,
   ): void {
+    flushSpeech(s, t);
     t.spoken.push(text);
-    if (!t.spokeFirst) {
-      t.spokeFirst = true;
-      setAgentState(s.sessionId, "speaking");
-    }
+    markReplyStarted(s, t);
     if (t.source === "chat") {
       sendToClient(s.sessionId, {
         type: "assistant_delta",
@@ -237,6 +271,147 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       speak(s.sessionId, text, { turnId });
     } else {
       trackAnnouncement(s, announce(s.sessionId, text, { turnId }).done);
+    }
+  }
+
+  // ---- fillers -----------------------------------------------------------
+
+  function clearFillerTimer(t: TurnState, kind?: FillerKind): void {
+    for (const [k, timer] of t.fillerTimers) {
+      if (kind && k !== kind) continue;
+      clearTimeout(timer);
+      t.fillerTimers.delete(k);
+    }
+  }
+
+  function phrasesFor(kind: FillerKind): string[] {
+    return kind === "thinking"
+      ? thinkingPhrases
+      : kind === "toolCall"
+        ? toolCallPhrases
+        : toolWaitPhrases;
+  }
+
+  function pickFiller(s: SessionState, kind: FillerKind): string {
+    const all = phrasesFor(kind);
+    const pool =
+      all.length > 1 ? all.filter((p) => p !== s.lastFillerPhrase) : all;
+    const i = Math.min(pool.length - 1, Math.floor(random() * pool.length));
+    return pool[i];
+  }
+
+  /**
+   * Speaks a filler of `kind` now, unless the turn's limits say no. Returns
+   * the ms to wait when the gap to the previous filler is too short.
+   */
+  function tryFiller(
+    s: SessionState,
+    t: TurnState,
+    kind: FillerKind,
+    afterMs: number,
+  ): { wait: number } | undefined {
+    if (t.controller.signal.aborted || s.ended) return undefined;
+    if (t.source === "chat" && !speakChat) return undefined;
+    if (phrasesFor(kind).length === 0) return undefined;
+    if (t.fillersSpoken >= MAX_FILLERS_PER_TURN) return undefined;
+    if (kind === "thinking" && (t.thinkingSpoken || t.spokeFirst)) {
+      return undefined;
+    }
+    if (kind === "toolCall" && (t.toolCallSpoken || t.spokeFirst)) {
+      return undefined;
+    }
+    if (kind === "toolWait" && t.toolWaitSpoken >= MAX_TOOL_WAIT_FILLERS) {
+      return undefined;
+    }
+    if (t.lastFillerAt !== undefined && !t.replySinceFiller) {
+      const gap = kind === "toolCall" ? TOOL_CALL_GAP_MS : afterMs;
+      const rest = gap - (now() - t.lastFillerAt);
+      if (rest > 0) return kind === "toolCall" ? undefined : { wait: rest };
+    }
+    const text = pickFiller(s, kind);
+    s.lastFillerPhrase = text;
+    t.fillersSpoken += 1;
+    t.lastFillerAt = now();
+    t.replySinceFiller = false;
+    if (kind === "thinking") t.thinkingSpoken = true;
+    if (kind === "toolCall") t.toolCallSpoken = true;
+    if (kind === "toolWait") t.toolWaitSpoken += 1;
+    speakAnnouncement(s, t.turnId, text, fillersInterruptible);
+    return undefined;
+  }
+
+  function armFiller(
+    s: SessionState,
+    t: TurnState,
+    kind: FillerKind,
+    delayMs: number,
+    afterMs: number,
+  ): void {
+    if (phrasesFor(kind).length === 0 || s.ended) return;
+    clearFillerTimer(t, kind);
+    const timer = setTimeout(() => {
+      t.fillerTimers.delete(kind);
+      const r = tryFiller(s, t, kind, afterMs);
+      if (r) armFiller(s, t, kind, r.wait, afterMs);
+    }, delayMs);
+    t.fillerTimers.set(kind, timer);
+  }
+
+  // ---- speech coalescing -------------------------------------------------
+
+  function dropPending(t: TurnState): void {
+    if (t.coalesceTimer) clearTimeout(t.coalesceTimer);
+    t.coalesceTimer = undefined;
+    t.pending = [];
+    t.pendingChars = 0;
+  }
+
+  /** Speaks the buffered sentences as one utterance. */
+  function flushSpeech(s: SessionState, t: TurnState): void {
+    if (t.coalesceTimer) clearTimeout(t.coalesceTimer);
+    t.coalesceTimer = undefined;
+    if (t.pending.length === 0) return;
+    const text = t.pending.join(" ");
+    t.pending = [];
+    t.pendingChars = 0;
+    if (t.controller.signal.aborted || s.ended) return;
+    speak(s.sessionId, text, { turnId: t.turnId });
+  }
+
+  /** A sentence of the model's reply: chat delta now, speech coalesced. */
+  function deliverReply(s: SessionState, t: TurnState, text: string): void {
+    if (coalesceMs <= 0) {
+      deliver(s, t, text);
+      return;
+    }
+    markReplyStarted(s, t);
+    t.spoken.push(text);
+    if (t.source === "chat") {
+      sendToClient(s.sessionId, {
+        type: "assistant_delta",
+        turnId: t.turnId,
+        text,
+      });
+    }
+    if (t.source !== "voice" && !speakChat) return;
+    t.pending.push(text);
+    t.pendingChars += text.length;
+    if (t.pendingChars >= COALESCE_MAX_CHARS) {
+      flushSpeech(s, t);
+    } else if (!t.coalesceTimer) {
+      t.coalesceTimer = setTimeout(() => {
+        t.coalesceTimer = undefined;
+        flushSpeech(s, t);
+      }, coalesceMs);
+    }
+  }
+
+  function markReplyStarted(s: SessionState, t: TurnState): void {
+    t.replySinceFiller = true;
+    if (!t.spokeFirst) {
+      t.spokeFirst = true;
+      clearFillerTimer(t, "thinking");
+      setAgentState(s.sessionId, "speaking");
     }
   }
 
@@ -404,7 +579,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     }
     if (t.controller.signal.aborted) return;
     t.roundText += `${t.roundText ? " " : ""}${out}`;
-    deliver(s, t, out);
+    deliverReply(s, t, out);
   }
 
   async function runRound(
@@ -428,6 +603,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       ];
     }
     t.llmCalls += 1;
+    if (t.llmCalls === 1 && !t.spokeFirst) {
+      armFiller(s, t, "thinking", thinkingAfterMs, thinkingAfterMs);
+    }
     t.roundOpen = true;
     t.roundText = "";
     const splitter = new SentenceSplitter();
@@ -462,6 +640,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     for (const sentence of splitter.end()) {
       await emitSentence(s, t, ctx, sentence);
     }
+    flushSpeech(s, t);
     if (done.usage) {
       if (done.usage.inputTokens !== undefined) {
         t.inputTokens = (t.inputTokens ?? 0) + done.usage.inputTokens;
@@ -573,18 +752,21 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
             .join(",")
             .slice(0, 64),
         });
-        const fillerCfg = config.tools?.filler;
-        if (fillerCfg && !t.fillerSpoken) {
+        clearFillerTimer(t, "thinking");
+        tryFiller(s, t, "toolCall", 0);
+        armFiller(s, t, "toolWait", toolWaitAfterMs, toolWaitAfterMs);
+        const fillerLegacy = legacyToolFiller;
+        if (fillerLegacy && !t.fillerSpoken) {
           filler = setTimeout(() => {
             if (t.fillerSpoken || signal.aborted) return;
             t.fillerSpoken = true;
             speakAnnouncement(
               s,
               t.turnId,
-              fillerCfg.text,
-              fillerCfg.interruptible ?? D.fillerInterruptible,
+              fillerLegacy.text,
+              fillerLegacy.interruptible ?? D.fillerInterruptible,
             );
-          }, fillerCfg.afterMs ?? D.fillerAfterMs);
+          }, fillerLegacy.afterMs ?? D.fillerAfterMs);
         }
         let results: LlmToolResult[];
         try {
@@ -592,6 +774,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         } finally {
           if (filler) clearTimeout(filler);
           filler = undefined;
+          clearFillerTimer(t);
         }
         s.history.addToolResults(results, { turnId: t.turnId });
         if (signal.aborted)
@@ -623,6 +806,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       return summarize(t);
     } finally {
       if (filler) clearTimeout(filler);
+      clearFillerTimer(t);
+      if (signal.aborted) dropPending(t);
     }
   }
 
@@ -715,6 +900,14 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       roundText: "",
       spokeFirst: false,
       fillerSpoken: false,
+      fillersSpoken: 0,
+      thinkingSpoken: false,
+      toolCallSpoken: false,
+      toolWaitSpoken: 0,
+      replySinceFiller: false,
+      fillerTimers: new Map(),
+      pending: [],
+      pendingChars: 0,
       fallbackSpoken: false,
       status: "completed",
     };
@@ -797,6 +990,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       cancelSpeech(s.sessionId, { turnId: active.turnId });
       active.state.abortStatus = "cancelled";
       active.state.controller.abort();
+      clearFillerTimer(active.state);
+      dropPending(active.state);
       let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         active.promise,
@@ -827,6 +1022,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
 
   return {
     async onAgentStart() {
+      for (const w of validated.warnings) {
+        agentLog("warn", `config warning: ${w.path} ${w.message}`);
+      }
       const env = getEnv();
       const apiKey = env[config.apiKeySecret];
       if (!nonEmpty(apiKey)) {
@@ -900,6 +1098,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       const active = s.active;
       if (active && active.turnId === ctx.turnId) {
         const t = active.state;
+        clearFillerTimer(t);
+        dropPending(t);
         if (t.roundOpen) {
           t.playedOverride = ctx.playedText;
           if (note) s.history.setPendingNote(note);
@@ -923,6 +1123,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       if (s.active) {
         s.active.state.abortStatus = "cancelled";
         s.active.state.controller.abort();
+        clearFillerTimer(s.active.state);
+        dropPending(s.active.state);
       }
       sessions.delete(ctx.sessionId);
     },

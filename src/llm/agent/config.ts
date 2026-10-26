@@ -6,9 +6,31 @@ export interface LlmAgentGreeting {
   interruptible?: boolean;
 }
 
+/**
+ * @deprecated Use the top-level `fillers` block. Ignored when `fillers` is set.
+ */
 export interface LlmAgentToolFiller {
   text: string;
   afterMs?: number;
+  interruptible?: boolean;
+}
+
+/** One situation of the `fillers` block. Absent or empty `phrases` turns it off. */
+export interface LlmAgentFillerSituation {
+  phrases: string[];
+  /** Wait before the filler. `thinking` 300..10000 (default 1500), `toolWait` 1000..30000 (default 4000). Unused by `toolCall`. */
+  afterMs?: number;
+}
+
+/** Short sentences spoken while the caller waits. Off when absent. */
+export interface LlmAgentFillers {
+  /** The caller waits for the first sentence of the model's reply. Phrases up to 60 characters. */
+  thinking?: LlmAgentFillerSituation;
+  /** The model requested a tool call and has said nothing yet. Phrases up to 120 characters. */
+  toolCall?: LlmAgentFillerSituation;
+  /** A tool round is still running. Phrases up to 120 characters. */
+  toolWait?: LlmAgentFillerSituation;
+  /** Default true: barge-in may cut a filler. */
   interruptible?: boolean;
 }
 
@@ -16,6 +38,7 @@ export interface LlmAgentToolsConfig {
   maxRounds?: number;
   timeoutMs?: number;
   maxResultBytes?: number;
+  /** @deprecated Use the top-level `fillers` block. */
   filler?: LlmAgentToolFiller;
 }
 
@@ -56,6 +79,8 @@ export interface LlmAgentConfig {
   speechDuringNonInterruptible?: "answer_after" | "discard";
   history?: { turns?: number; interruptionNote?: boolean };
   tools?: LlmAgentToolsConfig;
+  fillers?: LlmAgentFillers;
+  speech?: { coalesceMs?: number };
   toolSources?: LlmAgentToolSource[];
   interruptPolicy?: "cancel" | "finish";
   serviceWaitMs?: number;
@@ -75,6 +100,10 @@ export const LLM_AGENT_CONFIG_DEFAULTS = {
   toolMaxResultBytes: 16_384,
   fillerAfterMs: 1_500,
   fillerInterruptible: false,
+  thinkingAfterMs: 1_500,
+  toolWaitAfterMs: 4_000,
+  fillersInterruptible: true,
+  speechCoalesceMs: 150,
   servicePath: "/mcp",
   interruptPolicy: "cancel",
   serviceWaitMs: 20_000,
@@ -88,7 +117,7 @@ export interface LlmAgentConfigError {
 }
 
 export type LlmAgentConfigResult =
-  | { ok: true; config: LlmAgentConfig }
+  | { ok: true; config: LlmAgentConfig; warnings: LlmAgentConfigError[] }
   | { ok: false; errors: LlmAgentConfigError[] };
 
 const PROVIDER_IDS = ["openai", "anthropic", "gemini", "openrouter"] as const;
@@ -382,6 +411,8 @@ const TOP_KEYS = [
   "speechDuringNonInterruptible",
   "history",
   "tools",
+  "fillers",
+  "speech",
   "toolSources",
   "interruptPolicy",
   "serviceWaitMs",
@@ -569,6 +600,93 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
     }
   }
 
+  const warnings: LlmAgentConfigError[] = [];
+  if (root.fillers !== undefined) {
+    const f = c.object(root.fillers, "fillers");
+    if (f) {
+      c.unknownKeys(
+        f,
+        ["thinking", "toolCall", "toolWait", "interruptible"],
+        "fillers",
+      );
+      const fillers: LlmAgentFillers = {};
+      const situations = [
+        ["thinking", 60, [300, 10000]],
+        ["toolCall", 120, undefined],
+        ["toolWait", 120, [1000, 30000]],
+      ] as const;
+      for (const [key, maxChars, range] of situations) {
+        if (f[key] === undefined) continue;
+        const path = `fillers.${key}`;
+        const o = c.object(f[key], path);
+        if (!o) continue;
+        c.unknownKeys(o, range ? ["phrases", "afterMs"] : ["phrases"], path);
+        const sit: LlmAgentFillerSituation = { phrases: [] };
+        if (o.phrases !== undefined) {
+          if (!Array.isArray(o.phrases)) {
+            c.err(`${path}.phrases`, "must be an array of strings");
+          } else if (o.phrases.length > 20) {
+            c.err(`${path}.phrases`, "must have at most 20 entries");
+          } else {
+            o.phrases.forEach((item, i) => {
+              const p = `${path}.phrases[${i}]`;
+              if (typeof item !== "string") {
+                c.err(p, "must be a string");
+                return;
+              }
+              const text = item.trim();
+              if (text.length < 1) c.err(p, "must be at least 1 character");
+              else if (text.length > maxChars) {
+                c.err(p, `must be at most ${maxChars} characters`);
+              } else sit.phrases.push(text);
+            });
+          }
+        }
+        if (range && o.afterMs !== undefined) {
+          const n = c.number(
+            o.afterMs,
+            `${path}.afterMs`,
+            range[0],
+            range[1],
+            true,
+          );
+          if (n !== undefined) sit.afterMs = n;
+        }
+        fillers[key] = sit;
+      }
+      if (f.interruptible !== undefined) {
+        const b = c.boolean(f.interruptible, "fillers.interruptible");
+        if (b !== undefined) fillers.interruptible = b;
+      }
+      config.fillers = fillers;
+      if (
+        ((fillers.toolCall?.phrases.length ?? 0) > 0 ||
+          (fillers.toolWait?.phrases.length ?? 0) > 0) &&
+        isRecord(root.tools) &&
+        root.tools.filler !== undefined
+      ) {
+        warnings.push({
+          path: "tools.filler",
+          message:
+            "is ignored because fillers.toolCall or fillers.toolWait is set; move the text into fillers.toolWait.phrases",
+        });
+      }
+    }
+  }
+
+  if (root.speech !== undefined) {
+    const sp = c.object(root.speech, "speech");
+    if (sp) {
+      c.unknownKeys(sp, ["coalesceMs"], "speech");
+      const speech: NonNullable<LlmAgentConfig["speech"]> = {};
+      if (sp.coalesceMs !== undefined) {
+        const n = c.number(sp.coalesceMs, "speech.coalesceMs", 0, 1000, true);
+        if (n !== undefined) speech.coalesceMs = n;
+      }
+      config.speech = speech;
+    }
+  }
+
   if (root.toolSources !== undefined) {
     const s = checkSources(c, root.toolSources, "toolSources");
     if (s) config.toolSources = s;
@@ -598,7 +716,7 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
   }
 
   if (c.errors.length > 0) return { ok: false, errors: c.errors };
-  return { ok: true, config: config as LlmAgentConfig };
+  return { ok: true, config: config as LlmAgentConfig, warnings };
 }
 
 const envName = {
@@ -685,6 +803,9 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
         },
         filler: {
           type: "object",
+          deprecated: true,
+          description:
+            "Deprecated: use the top-level fillers block. Ignored when fillers is set.",
           additionalProperties: false,
           required: ["text"],
           properties: {
@@ -697,6 +818,95 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
             },
             interruptible: { type: "boolean", default: false },
           },
+        },
+      },
+    },
+    fillers: {
+      type: "object",
+      description:
+        "Short sentences the agent speaks while the caller waits. Off when absent. At most 3 fillers per turn, never back to back.",
+      additionalProperties: false,
+      properties: {
+        thinking: {
+          type: "object",
+          description:
+            "Spoken when no sentence of the reply was spoken afterMs after the model call started. At most once per turn.",
+          additionalProperties: false,
+          properties: {
+            phrases: {
+              type: "array",
+              description:
+                "Phrases to pick from at random, never the same as the previous filler of the session. Empty or absent turns this situation off.",
+              maxItems: 20,
+              items: { type: "string", minLength: 1, maxLength: 60 },
+            },
+            afterMs: {
+              type: "integer",
+              description:
+                "Wait for the first sentence of the reply, in milliseconds.",
+              minimum: 300,
+              maximum: 10000,
+              default: 1500,
+            },
+          },
+        },
+        toolCall: {
+          type: "object",
+          description:
+            "Spoken right when the model requests a tool call, only if nothing was spoken in the turn yet. At most once per turn.",
+          additionalProperties: false,
+          properties: {
+            phrases: {
+              type: "array",
+              description:
+                "Phrases to pick from at random, never the same as the previous filler of the session. Empty or absent turns this situation off.",
+              maxItems: 20,
+              items: { type: "string", minLength: 1, maxLength: 120 },
+            },
+          },
+        },
+        toolWait: {
+          type: "object",
+          description:
+            "Spoken when a tool round is still running afterMs after it started. At most once per tool round, twice per turn.",
+          additionalProperties: false,
+          properties: {
+            phrases: {
+              type: "array",
+              description:
+                "Phrases to pick from at random, never the same as the previous filler of the session. Empty or absent turns this situation off.",
+              maxItems: 20,
+              items: { type: "string", minLength: 1, maxLength: 120 },
+            },
+            afterMs: {
+              type: "integer",
+              description:
+                "How long a tool round runs before the filler, in milliseconds.",
+              minimum: 1000,
+              maximum: 30000,
+              default: 4000,
+            },
+          },
+        },
+        interruptible: {
+          type: "boolean",
+          description: "Whether barge-in may cut a filler.",
+          default: true,
+        },
+      },
+    },
+    speech: {
+      type: "object",
+      description: "How the reply is spoken.",
+      additionalProperties: false,
+      properties: {
+        coalesceMs: {
+          type: "integer",
+          description:
+            "Sentences that complete within this window are spoken as one utterance, so a reply that arrives at once has no gap between sentences. 0 speaks every sentence on its own.",
+          minimum: 0,
+          maximum: 1000,
+          default: 150,
         },
       },
     },

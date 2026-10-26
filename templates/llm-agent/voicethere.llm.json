@@ -11,10 +11,26 @@
   },
   "bargeIn": { "mode": "project" },
   "history": { "turns": 20, "interruptionNote": true },
+  "fillers": {
+    "thinking": {
+      "phrases": ["Hmm.", "Okay.", "Mm-hm.", "Right."],
+      "afterMs": 1500
+    },
+    "toolCall": {
+      "phrases": [
+        "Let me check that for you.",
+        "One moment, I'll look that up."
+      ]
+    },
+    "toolWait": {
+      "phrases": ["Still checking, one moment.", "Almost there."],
+      "afterMs": 4000
+    },
+    "interruptible": true
+  },
   "tools": {
     "maxRounds": 5,
-    "timeoutMs": 15000,
-    "filler": { "text": "One moment." }
+    "timeoutMs": 15000
   },
   "toolSources": [],
   "interruptPolicy": "cancel"

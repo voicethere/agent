@@ -93,6 +93,7 @@ const BASE_CONFIG = {
   version: 1,
   provider: "openai",
   apiKeySecret: "AGENT_TEST_KEY",
+  speech: { coalesceMs: 0 },
 };
 
 describe("createLlmAgent", () => {

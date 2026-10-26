@@ -6,6 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- LLM agents: the `fillers` block in `voicethere.llm.json` has three situations, each with its own phrases: `thinking` (the caller waits for the first sentence, after `afterMs`, default 1500), `toolCall` (the model asked for a tool and has said nothing yet, spoken at once) and `toolWait` (a tool round runs longer than `afterMs`, default 4000). At most 3 fillers per turn, never back to back, never the same phrase twice in a row, and barge-in may cut them (`interruptible`, default true). Fillers are speech only and never reach the conversation sent to the model. Off unless set; the `llm-agent` template ships all three.
+- `speech.coalesceMs` (default 150): sentences that complete within the window are spoken as one utterance, so a reply that arrives at once has no gap between sentences. `0` keeps one utterance per sentence.
+- `CALL_AGENT_PROMPT_GUIDANCE` exported from `@voicethere/agent/llm`, and a "Voice call" section in the `llm-agent` template prompt.
+- `validateLlmAgentConfig` returns `warnings`. `createLlmAgent` accepts a `random` option for tests.
+
+### Deprecated
+
+- `tools.filler` (one fixed text, spoken only during tool calls). It still works when `fillers.toolCall` and `fillers.toolWait` have no phrases; otherwise it is ignored and the agent logs a warning.
+
 ## [0.13.0] - 2026-10-25
 
 ### Breaking

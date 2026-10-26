@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -10,6 +11,17 @@ import { listTemplates } from "../src/templates/index.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const templateDir = join(root, "templates", "llm-agent");
+
+/** verify-start through the CLI, as users run it. Throws with the output when it fails. */
+function verifyStartCli(bundle: string): void {
+  const result = spawnSync(
+    process.execPath,
+    [join(root, "dist", "cli.js"), "verify-start", "--no-build", "--bundle", bundle],
+    { encoding: "utf8", env: { ...process.env, AGENT_OPENAI_API_KEY: "unused" } },
+  );
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+  expect(result.stdout).toContain("All checks passed");
+}
 
 describe("llm-agent template", () => {
   it("llm-agent template bundles with its json and md imports", async () => {
@@ -68,4 +80,34 @@ describe("llm-agent template", () => {
     expect(template?.sourceFiles).toContain("llm-agent/voicethere.llm.json");
     expect(template?.sourceFiles).toContain("llm-agent/prompt.md");
   });
+
+  it("a bundle with the LLM agent loads and passes verify-start", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "voicethere-llm-verify-start-"));
+    const outfile = join(dir, "agent.js");
+    try {
+      await buildAgentBundle({
+        cwd: root,
+        entry: "test/fixtures/llm-create-require-agent.ts",
+        outfile,
+      });
+      verifyStartCli(outfile);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("the llm-agent template itself passes verify-start", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "voicethere-llm-template-start-"));
+    const outfile = join(dir, "agent.js");
+    try {
+      await buildAgentBundle({
+        cwd: root,
+        entry: "templates/llm-agent/agent.ts",
+        outfile,
+      });
+      verifyStartCli(outfile);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

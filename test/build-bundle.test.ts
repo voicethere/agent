@@ -1,5 +1,7 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 
@@ -39,7 +41,7 @@ describe("buildAgentBundle", () => {
 
       const source = readFileSync(outfile, "utf8");
       expect(source).toContain("defineAgent");
-      expect(source).toContain("createRequire(import.meta.url)");
+      expect(source).toContain("(import.meta.url)");
       expect(source).not.toContain('__require("supports-color")');
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -73,6 +75,38 @@ describe("buildAgentBundle", () => {
       });
       const source = readFileSync(join(dir, "dist", "agent.js"), "utf8");
       expect(source).toContain("You are a calm voice assistant.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("buildAgentBundle module identifiers", () => {
+  it("a bundle with the LLM agent and its own createRequire import loads", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "voicethere-agent-createrequire-"));
+    const outfile = join(dir, "agent.mjs");
+    try {
+      await buildAgentBundle({
+        cwd: process.cwd(),
+        entry: "test/fixtures/llm-create-require-agent.ts",
+        outfile,
+      });
+      const source = readFileSync(outfile, "utf8");
+      expect(source).toContain("__voicethereCreateRequire(import.meta.url)");
+      // Parsing is what failed: "Identifier 'createRequire' has already been declared".
+      // Import in a child: importing runs defineAgent, which talks to its parent over IPC.
+      const run = spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `const m = await import(${JSON.stringify(pathToFileURL(outfile).href)}); process.stdout.write(typeof m.entryRequire); process.exit(0);`,
+        ],
+        { encoding: "utf8", timeout: 20_000 },
+      );
+      expect(run.stderr).not.toContain("has already been declared");
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).toBe("function");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -18,9 +18,19 @@ const NODE_BUILTIN_MODULE_IDS = new Set<string>([
   ...builtinModules.map((name) => `node:${name}`),
 ]);
 
-/** Lets bundled CJS deps (ioredis) call `require("events")` under ESM output. */
-const AGENT_BUNDLE_BANNER = `import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
+/**
+ * Lets bundled CJS deps (ioredis) call `require("events")` under ESM output.
+ *
+ * The banner is raw text, so esbuild cannot see its identifiers and does not rename
+ * bundled modules around them. A bundled module that imports `createRequire` (the LLM
+ * MCP tool source does) is hoisted to the same top level, and a plain
+ * `import { createRequire }` here would be declared twice ("Identifier 'createRequire'
+ * has already been declared"). The import is therefore aliased to a name no module uses.
+ * `require` itself is safe: esbuild treats it as a reserved global and renames any
+ * bundled top-level `require` (`require2`).
+ */
+export const AGENT_BUNDLE_BANNER = `import { createRequire as __voicethereCreateRequire } from "node:module";
+const require = __voicethereCreateRequire(import.meta.url);
 `;
 
 function isNodeBuiltinModuleId(path: string): boolean {

@@ -1,5 +1,13 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { buildAgentBundle } from "../build-bundle.js";
 import {
@@ -46,6 +54,37 @@ function failCheck(
 ): VerifyAgentResult {
   checks.push({ name, ok: false, detail });
   return { ok: false, checks, bundlePath: "" };
+}
+
+/**
+ * Parse the bundle as an ES module without running it (`node --check`). Bundles are
+ * ESM whatever their extension, so the check runs on a `.mjs` copy. Catches errors that
+ * stop the bundle from loading at all, such as a duplicate top-level declaration.
+ * Returns the first line of Node's error, or undefined when the bundle parses.
+ */
+function checkBundleParses(bundlePath: string): string | undefined {
+  const dir = mkdtempSync(join(tmpdir(), "voicethere-verify-parse-"));
+  try {
+    const copy = join(dir, "bundle.mjs");
+    copyFileSync(bundlePath, copy);
+    const result = spawnSync(process.execPath, ["--check", copy], {
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+    if (result.error) {
+      return result.error.message;
+    }
+    if (result.status === 0) {
+      return undefined;
+    }
+    const lines = (result.stderr ?? "").split("\n").map((line) => line.trim());
+    return (
+      lines.find((line) => /Error:/.test(line)) ??
+      `node --check exited with code ${result.status}`
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 export async function runAgentVerify(
@@ -111,6 +150,13 @@ export async function runAgentVerify(
     detail: resolvedBundle,
   });
   logLine(quiet, `✓ Bundle present (${resolvedBundle})`);
+
+  const parseError = checkBundleParses(resolvedBundle);
+  if (parseError) {
+    return failCheck(checks, "Bundle parses", parseError);
+  }
+  checks.push({ name: "Bundle parses", ok: true, detail: "node --check" });
+  logLine(quiet, "✓ Bundle parses");
 
   const bundleSource = readFileSync(resolvedBundle, "utf8");
   if (!hasDefineAgentRegistration(bundleSource)) {

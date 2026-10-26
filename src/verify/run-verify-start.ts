@@ -83,6 +83,14 @@ export async function runAgentVerifyStart(
     child = startSandboxedChild({
       sessionId: VERIFY_SESSION_ID,
       bundlePath: resolvedBundle,
+      // Project secrets reach a deployed agent as AGENT_* variables; do the same here so
+      // agents that read one at start (the LLM API key) can be verified.
+      allowlistedEnv: Object.fromEntries(
+        Object.entries(process.env).filter(
+          (entry): entry is [string, string] =>
+            entry[0].startsWith("AGENT_") && typeof entry[1] === "string",
+        ),
+      ),
       onStderr: (message) => {
         if (!quiet) {
           process.stderr.write(`[child stderr] ${message}\n`);

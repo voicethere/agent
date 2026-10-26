@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-26
+
+### Fixed
+
+- Bundles built with `@voicethere/agent build` that include the LLM agent (`createLlmAgent`) failed to load with `SyntaxError: Identifier 'createRequire' has already been declared`. The bundle no longer declares a name that bundled modules can also declare.
+- `verify` now checks that the bundle parses as a module (new check "Bundle parses"), so a bundle that does not load fails `verify` instead of only timing out in `verify-start`.
+- `verify-start` passes `AGENT_*` environment variables to the sandboxed child, as a deployed agent gets its project secrets, so agents that read a key at start (such as the LLM API key) can be verified.
+
 ## [0.14.0] - 2026-10-26
 
 ### Added

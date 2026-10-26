@@ -111,4 +111,17 @@ describe("runAgentVerify", () => {
       result.checks.some((check) => check.name === "Bundle callbacks"),
     ).toBe(true);
   });
+
+  it("fails with a named error when the bundle does not parse (duplicate top-level identifier)", async () => {
+    const result = await runAgentVerify({
+      bundlePath: join(__dirname, "fixtures/duplicate-create-require-agent.mjs"),
+      noBuild: true,
+      quiet: true,
+    });
+
+    expect(result.ok).toBe(false);
+    const failed = result.checks.find((check) => !check.ok);
+    expect(failed?.name).toBe("Bundle parses");
+    expect(failed?.detail).toContain("createRequire");
+  });
 });

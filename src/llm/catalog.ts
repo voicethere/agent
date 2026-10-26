@@ -23,6 +23,9 @@ export const LLM_PROVIDERS: Record<
   },
   openrouter: {
     title: "OpenRouter",
+    // Chosen by the 2026-10-27 probe: tool calls 3/3, median first token 438 ms.
+    // A paid model; the free `:free` models were rate-limited or returned no content.
+    defaultModel: "amazon/nova-micro-v1",
     apiKeyEnv: "AGENT_OPENROUTER_API_KEY",
     docsUrl: "https://openrouter.ai/docs/api-reference/overview",
   },

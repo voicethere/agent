@@ -9,12 +9,13 @@ describe("llm catalog", () => {
     expect(LLM_PROVIDERS.gemini.apiKeyEnv).toBe("AGENT_GEMINI_API_KEY");
   });
 
-  it("resolveModel requires a model for gemini and openrouter", () => {
+  it("openrouter resolves a default model", () => {
+    expect(resolveModel("openrouter")).toBe("amazon/nova-micro-v1");
+  });
+
+  it("resolveModel requires a model for gemini", () => {
     expect(() => resolveModel("gemini")).toThrow(
       "model is required for Google Gemini",
-    );
-    expect(() => resolveModel("openrouter", "")).toThrow(
-      "model is required for OpenRouter",
     );
     expect(resolveModel("gemini", "gemini-x")).toBe("gemini-x");
   });

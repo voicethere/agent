@@ -1,9 +1,9 @@
 {
   "$schema": "./node_modules/@voicethere/agent/schema/voicethere.llm.schema.json",
   "version": 1,
-  "provider": "openai",
-  "model": "gpt-4o-mini",
-  "apiKeySecret": "AGENT_OPENAI_API_KEY",
+  "provider": "openrouter",
+  "model": "amazon/nova-micro-v1",
+  "apiKeySecret": "AGENT_OPENROUTER_API_KEY",
   "maxOutputTokens": 300,
   "greeting": {
     "text": "Hi! How can I help you today?",

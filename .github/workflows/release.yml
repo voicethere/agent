@@ -51,6 +51,9 @@ jobs:
       - name: Set package version
         run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
 
+      - name: Check OpenRouter default model
+        run: npm run check:openrouter-model
+
       - name: Build publishable dist
         run: npm run build
 

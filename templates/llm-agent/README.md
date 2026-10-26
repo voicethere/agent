@@ -13,7 +13,7 @@ A voice and chat agent powered by an LLM, with custom tools and MCP servers. Sou
 
 ## Set the API key
 
-The default provider is OpenAI. Add a project secret named `AGENT_OPENAI_API_KEY` with your key, then deploy. The key is read by name from `apiKeySecret` in `voicethere.llm.json`; it is never stored in the file. Only project secrets whose names start with `AGENT_` reach the agent.
+The template starts on OpenRouter with the model `amazon/nova-micro-v1`. Create a key at openrouter.ai, add it as a project secret named `AGENT_OPENROUTER_API_KEY`, then deploy. For production, pick the model from OpenRouter's list yourself, checking cost, latency and tool support. The key is read by name from `apiKeySecret` in `voicethere.llm.json`; it is never stored in the file. Only project secrets whose names start with `AGENT_` reach the agent.
 
 ## Filler phrases
 
@@ -56,7 +56,7 @@ It is never added automatically.
 
 ## Switch providers
 
-Change `provider`, `model` and `apiKeySecret` in `voicethere.llm.json`. For example, `anthropic` with `AGENT_ANTHROPIC_API_KEY`, `gemini` with `AGENT_GEMINI_API_KEY`, or `openrouter` with `AGENT_OPENROUTER_API_KEY`. Create the matching project secret before you deploy.
+Change `provider`, `model` and `apiKeySecret` in `voicethere.llm.json`. To go back to OpenAI, use `provider: "openai"`, `model: "gpt-4o-mini"` and `AGENT_OPENAI_API_KEY`; no import changes. Other options are `anthropic` with `AGENT_ANTHROPIC_API_KEY` and `gemini` with `AGENT_GEMINI_API_KEY`. Create the matching project secret before you deploy.
 
 ## Switching provider
 

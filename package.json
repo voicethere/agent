@@ -1,6 +1,6 @@
 {
   "name": "@voicethere/agent",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "description": "VoiceThere customer agent SDK — IPC types and runtime helpers for sandboxed child bundles",
   "type": "module",
   "exports": {
@@ -101,6 +101,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:ci": "npm run typecheck && npm run build && npm run test && node scripts/ci/verify-package-exports.mjs",
+    "check:openrouter-model": "node scripts/ci/check-openrouter-default-model.mjs",
     "test:redis": "vitest run test/redis-lua.test.ts test/game-sync-redis-agent.test.ts",
     "verify:local": "npm run build && node ./dist/cli.js verify --no-build --bundle ./dist/agent.js",
     "verify:local:only": "node ./dist/cli.js verify --no-build --bundle ./dist/agent.js",

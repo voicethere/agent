@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { buildAgentBundle } from "../src/build-bundle.js";
+import { LLM_PROVIDERS } from "../src/llm/catalog.js";
 import { validateLlmAgentConfig } from "../src/llm/agent/config.js";
 import { listTemplates } from "../src/templates/index.js";
 
@@ -16,8 +17,21 @@ const templateDir = join(root, "templates", "llm-agent");
 function verifyStartCli(bundle: string): void {
   const result = spawnSync(
     process.execPath,
-    [join(root, "dist", "cli.js"), "verify-start", "--no-build", "--bundle", bundle],
-    { encoding: "utf8", env: { ...process.env, AGENT_OPENAI_API_KEY: "unused" } },
+    [
+      join(root, "dist", "cli.js"),
+      "verify-start",
+      "--no-build",
+      "--bundle",
+      bundle,
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        AGENT_OPENAI_API_KEY: "unused",
+        AGENT_OPENROUTER_API_KEY: "unused",
+      },
+    },
   );
   expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
   expect(result.stdout).toContain("All checks passed");
@@ -68,6 +82,19 @@ describe("llm-agent template", () => {
     );
     const result = validateLlmAgentConfig(config);
     expect(result.ok, JSON.stringify(result)).toBe(true);
+  });
+
+  it("template model is its provider's catalog default", () => {
+    const config = JSON.parse(
+      readFileSync(join(templateDir, "voicethere.llm.json"), "utf8"),
+    ) as {
+      provider: keyof typeof LLM_PROVIDERS;
+      model: string;
+      apiKeySecret: string;
+    };
+    const entry = LLM_PROVIDERS[config.provider];
+    expect(config.model).toBe(entry.defaultModel);
+    expect(config.apiKeySecret).toBe(entry.apiKeyEnv);
   });
 
   it("registry lists llm-agent as a creatable product template", () => {

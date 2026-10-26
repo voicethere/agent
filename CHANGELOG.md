@@ -6,6 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-27
+
+### Changed
+
+- The `llm-agent` template now starts on OpenRouter with `amazon/nova-micro-v1` and the project secret `AGENT_OPENROUTER_API_KEY`. Projects that already have a `voicethere.llm.json` keep it.
+
+### Added
+
+- `openrouter` has a default model in the provider catalog, so a config without `model` resolves to `amazon/nova-micro-v1` instead of failing.
+- `npm run check:openrouter-model` confirms the default model is listed by OpenRouter and supports tools. The release workflow runs it before publishing.
+
 ## [0.14.1] - 2026-10-26
 
 ### Fixed

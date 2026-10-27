@@ -12,18 +12,22 @@ import {
 } from "./types.js";
 
 /**
- * Searches the customer's own Supabase project through the Postgres function
- * from the Supabase "Semantic search" (pgvector) guide:
- * https://supabase.com/docs/guides/ai/semantic-search
+ * Searches the customer's own Supabase project through a Postgres function.
  *
- *   match_documents(query_embedding vector(N), match_threshold float, match_count int)
- *   returns table (id bigint, content text, similarity float)
+ * `match_documents` is a customer-created function adapted from the Supabase
+ * guides (semantic-search: a `documents` table with id/content;
+ * vector-columns: similarity = 1 - (embedding <=> query_embedding)):
+ * https://supabase.com/docs/guides/ai/semantic-search
+ * https://supabase.com/docs/guides/ai/vector-columns
+ * VoiceThere requires the returns clause
+ * `table (id bigint, content text, similarity float)` shown in the README.
  *
  * Supabase serves Postgres functions over REST (PostgREST RPC):
  * POST {SUPABASE_URL}/rest/v1/rpc/{function}, headers `apikey` and
- * `Authorization: Bearer <key>`, JSON body = the named arguments.
- * https://supabase.com/docs/guides/api (and the PostgREST functions reference).
- * Only the three documented result columns are read.
+ * `Authorization: Bearer <key>`, JSON body = the named arguments
+ * `query_embedding`, `match_threshold`, `match_count`.
+ * https://supabase.com/docs/guides/api
+ * Only the three columns of the returns clause are read.
  */
 
 const RPC_NAME_RE = /^[a-z_][a-z0-9_]{0,62}$/;
@@ -108,6 +112,7 @@ export function createSupabaseKnowledgeBase(
   }
   const base = checkUrl(opts.url, opts.allowInsecureLocal === true);
   if (!opts.key) throw fail("supabase key is empty");
+  const urlHash = createHash("sha256").update(base).digest("hex");
   const threshold = opts.matchThreshold ?? 0.5;
   const dims = opts.dims ?? DEFAULT_EMBEDDING_DIMS;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -151,7 +156,7 @@ export function createSupabaseKnowledgeBase(
 
   function cacheKey(query: string, k: number): string {
     const digest = createHash("sha256")
-      .update([opts.model, dims, rpc, threshold, k, query].join("|"))
+      .update([urlHash, opts.model, dims, rpc, threshold, k, query].join("|"))
       .digest("hex");
     return `kb:${cacheNs}:cache:${digest}`;
   }

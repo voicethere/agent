@@ -7,6 +7,8 @@ import {
   KnowledgeIndexError,
   type LlmEmbedder,
 } from "../../src/llm/index.js";
+import { readFileSync } from "node:fs";
+import { supabaseMatchDocumentsSql } from "../helpers/supabase-sql.js";
 import { openTestRedis } from "../helpers/test-redis.js";
 
 const KEY = "sb-secret-key-sentinel";
@@ -85,6 +87,14 @@ function make(over: Record<string, unknown> = {}) {
 }
 
 describe("createSupabaseKnowledgeBase", () => {
+  it("README match_documents SQL equals the helper SQL", () => {
+    const readme = readFileSync(
+      new URL("../../README.md", import.meta.url),
+      "utf8",
+    );
+    expect(readme).toContain(supabaseMatchDocumentsSql(512));
+  });
+
   it("posts the documented RPC request and maps id/content/similarity", async () => {
     plan = [
       {
@@ -219,6 +229,25 @@ describe.skipIf(!harness)("supabase knowledge cache (real Redis)", () => {
     expect(ttl).toBeGreaterThan(0);
     expect(ttl).toBeLessThanOrEqual(600);
     await kb.close();
+  });
+
+  it("the same query against two Supabase urls is two RPC calls", async () => {
+    const namespace = `supa-test-proj-${process.pid}`;
+    const cache = { redisUrl: cacheUrl, ttlSeconds: 600, namespace };
+    plan = [
+      { status: 200, body: [{ id: 1, content: "a", similarity: 0.8 }] },
+      { status: 200, body: [{ id: 2, content: "b", similarity: 0.8 }] },
+    ];
+    const one = make({ cache });
+    const first = await one.kb.search("same query");
+    // a different project url
+    const other = make({ cache, url: base.replace("127.0.0.1", "localhost") });
+    const second = await other.kb.search("same query");
+    expect(seen).toHaveLength(2);
+    expect(first[0]?.text).toBe("a");
+    expect(second[0]?.text).toBe("b");
+    await one.kb.close();
+    await other.kb.close();
   });
 
   it("search still works when Redis is down", async () => {

@@ -73,7 +73,12 @@ export interface CreateLlmAgentOptions {
    * `store: "redis"` (import `knowledge/*.md` as strings). `base` replaces the
    * configured store (tests, advanced use).
    */
-  knowledge?: { documents?: KnowledgeDocument[]; base?: KnowledgeBase };
+  knowledge?: {
+    documents?: KnowledgeDocument[];
+    base?: KnowledgeBase;
+    /** Tests only: allow http://127.0.0.1 and http://localhost Supabase URLs. */
+    allowInsecureLocal?: boolean;
+  };
   /** Test injection for MCP tool sources. */
   sourceFactory?: (opts: McpToolSourceOptions) => McpToolSource;
 }
@@ -530,7 +535,20 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
           );
           return;
         }
+        if (!/^https:\/\//i.test(url.trim())) {
+          const local = /^http:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/i.test(
+            url.trim(),
+          );
+          if (!local || !opts.knowledge?.allowInsecureLocal) {
+            agentLog(
+              "info",
+              "knowledge: supabase url must use https; knowledge search disabled",
+            );
+            return;
+          }
+        }
         base = createSupabaseKnowledgeBase({
+          allowInsecureLocal: opts.knowledge?.allowInsecureLocal,
           url,
           key,
           rpc: sb.rpc,

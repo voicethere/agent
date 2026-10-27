@@ -494,7 +494,37 @@ An LLM agent turns retrieval on with a `knowledge` block in `voicethere.llm.json
 
 ### Your own Supabase pgvector table
 
-With `store: "supabase"` the agent searches a table in **your** Supabase project; VoiceThere never stores your vectors. Create the table and the `match_documents` function in your project as described in the Supabase guide ([Semantic search](https://supabase.com/docs/guides/ai/semantic-search)), with a vector size equal to `embeddings.dimensions` (512 by default), and fill it yourself.
+With `store: "supabase"` the agent searches a table in **your** Supabase project; VoiceThere never stores your vectors. Run this SQL in your own project, then fill the table yourself:
+
+```sql
+create extension if not exists vector;
+
+create table documents (
+  id bigint primary key generated always as identity,
+  content text not null,
+  embedding vector(512)
+);
+
+create or replace function match_documents (
+  query_embedding vector(512),
+  match_threshold float,
+  match_count int
+)
+returns table (id bigint, content text, similarity float)
+language sql stable
+as $$
+  select
+    documents.id,
+    documents.content,
+    1 - (documents.embedding <=> query_embedding) as similarity
+  from documents
+  where 1 - (documents.embedding <=> query_embedding) > match_threshold
+  order by documents.embedding <=> query_embedding asc
+  limit least(match_count, 200);
+$$;
+```
+
+It is adapted from the two Supabase guides ([Semantic search](https://supabase.com/docs/guides/ai/semantic-search) and [Vector columns](https://supabase.com/docs/guides/ai/vector-columns)). The returns clause `table (id bigint, content text, similarity float)` is required, and the vector size must match `knowledge.embeddings.dimensions` (512 by default).
 
 ```json
 {

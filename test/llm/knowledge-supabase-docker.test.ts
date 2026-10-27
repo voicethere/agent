@@ -4,6 +4,7 @@ import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { supabaseMatchDocumentsSql } from "../helpers/supabase-sql.js";
 import {
   createSupabaseKnowledgeBase,
   type LlmEmbedder,
@@ -64,22 +65,7 @@ const ROWS = [
 ];
 
 const SQL = `
-create extension if not exists vector;
-create table documents (id bigserial primary key, content text, embedding vector(${DIMS}));
-create or replace function match_documents (
-  query_embedding vector(${DIMS}),
-  match_threshold float,
-  match_count int
-)
-returns table (id bigint, content text, similarity float)
-language sql stable
-as $$
-  select documents.id, documents.content, 1 - (documents.embedding <=> query_embedding) as similarity
-  from documents
-  where 1 - (documents.embedding <=> query_embedding) > match_threshold
-  order by (documents.embedding <=> query_embedding) asc
-  limit match_count;
-$$;
+${supabaseMatchDocumentsSql(DIMS)}
 create role anon nologin;
 grant usage on schema public to anon;
 grant select on documents to anon;
@@ -228,6 +214,7 @@ describe.skipIf(!dockerUp)(
       expect(hits.length).toBeGreaterThan(0);
       expect(hits[0]!.text).toBe(ROWS[0]);
       expect(hits[0]!.source).toBe("supabase");
+      expect(hits[0]!.score).toBeGreaterThan(0);
       expect(hits[0]!.score).toBeGreaterThan(hits.at(-1)!.score - 1e-9);
     });
   },

@@ -202,6 +202,35 @@ describe("createLlmAgent knowledge", () => {
     expect(requests[0]!.tools).toEqual([]);
   });
 
+  it("a non-https supabase url does not fail start: one log line, no tool, no url in the log", async () => {
+    const { requests } = await boot({
+      config: {
+        knowledge: {
+          store: "supabase",
+          embeddings: { provider: "openai" },
+          supabase: {
+            urlSecret: "AGENT_SUPABASE_URL",
+            keySecret: "AGENT_SUPABASE_KEY",
+          },
+        },
+      },
+      providers: true,
+      env: {
+        AGENT_SUPABASE_URL: "http://db.example-sentinel.com",
+        AGENT_SUPABASE_KEY: "sb-key",
+      },
+      knowledge: {},
+    });
+    say("hi");
+    await vi.waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    expect(requests[0]!.tools).toEqual([]);
+    const lines = sent("log").filter((m) =>
+      String(m.message).includes("supabase url must use https"),
+    );
+    expect(lines).toHaveLength(1);
+    expect(JSON.stringify(sent("log"))).not.toContain("example-sentinel");
+  });
+
   it("a missing embeddings provider module is a config error at creation", () => {
     expect(() =>
       createLlmAgent({

@@ -130,7 +130,7 @@ export class McpToolSource {
   private readonly deny: Set<string>;
   private readonly connectTimeoutMs: number;
   private readonly log: McpLogFn;
-  private readonly kind: "mcp" | "service";
+  readonly kind: "mcp" | "service";
   private lastDiscoveryHash: string | undefined;
   private readonly backoff: number[];
 

@@ -19,6 +19,7 @@ import { resolveModel } from "../catalog.js";
 import { createLlmProvider } from "../providers.js";
 import { McpToolSource } from "../mcp/mcp-tool-source.js";
 import type { McpToolSourceOptions } from "../mcp/mcp-tool-source.js";
+import { secretValuesFromEnv } from "./redact.js";
 import { ToolRegistry } from "../mcp/tool-registry.js";
 import type { CustomTool } from "../mcp/tool-registry.js";
 import { LlmProviderError } from "../types.js";
@@ -420,6 +421,22 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
   function buildRegistry(env: Record<string, string | undefined>): void {
     const reg = new ToolRegistry({
       log: (level, message, fields) => agentLog(level, message, fields ?? {}),
+      toolCallLog: {
+        mode: config.toolCallLogs ?? D.toolCallLogs,
+        secretValues: secretValuesFromEnv(env, [
+          config.apiKeySecret,
+          "AGENT_SERVICE_TOKEN",
+          ...(config.toolSources ?? []).flatMap((src) => {
+            if (src.kind !== "mcp" || !src.auth) return [];
+            if (src.auth.type === "bearer") return [src.auth.secret];
+            if (src.auth.type === "headers")
+              return Object.values(src.auth.headers);
+            return [];
+          }),
+        ]),
+        emit: (fields, sid) =>
+          agentLog("info", "llm tool call", { ...fields }, sid),
+      },
     });
     for (const tool of opts.tools ?? []) reg.addCustomTool(tool);
     const sources: McpToolSource[] = [];
@@ -517,22 +534,39 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       let content = "";
       let isError = false;
       const work = (async () => {
+        const hookStart = Date.now();
         const hooked = hooks.onToolCall
           ? await callHook("onToolCall", s.sessionId, () =>
               hooks.onToolCall!({ name: call.name, args: call.input }, ctx),
             )
           : undefined;
         if (hooked?.ok && hooked.value) {
-          return {
+          const answered = {
             content: String(hooked.value.result),
             isError: hooked.value.isError === true,
           };
+          registry?.logExternalCall(
+            call.name,
+            call.input,
+            {
+              timeoutMs: toolTimeoutMs,
+              sessionId: s.sessionId,
+              turnId: t.turnId,
+              callId: call.id,
+            },
+            hookStart,
+            Date.now(),
+            answered,
+          );
+          return answered;
         }
         if (!registry) return { content: "no tools available", isError: true };
         return registry.call(call.name, call.input, {
           signal,
           timeoutMs: toolTimeoutMs,
           sessionId: s.sessionId,
+          turnId: t.turnId,
+          callId: call.id,
         });
       })();
       const raced = await Promise.race([work, aborted]);

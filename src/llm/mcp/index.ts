@@ -16,5 +16,6 @@ export type {
   CustomTool,
   RegisteredTool,
   ToolCallContext,
+  ToolCallLogOptions,
   ToolCallResult,
 } from "./tool-registry.js";

@@ -678,6 +678,43 @@ describe("createLlmAgent", () => {
     expect(byName.m.kind).toBeUndefined();
   });
 
+  it("hook-answered call writes one llm.tool.call line", async () => {
+    const handler = vi.fn(async () => "never");
+    await boot(
+      [
+        [done("", [{ id: "c1", name: "mine", input: { q: 1 } }])],
+        [delta("Ok."), done("Ok.")],
+      ],
+      {
+        options: {
+          tools: [
+            {
+              name: "mine",
+              description: "d",
+              inputSchema: { type: "object" },
+              handler,
+            },
+          ],
+          hooks: { onToolCall: () => ({ result: "x" }) },
+        },
+      },
+    );
+    say("hi");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    const lines = sent("log").filter(
+      (m) => (m.fields as Msg | undefined)?.event === "llm.tool.call",
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0].sessionId).toBe(SESSION);
+    expect(lines[0].fields).toMatchObject({
+      kind: "hook",
+      tool: "mine",
+      callId: "c1",
+      output: "x",
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("onAssistantText returning null suppresses a sentence", async () => {
     await boot(
       [[delta("Secret one. Public two."), done("Secret one. Public two.")]],

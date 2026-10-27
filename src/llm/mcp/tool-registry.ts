@@ -1,5 +1,9 @@
 import type { LlmToolSpec } from "../types.js";
 import type { McpLogFn, McpToolSource } from "./mcp-tool-source.js";
+import { createRedactor } from "../agent/redact.js";
+import type { ToolCallLogMode } from "../agent/redact.js";
+import { buildToolCallFields } from "../agent/tool-call-log.js";
+import type { ToolCallFields, ToolCallKind } from "../agent/tool-call-log.js";
 
 export const MAX_TOOLS = 128;
 export const MAX_RESULT_BYTES = 16_384;
@@ -10,6 +14,17 @@ export interface ToolCallContext {
   signal?: AbortSignal;
   timeoutMs: number;
   sessionId: string;
+  /** Turn and model tool-call id, carried into the `llm.tool.call` log line. */
+  turnId?: string;
+  callId?: string;
+}
+
+export interface ToolCallLogOptions {
+  mode: ToolCallLogMode;
+  /** Values (env/project secrets) removed from every logged input and output. */
+  secretValues: string[];
+  emit: (fields: ToolCallFields, sessionId: string) => void;
+  now?: () => number;
 }
 
 export interface CustomTool {
@@ -63,8 +78,19 @@ export class ToolRegistry {
   private readonly log: McpLogFn;
   private readonly warned = new Set<string>();
 
-  constructor(opts: { log?: McpLogFn } = {}) {
+  private readonly toolCallLog: ToolCallLogOptions | undefined;
+  private readonly redactor: ReturnType<typeof createRedactor> | undefined;
+
+  constructor(opts: { log?: McpLogFn; toolCallLog?: ToolCallLogOptions } = {}) {
     this.log = opts.log ?? (() => {});
+    const tcl = opts.toolCallLog;
+    if (tcl && tcl.mode !== "off") {
+      this.toolCallLog = tcl;
+      this.redactor = createRedactor({
+        secretValues: tcl.secretValues,
+        mode: tcl.mode,
+      });
+    }
   }
 
   addCustomTool(tool: CustomTool): void {
@@ -89,18 +115,129 @@ export class ToolRegistry {
   ): Promise<ToolCallResult> {
     const entry = this.build().find((e) => e.spec.name === exposedName);
     if (!entry) {
-      return { isError: true, content: `tool ${exposedName} is not available` };
+      const unavailable = {
+        isError: true,
+        content: `tool ${exposedName} is not available`,
+      };
+      const at = (this.toolCallLog?.now ?? Date.now)();
+      this.emitCall(
+        { tool: exposedName, source: "", kind: "unknown" },
+        args,
+        opts,
+        at,
+        at,
+        unavailable,
+      );
+      return unavailable;
     }
+    const clock = this.toolCallLog?.now ?? Date.now;
+    const startedAt = clock();
     let result: ToolCallResult;
-    if (entry.custom) {
-      result = await this.callCustom(entry.custom, args, opts);
-    } else {
-      result = await entry.source!.callTool(entry.mcpName!, args, {
-        signal: opts.signal,
-        timeoutMs: opts.timeoutMs,
+    try {
+      if (entry.custom) {
+        result = await this.callCustom(entry.custom, args, opts);
+      } else {
+        result = await entry.source!.callTool(entry.mcpName!, args, {
+          signal: opts.signal,
+          timeoutMs: opts.timeoutMs,
+        });
+      }
+    } catch (err) {
+      this.logToolCall(entry, exposedName, args, opts, startedAt, clock(), {
+        isError: true,
+        content: err instanceof Error ? err.message : "tool failed",
+      });
+      throw err;
+    }
+    this.logToolCall(
+      entry,
+      exposedName,
+      args,
+      opts,
+      startedAt,
+      clock(),
+      result,
+    );
+    return { isError: result.isError, content: truncateResult(result.content) };
+  }
+
+  /** Same log path for calls answered outside the registry (the onToolCall hook). */
+  logExternalCall(
+    name: string,
+    args: unknown,
+    opts: ToolCallContext,
+    startedAt: number,
+    endedAt: number,
+    result: ToolCallResult,
+  ): void {
+    this.emitCall(
+      { tool: name, source: "onToolCall", kind: "hook" },
+      args,
+      opts,
+      startedAt,
+      endedAt,
+      result,
+    );
+  }
+
+  private logToolCall(
+    entry: Entry,
+    exposedName: string,
+    args: unknown,
+    opts: ToolCallContext,
+    startedAt: number,
+    endedAt: number,
+    result: ToolCallResult,
+  ): void {
+    this.emitCall(
+      {
+        tool: exposedName,
+        source: entry.custom ? "custom" : entry.owner,
+        kind: entry.custom ? "custom" : (entry.source?.kind ?? "mcp"),
+      },
+      args,
+      opts,
+      startedAt,
+      endedAt,
+      result,
+    );
+  }
+
+  /** One `llm.tool.call` line per call; never throws into the call path. */
+  private emitCall(
+    id: { tool: string; source: string; kind: ToolCallKind },
+    args: unknown,
+    opts: ToolCallContext,
+    startedAt: number,
+    endedAt: number,
+    result: ToolCallResult,
+  ): void {
+    const cfg = this.toolCallLog;
+    const redactor = this.redactor;
+    if (!cfg || !redactor || cfg.mode === "off") return;
+    try {
+      cfg.emit(
+        buildToolCallFields({
+          turnId: opts.turnId ?? "",
+          callId: opts.callId ?? "",
+          tool: id.tool,
+          source: id.source,
+          kind: id.kind,
+          startedAt,
+          endedAt,
+          input: redactor.redact(args),
+          output: redactor.redact(result.content),
+          isError: result.isError,
+          mode: cfg.mode,
+        }),
+        opts.sessionId,
+      );
+    } catch (err) {
+      this.log("warn", "tool call log failed", {
+        tool: id.tool,
+        error: err instanceof Error ? err.name : "error",
       });
     }
-    return { isError: result.isError, content: truncateResult(result.content) };
   }
 
   private async callCustom(

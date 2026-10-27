@@ -6,6 +6,9 @@ import type {
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
 import type {
+  EmbeddingsRequest,
+  EmbeddingsResult,
+  LlmEmbedder,
   LlmMessage,
   LlmProvider,
   LlmRequest,
@@ -160,6 +163,49 @@ export function createOpenAiCompatibleProvider(
         text,
         toolCalls,
         ...(usage ? { usage } : {}),
+      };
+    },
+  };
+}
+
+/**
+ * Embeddings through the OpenAI SDK's typed `client.embeddings.create`.
+ * OpenRouter documents a compatible `POST /embeddings` on its base URL
+ * (https://openrouter.ai/docs/api/api-reference/embeddings/submit-an-embedding-request):
+ * request `model`, `input` (string array), `dimensions`, `encoding_format`;
+ * response `data[].embedding`, `data[].index`, `usage.prompt_tokens`.
+ */
+export function createOpenAiCompatibleEmbedder(
+  config: OpenAiCompatibleConfig,
+): LlmEmbedder {
+  const client = new OpenAI({
+    apiKey: config.apiKey,
+    baseURL:
+      config.baseUrl ??
+      (config.id === "openrouter" ? "https://openrouter.ai/api/v1" : undefined),
+    maxRetries: 0,
+  });
+  return {
+    id: config.id,
+    async embed(req: EmbeddingsRequest): Promise<EmbeddingsResult> {
+      const res = await client.embeddings.create(
+        {
+          model: req.model,
+          input: req.inputs,
+          encoding_format: "float",
+          ...(req.dimensions ? { dimensions: req.dimensions } : {}),
+        },
+        { signal: req.signal },
+      );
+      const ordered = [...res.data].sort((a, b) => a.index - b.index);
+      const vectors = ordered.map((d) => d.embedding);
+      return {
+        vectors,
+        model: res.model ?? req.model,
+        dims: vectors[0]?.length ?? 0,
+        ...(res.usage?.prompt_tokens !== undefined
+          ? { inputTokens: res.usage.prompt_tokens }
+          : {}),
       };
     },
   };

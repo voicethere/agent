@@ -1,10 +1,19 @@
-export { createLlmProvider } from "./providers.js";
+export { createLlmProvider, createLlmEmbedder } from "./providers.js";
+export {
+  withEmbedBounds,
+  DEFAULT_EMBEDDING_DIMS,
+  DEFAULT_EMBEDDING_MODEL,
+} from "./bounded-embedder.js";
+export type { EmbedBounds } from "./bounded-embedder.js";
 export type { LlmProviderConfig } from "./providers.js";
 export { LLM_PROVIDERS, resolveModel } from "./catalog.js";
 export { withStreamBounds, toLlmError } from "./bounded-provider.js";
 export type { StreamBounds } from "./bounded-provider.js";
 export { LlmProviderError } from "./types.js";
 export type {
+  EmbeddingsRequest,
+  EmbeddingsResult,
+  LlmEmbedder,
   LlmErrorCode,
   LlmProviderModule,
   LlmMessage,

@@ -64,13 +64,36 @@ export interface LlmProvider {
   stream(req: LlmRequest): AsyncIterable<LlmStreamEvent>;
 }
 
+export interface EmbeddingsRequest {
+  model: string;
+  inputs: string[];
+  /** Output vector length; passed to the provider only when set. */
+  dimensions?: number;
+  signal?: AbortSignal;
+}
+
+export interface EmbeddingsResult {
+  /** One vector per input, in input order. */
+  vectors: number[][];
+  model: string;
+  dims: number;
+  /** Prompt tokens, when the provider reports them. */
+  inputTokens?: number;
+}
+
+export interface LlmEmbedder {
+  readonly id: LlmProviderId;
+  embed(req: EmbeddingsRequest): Promise<EmbeddingsResult>;
+}
+
 export type LlmErrorCode =
   | "LLM_PROVIDER_ERROR"
   | "LLM_RATE_LIMITED"
   | "LLM_AUTH_FAILED"
   | "LLM_TIMEOUT"
   | "LLM_ABORTED"
-  | "LLM_BAD_REQUEST";
+  | "LLM_BAD_REQUEST"
+  | "LLM_EMBEDDINGS_UNSUPPORTED";
 
 export class LlmProviderError extends Error {
   constructor(
@@ -92,4 +115,10 @@ export interface LlmProviderModule {
     apiKey: string;
     baseUrl?: string;
   }): LlmProvider;
+  /** Present only when the provider publishes an embeddings API. */
+  createEmbedder?(opts: {
+    id: LlmProviderId;
+    apiKey: string;
+    baseUrl?: string;
+  }): LlmEmbedder;
 }

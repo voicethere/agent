@@ -424,6 +424,26 @@ Runners that do not advertise speak control (`isSpeakControlAvailable(ctx)` is `
 
 `SessionSpeakController` implements the parent-side rules: speak results, cancellation, flushing queued speaks on barge-in, and the interruption report. It has no transport, so the VoiceThere runner and local tooling both drive it with the same code.
 
+## Embeddings (`@voicethere/agent/llm`)
+
+`createLlmEmbedder` returns an embedder for providers that publish an embeddings API: `openai`, `openrouter` and `gemini`. `anthropic` throws `LLM_EMBEDDINGS_UNSUPPORTED` (Anthropic has no embeddings API). Calls are bounded: 15 s per attempt, two retries on rate limits, 5xx and timeouts, 96 inputs per request. Error messages never contain the input text.
+
+```ts
+import {
+  createLlmEmbedder,
+  DEFAULT_EMBEDDING_DIMS,
+  DEFAULT_EMBEDDING_MODEL,
+} from "@voicethere/agent/llm";
+import { openai } from "@voicethere/agent/llm/openai";
+
+const embedder = createLlmEmbedder({ provider: "openai", apiKey }, [openai]);
+const { vectors } = await embedder.embed({
+  model: DEFAULT_EMBEDDING_MODEL.openai,
+  inputs: ["hello"],
+  dimensions: DEFAULT_EMBEDDING_DIMS, // 512
+});
+```
+
 ## Multiplayer / shared state
 
 Each end-user connection must call **`startSession()`** once — one orchestrator session id per client (one signaling room per client). Do **not** join multiple browsers to the same session credentials.

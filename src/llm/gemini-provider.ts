@@ -1,6 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
 import type { Content, Part } from "@google/genai";
 import type {
+  EmbeddingsRequest,
+  EmbeddingsResult,
+  LlmEmbedder,
   LlmMessage,
   LlmProvider,
   LlmRequest,
@@ -129,6 +132,38 @@ export function createGeminiProvider(config: GeminiConfig): LlmProvider {
         toolCalls,
         providerState: parts,
         ...(usage ? { usage } : {}),
+      };
+    },
+  };
+}
+
+/**
+ * Embeddings through `ai.models.embedContent` (`EmbedContentParameters`:
+ * `model`, `contents`, `config.outputDimensionality`, `config.abortSignal`;
+ * `EmbedContentResponse.embeddings[].values`). The Gemini API reports no
+ * token count for embeddings, so `inputTokens` is never set.
+ */
+export function createGeminiEmbedder(config: GeminiConfig): LlmEmbedder {
+  const ai = new GoogleGenAI({
+    apiKey: config.apiKey,
+    ...(config.baseUrl ? { httpOptions: { baseUrl: config.baseUrl } } : {}),
+  });
+  return {
+    id: "gemini",
+    async embed(req: EmbeddingsRequest): Promise<EmbeddingsResult> {
+      const res = await ai.models.embedContent({
+        model: req.model,
+        contents: req.inputs,
+        config: {
+          ...(req.dimensions ? { outputDimensionality: req.dimensions } : {}),
+          abortSignal: req.signal,
+        },
+      });
+      const vectors = (res.embeddings ?? []).map((e) => e.values ?? []);
+      return {
+        vectors,
+        model: req.model,
+        dims: vectors[0]?.length ?? 0,
       };
     },
   };

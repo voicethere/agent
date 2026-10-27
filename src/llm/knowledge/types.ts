@@ -32,7 +32,17 @@ export interface IndexReport {
 }
 
 export interface KnowledgeBase {
+  /**
+   * Builds this content's own index version (or finds it ready). Starts a
+   * heartbeat that marks the version live while this knowledge base is open.
+   */
   ensureIndexed(): Promise<IndexReport>;
+  /**
+   * Drops indexes of other versions whose workers stopped (no heartbeat for
+   * 90 s, no build running). Runs by itself after a build and every 10 min;
+   * call it to force a pass. Returns the dropped version ids.
+   */
+  gc(): Promise<string[]>;
   search(query: string, k?: number): Promise<KnowledgeHit[]>;
   /** Closes the Redis connection only when this knowledge base opened it. */
   close(): Promise<void>;

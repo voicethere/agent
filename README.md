@@ -470,8 +470,8 @@ const hits = await kb.search("how much is the starter plan?", 4);
 // [{ text, title: "Pricing › Plans", source: "pricing.md", score }]
 ```
 
-- Documents are split on `#`..`###` headings into chunks of about 300 words with 50 words of overlap. The same content (documents, model, dimensions) is not embedded twice, also across workers: one worker builds, the others wait and report `built-by-other-worker`.
-- Vectors have no TTL, so `maxmemory-policy volatile-lru` never evicts them. The index refuses to grow past 80 % of `maxmemory` (`KB_MEMORY_LIMIT`). Plan on about 3.5 KB per chunk at 512 dimensions, which puts roughly 55,000 chunks in 200 MB; this is an estimate until measured on a real project.
+- Documents are split on `#`..`###` headings into chunks of about 300 words with 50 words of overlap. The same content (documents, model, dimensions) is not embedded twice, also across workers: one worker builds, the others wait and report `built-by-other-worker`. Each content version has its own index (`kb:<namespace>:idx:<hash>`), so during a rolling deploy old and new workers each search their own version. Open knowledge bases keep their version alive with a heartbeat; an index whose workers stopped is dropped about 90 s later (`gc()` forces a pass).
+- Vectors have no TTL, so `maxmemory-policy volatile-lru` never evicts them. The index refuses to grow past 80 % of `maxmemory` (`KB_MEMORY_LIMIT`). Plan on about 6.5 KB per 300-word chunk at 512 dimensions, which puts roughly 30,000 chunks in a 256 MB Project Redis (estimate; measured figures follow). Two versions side by side during a deploy both count.
 - Use a namespace per knowledge set (`namespace` option). Keys are `kb:<namespace>:...`.
 - Log lines carry the namespace, chunk count and durations, never chunk or query text.
 

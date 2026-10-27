@@ -77,6 +77,15 @@ const DOCS: KnowledgeDocument[] = [
   },
 ];
 
+const EDITED: KnowledgeDocument[] = DOCS.map((d) =>
+  d.id === "deploy.md"
+    ? {
+        ...d,
+        text: "# Deploy\n\nPublish with the ship command and rollback with undo.",
+      }
+    : d,
+);
+
 let seq = 0;
 const namespaces: string[] = [];
 const open: KnowledgeBase[] = [];
@@ -147,24 +156,17 @@ describe.skipIf(!supported)("createRedisKnowledgeBase (real Redis 8)", () => {
     expect(e.calls).toBe(1);
   });
 
-  it("changed content rebuilds and swaps the index", async () => {
+  it("changed content builds its own version next to the old one", async () => {
     const namespace = ns();
     const e = fakeEmbedder();
-    await kb(namespace, e).ensureIndexed();
-    const edited = DOCS.map((d) =>
-      d.id === "deploy.md"
-        ? {
-            ...d,
-            text: "# Deploy\n\nPublish with the ship command and rollback with undo.",
-          }
-        : d,
-    );
-    const next = kb(namespace, e, { documents: edited });
+    const old = kb(namespace, e);
+    await old.ensureIndexed();
+    const next = kb(namespace, e, { documents: EDITED });
     expect((await next.ensureIndexed()).status).toBe("rebuilt");
     const lists = (await kbRedis!.call("FT._LIST")) as string[];
     expect(
       lists.filter((n) => n.startsWith(`kb:${namespace}:idx:`)),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     const [top] = await next.search("ship command rollback undo", 1);
     expect(top?.text).toContain("ship command");
   });
@@ -192,6 +194,117 @@ describe.skipIf(!supported)("createRedisKnowledgeBase (real Redis 8)", () => {
     expect((await second).status).toBe("built-by-other-worker");
     expect(a.calls).toBe(1);
     expect(b.calls).toBe(0);
+  });
+
+  it("search re-indexes when its index was dropped", async () => {
+    const namespace = ns();
+    const base = kb(namespace, fakeEmbedder());
+    const report = await base.ensureIndexed();
+    await kbRedis!.call(
+      "FT.DROPINDEX",
+      `kb:${namespace}:idx:${report.contentHash.slice(0, 12)}`,
+    );
+    const hits = await base.search("deploy command publish bundle", 1);
+    expect(hits[0]?.source).toBe("deploy.md");
+  });
+
+  it("ensureIndexed rebuilds when the index is missing but the ready marker remains", async () => {
+    const namespace = ns();
+    const base = kb(namespace, fakeEmbedder());
+    const report = await base.ensureIndexed();
+    const h12 = report.contentHash.slice(0, 12);
+    await kbRedis!.call("FT.DROPINDEX", `kb:${namespace}:idx:${h12}`);
+    expect(await kbRedis!.exists(`kb:${namespace}:ready:${h12}`)).toBe(1);
+    expect((await base.ensureIndexed()).status).toBe("rebuilt");
+  });
+
+  it("residue from a dead builder is removed", async () => {
+    const namespace = ns();
+    const base = kb(namespace, fakeEmbedder());
+    const h12 = (await base.ensureIndexed()).contentHash.slice(0, 12);
+    await kbRedis!.call("FT.DROPINDEX", `kb:${namespace}:idx:${h12}`);
+    await kbRedis!.del(`kb:${namespace}:ready:${h12}`);
+    const stray = `kb:${namespace}:v:${h12}:chunk:999`;
+    await kbRedis!.hset(stray, "text", "stray");
+    expect((await base.ensureIndexed()).status).toBe("rebuilt");
+    expect(await kbRedis!.exists(stray)).toBe(0);
+  });
+
+  it("the lock outlives its TTL during a slow build", async () => {
+    const namespace = ns();
+    let release!: () => void;
+    const a = fakeEmbedder();
+    a.gate = new Promise<void>((r) => (release = r));
+    const b = fakeEmbedder();
+    const embeddingStarted = new Promise<void>((r) => (a.onEmbed = r));
+    const limits = { pollMs: 10, lockTtlMs: 200 };
+
+    const first = kb(namespace, a, { limits }).ensureIndexed();
+    await embeddingStarted;
+    const h12 = (await kbRedis!.keys(`kb:${namespace}:lock:*`))[0]!;
+    const startedAt = Date.now();
+    await expect
+      .poll(
+        async () =>
+          Date.now() - startedAt >= 600 && (await kbRedis!.pttl(h12)) > 0,
+      )
+      .toBe(true);
+    const second = kb(namespace, b, { limits }).ensureIndexed();
+    release();
+
+    expect((await first).status).toBe("rebuilt");
+    expect((await second).status).toBe("built-by-other-worker");
+    expect(b.calls).toBe(0);
+  });
+
+  it("a builder that lost its lock does not mark ready or discard", async () => {
+    const namespace = ns();
+    let release!: () => void;
+    const a = fakeEmbedder();
+    a.gate = new Promise<void>((r) => (release = r));
+    const embeddingStarted = new Promise<void>((r) => (a.onEmbed = r));
+
+    const building = kb(namespace, a).ensureIndexed();
+    const outcome = building.catch((x: unknown) => x);
+    await embeddingStarted;
+    const [lockKeyName] = await kbRedis!.keys(`kb:${namespace}:lock:*`);
+    await kbRedis!.set(lockKeyName!, "another-builder");
+    release();
+
+    const err = await outcome;
+    expect(err).toBeInstanceOf(KnowledgeIndexError);
+    expect((err as KnowledgeIndexError).code).toBe("KB_INDEX_TIMEOUT");
+    expect(await kbRedis!.keys(`kb:${namespace}:ready:*`)).toEqual([]);
+    expect(await kbRedis!.get(lockKeyName!)).toBe("another-builder");
+    expect((await kbRedis!.keys(`kb:${namespace}:v:*`)).length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it("two versions live side by side until the old one stops", async () => {
+    const namespace = ns();
+    const e = fakeEmbedder();
+    const old = kb(namespace, e);
+    const oldH = (await old.ensureIndexed()).contentHash.slice(0, 12);
+    const next = kb(namespace, e, { documents: EDITED });
+    await next.ensureIndexed();
+
+    const [fromOld] = await old.search("deploy command publish bundle", 1);
+    const [fromNew] = await next.search("ship command rollback undo", 1);
+    expect(fromOld?.text).toContain("Run the deploy command");
+    expect(fromNew?.text).toContain("ship command");
+    const oldIndex = `kb:${namespace}:idx:${oldH}`;
+    expect((await kbRedis!.call("FT._LIST")) as string[]).toContain(oldIndex);
+    expect(await next.gc()).toEqual([]);
+
+    await old.close();
+    await kbRedis!.del(`kb:${namespace}:live:${oldH}`);
+    expect(await next.gc()).toEqual([oldH]);
+    expect((await kbRedis!.call("FT._LIST")) as string[]).not.toContain(
+      oldIndex,
+    );
+    expect(await kbRedis!.keys(`kb:${namespace}:v:${oldH}:*`)).toEqual([]);
+    expect(await kbRedis!.exists(`kb:${namespace}:ready:${oldH}`)).toBe(0);
   });
 
   it("an index wiped between queries is rebuilt at query time", async () => {

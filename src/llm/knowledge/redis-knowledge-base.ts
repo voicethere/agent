@@ -28,6 +28,11 @@ const NAMESPACE = /^[A-Za-z0-9._-]+$/;
 const OVERHEAD_BYTES_PER_CHUNK = 512;
 const WRITE_BATCH = 200;
 const COMPARE_AND_DELETE = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end`;
+const COMPARE_AND_RENEW = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end`;
+const COMPARE = `if redis.call('get', KEYS[1]) == ARGV[1] then return 1 else return 0 end`;
+const LIVE_TTL_MS = 90_000;
+const HEARTBEAT_MS = 30_000;
+const GC_MIN_INTERVAL_MS = 600_000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -37,7 +42,8 @@ function toFloat32Buffer(vector: number[]): Buffer {
 
 function isUnknownIndex(err: unknown): boolean {
   return (
-    err instanceof Error && /unknown (index|index name)/i.test(err.message)
+    err instanceof Error &&
+    /unknown index|index not found|SEARCH_INDEX_NOT_FOUND/i.test(err.message)
   );
 }
 
@@ -97,8 +103,10 @@ export function createRedisKnowledgeBase(
     .digest("hex");
   const h12 = contentHash.slice(0, 12);
 
-  const activeKey = `kb:${namespace}:active`;
-  const lockKey = `kb:${namespace}:lock`;
+  const lockKeyOf = (hash12: string) => `kb:${namespace}:lock:${hash12}`;
+  const readyKey = (hash12: string) => `kb:${namespace}:ready:${hash12}`;
+  const liveKey = (hash12: string) => `kb:${namespace}:live:${hash12}`;
+  const lockKey = lockKeyOf(h12);
   const indexName = (hash12: string) => `kb:${namespace}:idx:${hash12}`;
   const chunkPrefix = (hash12: string) => `kb:${namespace}:v:${hash12}:chunk:`;
   const workerId = randomUUID();
@@ -195,8 +203,8 @@ export function createRedisKnowledgeBase(
   }
 
   async function isFresh(): Promise<boolean> {
-    const active = await quick("GET", activeKey);
-    return active === h12 && (await indexExists(h12));
+    const ready = await quick("GET", readyKey(h12));
+    return ready !== null && (await indexExists(h12));
   }
 
   async function dropIndex(hash12: string): Promise<void> {
@@ -226,9 +234,13 @@ export function createRedisKnowledgeBase(
   async function discard(hash12: string): Promise<void> {
     try {
       await dropIndex(hash12);
-      await deleteKeys(hash12);
     } catch {
       /* best effort; the next build for this hash cleans up again */
+    }
+    try {
+      await deleteKeys(hash12);
+    } catch {
+      /* best effort */
     }
   }
 
@@ -268,9 +280,15 @@ export function createRedisKnowledgeBase(
     }
   }
 
+  const ownsLock = async (): Promise<boolean> =>
+    (await quick("EVAL", COMPARE, 1, lockKey, workerId)) === 1;
+
   async function build(): Promise<void> {
-    await checkMemory();
+    // Residue of an earlier attempt at this version must not count against
+    // the memory budget.
+    await quick("DEL", readyKey(h12));
     await discard(h12);
+    await checkMemory();
     const vectors: number[][] = [];
     if (chunks.length > 0) {
       const result = await opts.embedder.embed({
@@ -344,9 +362,68 @@ export function createRedisKnowledgeBase(
       "TAG",
     );
     await waitIndexed(h12);
-    const previous = (await quick("GET", activeKey)) as string | null;
-    await quick("SET", activeKey, h12);
-    if (previous && previous !== h12) await discard(previous);
+    if (!(await ownsLock())) {
+      throw new KnowledgeIndexError(
+        "KB_INDEX_TIMEOUT",
+        "lost the knowledge index lock",
+      );
+    }
+    await quick("SET", readyKey(h12), "1");
+  }
+
+  let lastGc = 0;
+  /**
+   * Drops indexes of other versions whose workers are gone (no live key, no
+   * build lock). Returns the dropped version ids.
+   */
+  async function gc(): Promise<string[]> {
+    lastGc = Date.now();
+    const dropped: string[] = [];
+    try {
+      const names = (await quick("FT._LIST")) as string[];
+      const prefix = `kb:${namespace}:idx:`;
+      for (const name of names) {
+        if (!name.startsWith(prefix)) continue;
+        const other = name.slice(prefix.length);
+        if (other === h12) continue;
+        const live = Number(await quick("EXISTS", liveKey(other)));
+        const locked = Number(await quick("EXISTS", lockKeyOf(other)));
+        if (live > 0 || locked > 0) continue;
+        await discard(other);
+        await quick("DEL", readyKey(other));
+        dropped.push(other);
+      }
+      if (dropped.length > 0)
+        log("kb dropped old versions", { dropped: dropped.length });
+    } catch (err) {
+      log("kb gc failed", {
+        error: err instanceof KnowledgeIndexError ? err.code : "unknown",
+      });
+    }
+    return dropped;
+  }
+  const maybeGc = async (): Promise<void> => {
+    if (Date.now() - lastGc >= GC_MIN_INTERVAL_MS) await gc();
+  };
+
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let closed = false;
+  async function beat(): Promise<void> {
+    try {
+      await quick("SET", liveKey(h12), "1", "PX", LIVE_TTL_MS);
+    } catch (err) {
+      log("kb heartbeat failed", {
+        error: err instanceof KnowledgeIndexError ? err.code : "unknown",
+      });
+    }
+  }
+  async function startHeartbeat(): Promise<void> {
+    if (heartbeat || closed) return;
+    heartbeat = setInterval(() => {
+      void beat().then(maybeGc);
+    }, HEARTBEAT_MS);
+    heartbeat.unref?.();
+    await beat();
   }
 
   async function ensure(): Promise<IndexReport> {
@@ -366,7 +443,15 @@ export function createRedisKnowledgeBase(
       });
       return done;
     };
-    if (await isFresh()) return report("fresh");
+    const finish = async (
+      status: IndexReport["status"],
+    ): Promise<IndexReport> => {
+      await startHeartbeat();
+      if (status === "rebuilt") await gc();
+      else await maybeGc();
+      return report(status);
+    };
+    if (await isFresh()) return finish("fresh");
 
     const waitDeadline = started + lim.waitForOtherMs;
     let announced = false;
@@ -380,18 +465,39 @@ export function createRedisKnowledgeBase(
         lim.lockTtlMs,
       );
       if (got === "OK") {
+        const renew = setInterval(
+          () => {
+            void quick(
+              "EVAL",
+              COMPARE_AND_RENEW,
+              1,
+              lockKey,
+              workerId,
+              lim.lockTtlMs,
+            ).catch(() => undefined);
+          },
+          Math.max(10, Math.floor(lim.lockTtlMs / 3)),
+        );
+        let status: IndexReport["status"];
         try {
-          if (await isFresh()) return report("built-by-other-worker");
-          await build();
-          return report("rebuilt");
+          if (await isFresh()) {
+            status = "built-by-other-worker";
+          } else {
+            await build();
+            status = "rebuilt";
+          }
         } catch (err) {
-          await discard(h12);
+          // Only the lock holder may clean up; a builder that lost the lock
+          // leaves the partial version to whoever owns it now.
+          if (await ownsLock().catch(() => false)) await discard(h12);
           throw err;
         } finally {
+          clearInterval(renew);
           await quick("EVAL", COMPARE_AND_DELETE, 1, lockKey, workerId).catch(
             () => undefined,
           );
         }
+        return finish(status);
       }
       if (!announced) {
         announced = true;
@@ -404,7 +510,7 @@ export function createRedisKnowledgeBase(
         );
       }
       await sleep(lim.pollMs);
-      if (await isFresh()) return report("built-by-other-worker");
+      if (await isFresh()) return finish("built-by-other-worker");
     }
   }
 
@@ -420,13 +526,11 @@ export function createRedisKnowledgeBase(
     vec: Buffer,
     k: number,
   ): Promise<KnowledgeHit[] | "missing"> {
-    const active = (await quick("GET", activeKey)) as string | null;
-    if (!active) return "missing";
     let reply: unknown;
     try {
       reply = await quick(
         "FT.SEARCH",
-        indexName(active),
+        indexName(h12),
         `*=>[KNN ${k} @embedding $vec AS score]`,
         "PARAMS",
         2,
@@ -466,6 +570,7 @@ export function createRedisKnowledgeBase(
 
   return {
     ensureIndexed,
+    gc,
     async search(query: string, k = 4): Promise<KnowledgeHit[]> {
       const limit = Math.max(1, Math.floor(k));
       const embedded = await opts.embedder.embed({
@@ -493,6 +598,9 @@ export function createRedisKnowledgeBase(
       return hits;
     },
     async close(): Promise<void> {
+      closed = true;
+      if (heartbeat) clearInterval(heartbeat);
+      heartbeat = undefined;
       if (!owned) return;
       const c = owned;
       owned = undefined;

@@ -639,6 +639,45 @@ describe("createLlmAgent", () => {
     });
   });
 
+  it("service source reports kind service", async () => {
+    const sourceFactory = vi.fn((o: { name: string }) => ({
+      name: o.name,
+      status: "ready",
+      start: vi.fn(),
+      ready: async () => true,
+      tools: () => [],
+      callTool: async () => ({ content: "", isError: false }),
+    }));
+    const handlers = createLlmAgent({
+      config: {
+        ...BASE_CONFIG,
+        toolSources: [
+          { kind: "service" },
+          { kind: "mcp", name: "m", url: "https://x.example" },
+        ],
+      },
+      systemPrompt: "p",
+      provider: fakeProvider([[done("x")]]).provider,
+      env: () => ({
+        AGENT_TEST_KEY: "k",
+        AGENT_SERVICE_URL: "http://svc.internal:3000",
+        AGENT_SERVICE_TOKEN: "tok-123",
+      }),
+      sourceFactory:
+        sourceFactory as unknown as CreateLlmAgentOptions["sourceFactory"],
+    });
+    await handlers.onAgentStart!({ env: {} });
+    expect(sourceFactory).toHaveBeenCalledTimes(2);
+    const byName = Object.fromEntries(
+      sourceFactory.mock.calls.map((c) => [
+        (c[0] as { name: string }).name,
+        c[0] as { kind?: string },
+      ]),
+    );
+    expect(byName.service.kind).toBe("service");
+    expect(byName.m.kind).toBeUndefined();
+  });
+
   it("onAssistantText returning null suppresses a sentence", async () => {
     await boot(
       [[delta("Secret one. Public two."), done("Secret one. Public two.")]],

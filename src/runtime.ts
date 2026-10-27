@@ -2781,7 +2781,7 @@ export function broadcastToClients(
 }
 
 const AGENT_LOG_MESSAGE_MAX_CHARS = 2048;
-const AGENT_LOG_FIELDS_MAX_CHARS = 8192;
+export const AGENT_LOG_FIELDS_MAX_CHARS = 8192;
 
 function truncateAgentLogMessage(message: string): string {
   if (message.length <= AGENT_LOG_MESSAGE_MAX_CHARS) {
@@ -2795,7 +2795,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function sanitizeAgentLogFields(
+export function sanitizeAgentLogFields(
   fields: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   if (Object.keys(fields).length === 0) {

@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { buildDiscoveryFields, toolsHash } from "./discovery.js";
 
 export interface McpToolInfo {
   name: string;
@@ -21,6 +22,8 @@ export interface McpToolSourceOptions {
   headers?: Record<string, string>;
   allow?: string[];
   deny?: string[];
+  /** Reported in the discovery log line. Default "mcp". */
+  kind?: "mcp" | "service";
   connectTimeoutMs?: number;
   log?: McpLogFn;
   now?: () => number;
@@ -127,6 +130,8 @@ export class McpToolSource {
   private readonly deny: Set<string>;
   private readonly connectTimeoutMs: number;
   private readonly log: McpLogFn;
+  private readonly kind: "mcp" | "service";
+  private lastDiscoveryHash: string | undefined;
   private readonly backoff: number[];
 
   private state: McpSourceStatus = "idle";
@@ -147,6 +152,7 @@ export class McpToolSource {
     this.deny = new Set(opts.deny ?? []);
     this.connectTimeoutMs = opts.connectTimeoutMs ?? 10_000;
     this.log = opts.log ?? (() => {});
+    this.kind = opts.kind ?? "mcp";
     this.backoff =
       opts.backoffMs && opts.backoffMs.length > 0
         ? opts.backoffMs
@@ -330,6 +336,16 @@ export class McpToolSource {
       }
       cursor = res.nextCursor;
       if (!cursor) break;
+    }
+    const hash = toolsHash(out);
+    if (hash !== this.lastDiscoveryHash) {
+      this.lastDiscoveryHash = hash;
+      const exposed = new Set(this.filter(out).map((t) => t.name));
+      this.log(
+        "info",
+        "llm tools discovered",
+        buildDiscoveryFields(this.name, this.kind, out, (n) => exposed.has(n)),
+      );
     }
     return this.filter(out);
   }

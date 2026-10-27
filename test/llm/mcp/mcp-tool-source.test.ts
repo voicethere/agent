@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { McpToolSource } from "../../../src/llm/mcp/mcp-tool-source.js";
 import { startTestMcpServer, type TestMcpServer } from "./mcp-test-server.js";
 
@@ -145,20 +145,14 @@ describe("McpToolSource", () => {
     src.start();
     await src.ready(5_000);
     expect(src.tools().map((t) => t.name)).not.toContain("extra");
-    const mcp = srv.servers[0];
-    mcp.registerTool("extra", { description: "new" }, async () => ({
+    await srv.standaloneSseOpen();
+    srv.servers[0].registerTool("extra", { description: "new" }, async () => ({
       content: [{ type: "text", text: "x" }],
     }));
-    // The client opens its notification stream right after ready, so the
-    // first notification can race it; sending again is harmless.
-    const deadline = Date.now() + 5_000;
-    while (
-      !src.tools().some((t) => t.name === "extra") &&
-      Date.now() < deadline
-    ) {
-      mcp.sendToolListChanged();
-      await new Promise((r) => setTimeout(r, 100));
-    }
+    await vi.waitFor(
+      () => expect(src.tools().map((t) => t.name)).toContain("extra"),
+      { timeout: 5_000 },
+    );
     expect(src.tools().map((t) => t.name)).toContain("extra");
   });
 

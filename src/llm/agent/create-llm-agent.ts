@@ -442,6 +442,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         }
         const source = makeSource({
           name: "service",
+          kind: "service",
           url: `${base}${src.path ?? D.servicePath}`,
           headers,
           allow: src.allow,

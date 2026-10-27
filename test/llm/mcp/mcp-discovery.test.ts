@@ -4,6 +4,7 @@ import {
   buildDiscoveryFields,
   TOOLS_DISCOVERED_EVENT,
 } from "../../../src/llm/mcp/discovery.js";
+import { sanitizeAgentLogFields } from "../../../src/runtime.js";
 import {
   McpToolSource,
   type McpToolInfo,
@@ -105,9 +106,12 @@ describe("tool discovery log", () => {
       { description: "new tool", inputSchema: { x: z.string() } },
       async () => ({ content: [{ type: "text", text: "x" }] }),
     );
+    // The client opens its notification stream right after ready, so the
+    // first notification can race it; sending again is harmless.
     const deadline = Date.now() + 5_000;
     while (Date.now() < deadline && discovered().length < 2) {
-      await new Promise((r) => setTimeout(r, 20));
+      srv.servers[0].sendToolListChanged();
+      await new Promise((r) => setTimeout(r, 100));
     }
     expect(discovered()).toHaveLength(2);
     const f = discovered()[1].fields as unknown as Fields;
@@ -142,16 +146,38 @@ describe("buildDiscoveryFields", () => {
     ).toBe(false);
   });
 
-  it("description cut to 200 chars on a code-point boundary", () => {
+  it("description cut to 120 chars on a code-point boundary", () => {
     const f = buildDiscoveryFields(
       "s",
       "service",
       [tool("a", "😀".repeat(300)), tool("b", "x".repeat(300))],
       () => true,
     );
-    expect(Array.from(f.tools[0].description)).toHaveLength(200);
-    expect(f.tools[0].description).toBe("😀".repeat(200));
-    expect(f.tools[1].description).toHaveLength(200);
+    expect(Array.from(f.tools[0].description)).toHaveLength(120);
+    expect(f.tools[0].description).toBe("😀".repeat(120));
+    expect(f.tools[1].description).toHaveLength(120);
     expect(f.kind).toBe("service");
+  });
+
+  it("stays under the agent log fields cap", () => {
+    const all = Array.from({ length: 128 }, (_, i) =>
+      tool(`tool_${i}`, "d".repeat(300)),
+    );
+    const f = buildDiscoveryFields("s", "mcp", all, () => true);
+    expect(JSON.stringify(f).length).toBeLessThanOrEqual(8192);
+    expect(f.truncated).toBe(true);
+    expect(f.tools.length).toBeGreaterThan(0);
+    expect(f.event).toBe(TOOLS_DISCOVERED_EVENT);
+    for (const t of f.tools) {
+      expect(Array.from(t.description).length).toBeLessThanOrEqual(120);
+    }
+    expect(sanitizeAgentLogFields(f)?.event).toBe(TOOLS_DISCOVERED_EVENT);
+  });
+
+  it("small list not truncated by budget", () => {
+    const all = [tool("a", "x"), tool("b", "y"), tool("c", "z")];
+    const f = buildDiscoveryFields("s", "mcp", all, () => true);
+    expect(f.tools).toHaveLength(3);
+    expect(f.truncated).toBe(false);
   });
 });

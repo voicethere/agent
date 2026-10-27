@@ -65,6 +65,28 @@ export interface LlmAgentMcpSource {
 
 export type LlmAgentToolSource = LlmAgentServiceSource | LlmAgentMcpSource;
 
+export interface LlmAgentKnowledgeEmbeddings {
+  provider: Exclude<LlmProviderId, "anthropic">;
+  model?: string;
+  dimensions?: number;
+  /** Name of the environment variable that holds the embeddings API key. */
+  apiKeySecret: string;
+}
+
+export interface LlmAgentKnowledgeConfig {
+  store: "redis" | "supabase" | "off";
+  topK?: number;
+  embeddings?: LlmAgentKnowledgeEmbeddings;
+  redis?: { namespace?: string };
+  supabase?: {
+    urlSecret: string;
+    keySecret: string;
+    rpc?: string;
+    matchThreshold?: number;
+    cacheTtlSeconds?: number;
+  };
+}
+
 export interface LlmAgentConfig {
   version: 1;
   provider: LlmProviderId;
@@ -88,6 +110,8 @@ export interface LlmAgentConfig {
   speakChatReplies?: boolean;
   /** Tool-call log lines: `redacted` (default), `full` (secrets still removed) or `off`. */
   toolCallLogs?: "full" | "redacted" | "off";
+  /** Retrieval (RAG) behind a `search_knowledge` tool. */
+  knowledge?: LlmAgentKnowledgeConfig;
 }
 
 export const LLM_AGENT_CONFIG_DEFAULTS = {
@@ -127,6 +151,8 @@ const PROVIDER_IDS = ["openai", "anthropic", "gemini", "openrouter"] as const;
 const ENV_NAME_RE = /^AGENT_[A-Z0-9_]{1,57}$/;
 const ENV_NAME_MESSAGE =
   "must start with AGENT_ (only AGENT_* project secrets reach the agent)";
+const KNOWLEDGE_NAMESPACE_RE = /^[a-z0-9_-]{1,40}$/;
+const KNOWLEDGE_RPC_RE = /^[a-z_][a-z0-9_]{0,62}$/;
 const SOURCE_NAME_RE = /^[a-z0-9-]{1,40}$/;
 const MAX_SOURCES = 8;
 
@@ -422,7 +448,167 @@ const TOP_KEYS = [
   "fallbackText",
   "speakChatReplies",
   "toolCallLogs",
+  "knowledge",
 ] as const;
+
+function validateKnowledge(
+  c: Checker,
+  raw: unknown,
+  provider: LlmProviderId | undefined,
+  topSecret: string | undefined,
+): LlmAgentKnowledgeConfig | undefined {
+  const k = c.object(raw, "knowledge");
+  if (!k) return undefined;
+  c.unknownKeys(
+    k,
+    ["store", "topK", "embeddings", "redis", "supabase"],
+    "knowledge",
+  );
+  if (k.store !== "redis" && k.store !== "supabase" && k.store !== "off") {
+    c.err("knowledge.store", 'must be one of "redis", "supabase", "off"');
+    return undefined;
+  }
+  const out: LlmAgentKnowledgeConfig = { store: k.store };
+  if (k.topK !== undefined) {
+    const n = c.number(k.topK, "knowledge.topK", 1, 10, true);
+    if (n !== undefined) out.topK = n;
+  }
+  if (k.store === "off") return out;
+
+  const e = c.object(k.embeddings, "knowledge.embeddings");
+  if (e) {
+    c.unknownKeys(
+      e,
+      ["provider", "model", "dimensions", "apiKeySecret"],
+      "knowledge.embeddings",
+    );
+    if (e.provider === "anthropic") {
+      c.err(
+        "knowledge.embeddings.provider",
+        "anthropic has no embeddings API; use openai, gemini or openrouter",
+      );
+    } else if (
+      e.provider === "openai" ||
+      e.provider === "gemini" ||
+      e.provider === "openrouter"
+    ) {
+      const emb: Partial<LlmAgentKnowledgeEmbeddings> = {
+        provider: e.provider,
+      };
+      if (e.model !== undefined) {
+        const m = c.string(e.model, "knowledge.embeddings.model", {
+          min: 1,
+          max: 200,
+        });
+        if (m !== undefined) emb.model = m;
+      } else if (e.provider === "openrouter") {
+        c.err(
+          "knowledge.embeddings.model",
+          "is required when provider is openrouter",
+        );
+      }
+      if (e.dimensions !== undefined) {
+        const d = c.number(
+          e.dimensions,
+          "knowledge.embeddings.dimensions",
+          64,
+          3072,
+          true,
+        );
+        if (d !== undefined) emb.dimensions = d;
+      }
+      if (e.apiKeySecret !== undefined) {
+        const sec = c.string(
+          e.apiKeySecret,
+          "knowledge.embeddings.apiKeySecret",
+          { re: ENV_NAME_RE, reMessage: ENV_NAME_MESSAGE },
+        );
+        if (sec !== undefined) emb.apiKeySecret = sec;
+      } else if (e.provider === provider && topSecret !== undefined) {
+        emb.apiKeySecret = topSecret;
+      } else {
+        c.err(
+          "knowledge.embeddings.apiKeySecret",
+          "is required unless embeddings.provider equals the top-level provider",
+        );
+      }
+      if (emb.apiKeySecret !== undefined) {
+        out.embeddings = emb as LlmAgentKnowledgeEmbeddings;
+      }
+    } else {
+      c.err(
+        "knowledge.embeddings.provider",
+        'must be one of "openai", "gemini", "openrouter"',
+      );
+    }
+  }
+
+  if (k.redis !== undefined) {
+    const r = c.object(k.redis, "knowledge.redis");
+    if (r) {
+      c.unknownKeys(r, ["namespace"], "knowledge.redis");
+      out.redis = {};
+      if (r.namespace !== undefined) {
+        const ns = c.string(r.namespace, "knowledge.redis.namespace", {
+          re: KNOWLEDGE_NAMESPACE_RE,
+        });
+        if (ns !== undefined) out.redis.namespace = ns;
+      }
+    }
+  }
+
+  if (k.store === "supabase") {
+    const sb = c.object(k.supabase, "knowledge.supabase");
+    if (sb) {
+      c.unknownKeys(
+        sb,
+        ["urlSecret", "keySecret", "rpc", "matchThreshold", "cacheTtlSeconds"],
+        "knowledge.supabase",
+      );
+      const urlSecret = c.string(sb.urlSecret, "knowledge.supabase.urlSecret", {
+        re: ENV_NAME_RE,
+        reMessage: ENV_NAME_MESSAGE,
+      });
+      const keySecret = c.string(sb.keySecret, "knowledge.supabase.keySecret", {
+        re: ENV_NAME_RE,
+        reMessage: ENV_NAME_MESSAGE,
+      });
+      const cfg: Partial<NonNullable<LlmAgentKnowledgeConfig["supabase"]>> = {};
+      if (urlSecret !== undefined) cfg.urlSecret = urlSecret;
+      if (keySecret !== undefined) cfg.keySecret = keySecret;
+      if (sb.rpc !== undefined) {
+        const rpc = c.string(sb.rpc, "knowledge.supabase.rpc", {
+          re: KNOWLEDGE_RPC_RE,
+        });
+        if (rpc !== undefined) cfg.rpc = rpc;
+      }
+      if (sb.matchThreshold !== undefined) {
+        const n = c.number(
+          sb.matchThreshold,
+          "knowledge.supabase.matchThreshold",
+          0,
+          1,
+          false,
+        );
+        if (n !== undefined) cfg.matchThreshold = n;
+      }
+      if (sb.cacheTtlSeconds !== undefined) {
+        const n = c.number(
+          sb.cacheTtlSeconds,
+          "knowledge.supabase.cacheTtlSeconds",
+          10,
+          86400,
+          true,
+        );
+        if (n !== undefined) cfg.cacheTtlSeconds = n;
+      }
+      if (urlSecret !== undefined && keySecret !== undefined) {
+        out.supabase = cfg as NonNullable<LlmAgentKnowledgeConfig["supabase"]>;
+      }
+    }
+  }
+  return out;
+}
 
 export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
   const c = new Checker();
@@ -731,6 +917,16 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
     }
   }
 
+  if (root.knowledge !== undefined) {
+    const kn = validateKnowledge(
+      c,
+      root.knowledge,
+      provider,
+      config.apiKeySecret,
+    );
+    if (kn) config.knowledge = kn;
+  }
+
   if (c.errors.length > 0) return { ok: false, errors: c.errors };
   return { ok: true, config: config as LlmAgentConfig, warnings };
 }
@@ -1009,6 +1205,73 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
       default: "Sorry, something went wrong. Please try again.",
     },
     speakChatReplies: { type: "boolean", default: true },
+    knowledge: {
+      type: "object",
+      additionalProperties: false,
+      required: ["store"],
+      description:
+        "Retrieval (RAG) behind a search_knowledge tool. store redis indexes knowledge/*.md into Project Redis; store supabase queries your own Supabase pgvector function.",
+      properties: {
+        store: { enum: ["redis", "supabase", "off"] },
+        topK: { type: "integer", minimum: 1, maximum: 10, default: 4 },
+        embeddings: {
+          type: "object",
+          additionalProperties: false,
+          required: ["provider"],
+          description:
+            "Required unless store is off. apiKeySecret may be omitted when provider equals the top-level provider. Anthropic has no embeddings API.",
+          properties: {
+            provider: { enum: ["openai", "gemini", "openrouter"] },
+            model: { type: "string", minLength: 1, maxLength: 200 },
+            dimensions: {
+              type: "integer",
+              minimum: 64,
+              maximum: 3072,
+              default: 512,
+            },
+            apiKeySecret: envName,
+          },
+        },
+        redis: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            namespace: {
+              type: "string",
+              pattern: "^[a-z0-9_-]{1,40}$",
+              default: "default",
+            },
+          },
+        },
+        supabase: {
+          type: "object",
+          additionalProperties: false,
+          required: ["urlSecret", "keySecret"],
+          description: "Required when store is supabase.",
+          properties: {
+            urlSecret: envName,
+            keySecret: envName,
+            rpc: {
+              type: "string",
+              pattern: "^[a-z_][a-z0-9_]{0,62}$",
+              default: "match_documents",
+            },
+            matchThreshold: {
+              type: "number",
+              minimum: 0,
+              maximum: 1,
+              default: 0.5,
+            },
+            cacheTtlSeconds: {
+              type: "integer",
+              minimum: 10,
+              maximum: 86400,
+              default: 600,
+            },
+          },
+        },
+      },
+    },
     toolCallLogs: {
       enum: ["full", "redacted", "off"],
       default: "redacted",

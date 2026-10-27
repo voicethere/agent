@@ -475,6 +475,45 @@ const hits = await kb.search("how much is the starter plan?", 4);
 - Use a namespace per knowledge set (`namespace` option). Keys are `kb:<namespace>:...`.
 - Log lines carry the namespace, chunk count and durations, never chunk or query text.
 
+### Config block and the `search_knowledge` tool
+
+An LLM agent turns retrieval on with a `knowledge` block in `voicethere.llm.json`:
+
+```json
+{
+  "knowledge": {
+    "store": "redis",
+    "topK": 4,
+    "embeddings": { "provider": "openai", "dimensions": 512 },
+    "redis": { "namespace": "default" }
+  }
+}
+```
+
+`store` is `redis`, `supabase` or `off`. `embeddings.provider` is `openai`, `gemini` or `openrouter` (Anthropic has no embeddings API); `apiKeySecret` defaults to the top-level one when the provider is the same, and must be an `AGENT_*` secret name. Register the embeddings provider module in `providers`. With `store: "redis"` pass the documents to `createLlmAgent({ knowledge: { documents: [{ id: "pricing.md", text: pricing }] } })`; the agent needs `AGENT_REDIS_URL` (Project Redis) and indexes in the background on start. The model gets one tool, `search_knowledge({ query, k })`, which returns numbered chunks with title and score.
+
+### Your own Supabase pgvector table
+
+With `store: "supabase"` the agent searches a table in **your** Supabase project; VoiceThere never stores your vectors. Create the table and the `match_documents` function in your project as described in the Supabase guide ([Semantic search](https://supabase.com/docs/guides/ai/semantic-search)), with a vector size equal to `embeddings.dimensions` (512 by default), and fill it yourself.
+
+```json
+{
+  "knowledge": {
+    "store": "supabase",
+    "embeddings": { "provider": "openai", "dimensions": 512 },
+    "supabase": {
+      "urlSecret": "AGENT_SUPABASE_URL",
+      "keySecret": "AGENT_SUPABASE_KEY",
+      "rpc": "match_documents",
+      "matchThreshold": 0.5,
+      "cacheTtlSeconds": 600
+    }
+  }
+}
+```
+
+The agent calls `POST {AGENT_SUPABASE_URL}/rest/v1/rpc/match_documents` with the arguments `query_embedding`, `match_threshold` and `match_count` and reads `id`, `content` and `similarity` from each row. Use a key that may only execute that function (a restricted role), not a service-role key. With Project Redis enabled, identical questions are answered from a Redis cache for `cacheTtlSeconds` (10 minutes by default; cache entries have a TTL so they are evicted first when memory is full). `createSupabaseKnowledgeBase` and `searchKnowledgeTool` are exported for custom agents.
+
 ## Multiplayer / shared state
 
 Each end-user connection must call **`startSession()`** once — one orchestrator session id per client (one signaling room per client). Do **not** join multiple browsers to the same session credentials.

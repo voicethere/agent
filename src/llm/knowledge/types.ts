@@ -49,7 +49,10 @@ export interface KnowledgeBase {
 }
 
 export type KnowledgeIndexErrorCode =
-  "KB_INDEX_TIMEOUT" | "KB_MEMORY_LIMIT" | "KB_REDIS_ERROR";
+  | "KB_INDEX_TIMEOUT"
+  | "KB_MEMORY_LIMIT"
+  | "KB_REDIS_ERROR"
+  | "KB_SUPABASE_ERROR";
 
 export class KnowledgeIndexError extends Error {
   readonly code: KnowledgeIndexErrorCode;

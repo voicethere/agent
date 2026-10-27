@@ -4,11 +4,7 @@
   "title": "VoiceThere LLM agent config",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "version",
-    "provider",
-    "apiKeySecret"
-  ],
+  "required": ["version", "provider", "apiKeySecret"],
   "properties": {
     "$schema": {
       "type": "string"
@@ -17,12 +13,7 @@
       "const": 1
     },
     "provider": {
-      "enum": [
-        "openai",
-        "anthropic",
-        "gemini",
-        "openrouter"
-      ]
+      "enum": ["openai", "anthropic", "gemini", "openrouter"]
     },
     "model": {
       "type": "string",
@@ -54,9 +45,7 @@
     "greeting": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "text"
-      ],
+      "required": ["text"],
       "properties": {
         "text": {
           "type": "string",
@@ -72,16 +61,10 @@
     "bargeIn": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "mode"
-      ],
+      "required": ["mode"],
       "properties": {
         "mode": {
-          "enum": [
-            "project",
-            "on",
-            "off"
-          ]
+          "enum": ["project", "on", "off"]
         }
       },
       "default": {
@@ -89,10 +72,7 @@
       }
     },
     "speechDuringNonInterruptible": {
-      "enum": [
-        "answer_after",
-        "discard"
-      ],
+      "enum": ["answer_after", "discard"],
       "default": "answer_after"
     },
     "history": {
@@ -138,9 +118,7 @@
           "deprecated": true,
           "description": "Deprecated: use the top-level fillers block. Ignored when fillers is set.",
           "additionalProperties": false,
-          "required": [
-            "text"
-          ],
+          "required": ["text"],
           "properties": {
             "text": {
               "type": "string",
@@ -260,9 +238,7 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "kind"
-            ],
+            "required": ["kind"],
             "properties": {
               "kind": {
                 "const": "service"
@@ -293,11 +269,7 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "kind",
-              "name",
-              "url"
-            ],
+            "required": ["kind", "name", "url"],
             "properties": {
               "kind": {
                 "const": "mcp"
@@ -317,9 +289,7 @@
                   {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": [
-                      "type"
-                    ],
+                    "required": ["type"],
                     "properties": {
                       "type": {
                         "const": "none"
@@ -329,10 +299,7 @@
                   {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": [
-                      "type",
-                      "secret"
-                    ],
+                    "required": ["type", "secret"],
                     "properties": {
                       "type": {
                         "const": "bearer"
@@ -347,10 +314,7 @@
                   {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": [
-                      "type",
-                      "headers"
-                    ],
+                    "required": ["type", "headers"],
                     "properties": {
                       "type": {
                         "const": "headers"
@@ -392,10 +356,7 @@
       }
     },
     "interruptPolicy": {
-      "enum": [
-        "cancel",
-        "finish"
-      ],
+      "enum": ["cancel", "finish"],
       "default": "cancel"
     },
     "serviceWaitMs": {
@@ -414,12 +375,98 @@
       "type": "boolean",
       "default": true
     },
+    "knowledge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["store"],
+      "description": "Retrieval (RAG) behind a search_knowledge tool. store redis indexes knowledge/*.md into Project Redis; store supabase queries your own Supabase pgvector function.",
+      "properties": {
+        "store": {
+          "enum": ["redis", "supabase", "off"]
+        },
+        "topK": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 4
+        },
+        "embeddings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider"],
+          "description": "Required unless store is off. apiKeySecret may be omitted when provider equals the top-level provider. Anthropic has no embeddings API.",
+          "properties": {
+            "provider": {
+              "enum": ["openai", "gemini", "openrouter"]
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "dimensions": {
+              "type": "integer",
+              "minimum": 64,
+              "maximum": 3072,
+              "default": 512
+            },
+            "apiKeySecret": {
+              "type": "string",
+              "pattern": "^AGENT_[A-Z0-9_]{1,57}$",
+              "description": "Name of an AGENT_* environment variable (project secret), never its value."
+            }
+          }
+        },
+        "redis": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "pattern": "^[a-z0-9_-]{1,40}$",
+              "default": "default"
+            }
+          }
+        },
+        "supabase": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["urlSecret", "keySecret"],
+          "description": "Required when store is supabase.",
+          "properties": {
+            "urlSecret": {
+              "type": "string",
+              "pattern": "^AGENT_[A-Z0-9_]{1,57}$",
+              "description": "Name of an AGENT_* environment variable (project secret), never its value."
+            },
+            "keySecret": {
+              "type": "string",
+              "pattern": "^AGENT_[A-Z0-9_]{1,57}$",
+              "description": "Name of an AGENT_* environment variable (project secret), never its value."
+            },
+            "rpc": {
+              "type": "string",
+              "pattern": "^[a-z_][a-z0-9_]{0,62}$",
+              "default": "match_documents"
+            },
+            "matchThreshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.5
+            },
+            "cacheTtlSeconds": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 86400,
+              "default": 600
+            }
+          }
+        }
+      }
+    },
     "toolCallLogs": {
-      "enum": [
-        "full",
-        "redacted",
-        "off"
-      ],
+      "enum": ["full", "redacted", "off"],
       "default": "redacted",
       "description": "Agent log line per tool call. redacted removes secret values, sensitive keys and common personal data; full removes only secret values; off writes nothing."
     }

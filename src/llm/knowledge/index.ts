@@ -14,3 +14,10 @@ export type {
   KnowledgeRedisPipeline,
   RedisKnowledgeBaseOptions,
 } from "./types.js";
+export { createSupabaseKnowledgeBase } from "./supabase-knowledge-base.js";
+export type {
+  SupabaseKnowledgeBaseOptions,
+  SupabaseKnowledgeCacheOptions,
+} from "./supabase-knowledge-base.js";
+export { searchKnowledgeTool } from "./search-knowledge-tool.js";
+export type { SearchKnowledgeToolOptions } from "./search-knowledge-tool.js";

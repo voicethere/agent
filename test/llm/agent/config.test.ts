@@ -179,4 +179,129 @@ describe("validateLlmAgentConfig", () => {
       JSON.parse(JSON.stringify(LLM_AGENT_CONFIG_JSON_SCHEMA)),
     );
   });
+
+  describe("knowledge", () => {
+    const redis = {
+      store: "redis",
+      embeddings: { provider: "openai", dimensions: 512 },
+    };
+    const supabase = {
+      store: "supabase",
+      topK: 5,
+      embeddings: {
+        provider: "gemini",
+        apiKeySecret: "AGENT_GEMINI_API_KEY",
+      },
+      supabase: {
+        urlSecret: "AGENT_SUPABASE_URL",
+        keySecret: "AGENT_SUPABASE_KEY",
+        rpc: "match_documents",
+        matchThreshold: 0.6,
+        cacheTtlSeconds: 300,
+      },
+    };
+
+    it("accepts redis, supabase and off blocks", () => {
+      const r = validateLlmAgentConfig({ ...base, knowledge: redis });
+      expect(r.ok && r.config.knowledge).toEqual({
+        store: "redis",
+        embeddings: {
+          provider: "openai",
+          dimensions: 512,
+          apiKeySecret: "AGENT_OPENAI_API_KEY",
+        },
+      });
+      expect(validateLlmAgentConfig({ ...base, knowledge: supabase }).ok).toBe(
+        true,
+      );
+      expect(
+        validateLlmAgentConfig({ ...base, knowledge: { store: "off" } }).ok,
+      ).toBe(true);
+    });
+
+    it.each([
+      [
+        "anthropic embeddings",
+        { ...redis, embeddings: { provider: "anthropic" } },
+        "knowledge.embeddings.provider",
+      ],
+      [
+        "supabase block missing",
+        { store: "supabase", embeddings: redis.embeddings },
+        "knowledge.supabase",
+      ],
+      [
+        "bad secret name",
+        {
+          ...supabase,
+          supabase: { ...supabase.supabase, keySecret: "SUPABASE_KEY" },
+        },
+        "knowledge.supabase.keySecret",
+      ],
+      ["topK 11", { ...redis, topK: 11 }, "knowledge.topK"],
+      [
+        "bad rpc",
+        {
+          ...supabase,
+          supabase: { ...supabase.supabase, rpc: "x/../y" },
+        },
+        "knowledge.supabase.rpc",
+      ],
+      [
+        "bad namespace",
+        { ...redis, redis: { namespace: "Bad Space" } },
+        "knowledge.redis.namespace",
+      ],
+      [
+        "embeddings key needed when provider differs from the top-level one",
+        { store: "redis", embeddings: { provider: "gemini" } },
+        "knowledge.embeddings.apiKeySecret",
+      ],
+      ["embeddings missing", { store: "redis" }, "knowledge.embeddings"],
+      ["unknown field", { ...redis, extra: 1 }, "knowledge.extra"],
+    ])("rejects: %s", (_name, knowledge, path) => {
+      expect(errorsOf({ ...base, knowledge }).map((e) => e.path)).toContain(
+        path,
+      );
+    });
+
+    it("anthropic message names the alternatives", () => {
+      const e = errorsOf({
+        ...base,
+        knowledge: { ...redis, embeddings: { provider: "anthropic" } },
+      });
+      expect(e[0]?.message).toBe(
+        "anthropic has no embeddings API; use openai, gemini or openrouter",
+      );
+    });
+
+    it("the JSON schema on disk describes the knowledge block", async () => {
+      const schema = LLM_AGENT_CONFIG_JSON_SCHEMA.properties.knowledge;
+      expect(schema.required).toEqual(["store"]);
+      expect(schema.properties.store.enum).toEqual([
+        "redis",
+        "supabase",
+        "off",
+      ]);
+      expect(Object.keys(schema.properties.supabase.properties)).toEqual([
+        "urlSecret",
+        "keySecret",
+        "rpc",
+        "matchThreshold",
+        "cacheTtlSeconds",
+      ]);
+      const onDisk = JSON.parse(
+        readFileSync(
+          join(
+            dirname(fileURLToPath(import.meta.url)),
+            "../../../schema/voicethere.llm.schema.json",
+          ),
+          "utf8",
+        ),
+      ) as { properties: Record<string, unknown> };
+      expect(onDisk.properties.knowledge).toEqual(
+        JSON.parse(JSON.stringify(schema)),
+      );
+    });
+  });
 });

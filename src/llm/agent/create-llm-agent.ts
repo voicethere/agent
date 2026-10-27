@@ -16,7 +16,21 @@ import type {
   SessionContext,
 } from "../../runtime.js";
 import { resolveModel } from "../catalog.js";
-import { createLlmProvider } from "../providers.js";
+import {
+  DEFAULT_EMBEDDING_DIMS,
+  DEFAULT_EMBEDDING_MODEL,
+} from "../bounded-embedder.js";
+import { createLlmEmbedder, createLlmProvider } from "../providers.js";
+import {
+  createRedisKnowledgeBase,
+  createSupabaseKnowledgeBase,
+  searchKnowledgeTool,
+} from "../knowledge/index.js";
+import type {
+  KnowledgeBase,
+  KnowledgeDocument,
+  KnowledgeLogger,
+} from "../knowledge/index.js";
 import { McpToolSource } from "../mcp/mcp-tool-source.js";
 import type { McpToolSourceOptions } from "../mcp/mcp-tool-source.js";
 import { secretValuesFromEnv } from "./redact.js";
@@ -54,6 +68,12 @@ export interface CreateLlmAgentOptions {
   now?: () => number;
   /** Test injection: random number in [0, 1) used to pick a filler phrase. */
   random?: () => number;
+  /**
+   * Retrieval for `config.knowledge`. `documents` are the chunks' source for
+   * `store: "redis"` (import `knowledge/*.md` as strings). `base` replaces the
+   * configured store (tests, advanced use).
+   */
+  knowledge?: { documents?: KnowledgeDocument[]; base?: KnowledgeBase };
   /** Test injection for MCP tool sources. */
   sourceFactory?: (opts: McpToolSourceOptions) => McpToolSource;
 }
@@ -169,6 +189,26 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       "LLM_CONFIG_INVALID",
     );
   }
+  const knowledgeCfg = config.knowledge;
+  if (
+    knowledgeCfg &&
+    knowledgeCfg.store !== "off" &&
+    knowledgeCfg.embeddings &&
+    !opts.knowledge?.base &&
+    !(opts.providers ?? []).some((m) =>
+      m.ids.includes(knowledgeCfg.embeddings!.provider),
+    )
+  ) {
+    const sub =
+      knowledgeCfg.embeddings.provider === "openrouter"
+        ? "openai"
+        : knowledgeCfg.embeddings.provider;
+    const q = '"';
+    throw configError(
+      `voicethere.llm.json knowledge.embeddings selects provider ${q}${knowledgeCfg.embeddings.provider}${q}, but agent.ts does not register it. Add: import { ${sub} } from ${q}@voicethere/agent/llm/${sub}${q}; and pass it in providers`,
+      "LLM_CONFIG_INVALID",
+    );
+  }
   const hooks = opts.hooks ?? {};
   const now = opts.now ?? Date.now;
   const random = opts.random ?? Math.random;
@@ -200,6 +240,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       : undefined;
 
   let provider: LlmProvider | undefined = opts.provider;
+  let knowledgeTool: CustomTool | undefined;
   let registry: ToolRegistry | undefined;
   let serviceSource: McpToolSource | undefined;
   let serviceWaited = false;
@@ -418,6 +459,119 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
 
   // ---- tools -------------------------------------------------------------
 
+  /** Content-free: fields hold counts, ids and durations only. */
+  const knowledgeLogger: KnowledgeLogger = {
+    info: (message, fields) => agentLog("info", message, fields ?? {}),
+  };
+
+  function buildKnowledge(env: Record<string, string | undefined>): void {
+    const kc = config.knowledge;
+    if (!kc || kc.store === "off") return;
+    const injected = opts.knowledge?.base;
+    const topK = kc.topK ?? 4;
+    const logCode = (message: string, fields?: Record<string, unknown>) =>
+      agentLog("warn", message, fields ?? {});
+    let base = injected;
+    if (!base) {
+      const emb = kc.embeddings;
+      if (!emb) return;
+      const apiKey = env[emb.apiKeySecret];
+      if (!nonEmpty(apiKey)) {
+        agentLog(
+          "warn",
+          `knowledge: ${emb.apiKeySecret} is not set, search_knowledge disabled`,
+        );
+        return;
+      }
+      const model =
+        emb.model ??
+        (emb.provider === "openai" || emb.provider === "gemini"
+          ? DEFAULT_EMBEDDING_MODEL[emb.provider]
+          : undefined);
+      if (!model) return;
+      const dims = emb.dimensions ?? DEFAULT_EMBEDDING_DIMS;
+      const redisUrl = env.AGENT_REDIS_URL;
+      if (kc.store === "redis") {
+        if (!nonEmpty(redisUrl)) {
+          agentLog(
+            "info",
+            "knowledge: AGENT_REDIS_URL unset (enable Project Redis)",
+          );
+          return;
+        }
+        const documents = opts.knowledge?.documents ?? [];
+        if (documents.length === 0) {
+          agentLog(
+            "info",
+            "knowledge: no documents, search_knowledge disabled",
+          );
+          return;
+        }
+        base = createRedisKnowledgeBase({
+          redisUrl,
+          namespace: kc.redis?.namespace,
+          documents,
+          embedder: createLlmEmbedder(
+            { provider: emb.provider, apiKey },
+            opts.providers ?? [],
+          ),
+          model,
+          dims,
+          logger: knowledgeLogger,
+        });
+      } else {
+        const sb = kc.supabase;
+        const url = sb ? env[sb.urlSecret] : undefined;
+        const key = sb ? env[sb.keySecret] : undefined;
+        if (!sb || !nonEmpty(url) || !nonEmpty(key)) {
+          agentLog(
+            "info",
+            "knowledge: Supabase URL or key secret is not set, search_knowledge disabled",
+          );
+          return;
+        }
+        base = createSupabaseKnowledgeBase({
+          url,
+          key,
+          rpc: sb.rpc,
+          matchThreshold: sb.matchThreshold,
+          embedder: createLlmEmbedder(
+            { provider: emb.provider, apiKey },
+            opts.providers ?? [],
+          ),
+          model,
+          dims,
+          cache: nonEmpty(redisUrl)
+            ? {
+                redisUrl,
+                ttlSeconds: sb.cacheTtlSeconds,
+                namespace: kc.redis?.namespace,
+              }
+            : undefined,
+          logger: knowledgeLogger,
+        });
+      }
+    }
+    // The agent runtime has no shutdown hook: the connection is closed with the process.
+    // Indexing never blocks agent start; search retries the index on demand.
+    void base.ensureIndexed().then(
+      (report) =>
+        agentLog("info", "knowledge indexed", {
+          status: report.status,
+          chunks: report.chunks,
+          waitedMs: report.waitedMs,
+        }),
+      (err: unknown) =>
+        agentLog("warn", "knowledge indexing failed", {
+          code:
+            typeof (err as { code?: unknown })?.code === "string"
+              ? (err as { code: string }).code
+              : "KB_UNKNOWN",
+        }),
+    );
+    knowledgeTool = searchKnowledgeTool(base, { topK, log: logCode });
+  }
+
   function buildRegistry(env: Record<string, string | undefined>): void {
     const reg = new ToolRegistry({
       log: (level, message, fields) => agentLog(level, message, fields ?? {}),
@@ -426,6 +580,15 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         secretValues: secretValuesFromEnv(env, [
           config.apiKeySecret,
           "AGENT_SERVICE_TOKEN",
+          ...(config.knowledge?.embeddings
+            ? [config.knowledge.embeddings.apiKeySecret]
+            : []),
+          ...(config.knowledge?.supabase
+            ? [
+                config.knowledge.supabase.keySecret,
+                config.knowledge.supabase.urlSecret,
+              ]
+            : []),
           ...(config.toolSources ?? []).flatMap((src) => {
             if (src.kind !== "mcp" || !src.auth) return [];
             if (src.auth.type === "bearer") return [src.auth.secret];
@@ -439,6 +602,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       },
     });
     for (const tool of opts.tools ?? []) reg.addCustomTool(tool);
+    if (knowledgeTool) reg.addCustomTool(knowledgeTool);
     const sources: McpToolSource[] = [];
     for (const src of config.toolSources ?? []) {
       if (src.kind === "service") {
@@ -1078,6 +1242,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
           opts.providers ?? [],
         );
       }
+      buildKnowledge(env);
       buildRegistry(env);
     },
 

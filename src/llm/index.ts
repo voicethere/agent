@@ -62,6 +62,8 @@ export type {
   LlmAgentFillerSituation,
   LlmAgentFillers,
   LlmAgentGreeting,
+  LlmAgentKnowledgeConfig,
+  LlmAgentKnowledgeEmbeddings,
   LlmAgentMcpAuth,
   LlmAgentMcpSource,
   LlmAgentServiceSource,
@@ -76,7 +78,9 @@ export type { LlmAgentHooks, TurnContext, TurnSummary } from "./agent/hooks.js";
 export {
   chunkMarkdown,
   createRedisKnowledgeBase,
+  createSupabaseKnowledgeBase,
   KnowledgeIndexError,
+  searchKnowledgeTool,
 } from "./knowledge/index.js";
 export type {
   ChunkOptions,
@@ -90,4 +94,7 @@ export type {
   KnowledgeRedisClient,
   MarkdownChunk,
   RedisKnowledgeBaseOptions,
+  SearchKnowledgeToolOptions,
+  SupabaseKnowledgeBaseOptions,
+  SupabaseKnowledgeCacheOptions,
 } from "./knowledge/index.js";

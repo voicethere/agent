@@ -444,6 +444,37 @@ const { vectors } = await embedder.embed({
 });
 ```
 
+## Knowledge base (RAG) on Project Redis (`@voicethere/agent/llm`)
+
+`createRedisKnowledgeBase` indexes Markdown documents in the project's Redis (Redis 8 Query Engine, HNSW vector index, cosine) and returns the chunks closest to a question. It needs `ioredis` in your agent and an embedder from `createLlmEmbedder`. Redis 7 has no vector search: the call fails with `KB_REDIS_ERROR`.
+
+```ts
+import {
+  createLlmEmbedder,
+  createRedisKnowledgeBase,
+  DEFAULT_EMBEDDING_DIMS,
+  DEFAULT_EMBEDDING_MODEL,
+} from "@voicethere/agent/llm";
+import { openai } from "@voicethere/agent/llm/openai";
+import pricing from "./knowledge/pricing.md";
+
+const kb = createRedisKnowledgeBase({
+  redisUrl: process.env.AGENT_REDIS_URL,
+  documents: [{ id: "pricing.md", text: pricing }],
+  embedder: createLlmEmbedder({ provider: "openai", apiKey }, [openai]),
+  model: DEFAULT_EMBEDDING_MODEL.openai,
+  dims: DEFAULT_EMBEDDING_DIMS,
+});
+await kb.ensureIndexed(); // embeds only when the documents, model or dims changed
+const hits = await kb.search("how much is the starter plan?", 4);
+// [{ text, title: "Pricing › Plans", source: "pricing.md", score }]
+```
+
+- Documents are split on `#`..`###` headings into chunks of about 300 words with 50 words of overlap. The same content (documents, model, dimensions) is not embedded twice, also across workers: one worker builds, the others wait and report `built-by-other-worker`.
+- Vectors have no TTL, so `maxmemory-policy volatile-lru` never evicts them. The index refuses to grow past 80 % of `maxmemory` (`KB_MEMORY_LIMIT`). Plan on about 3.5 KB per chunk at 512 dimensions, which puts roughly 55,000 chunks in 200 MB; this is an estimate until measured on a real project.
+- Use a namespace per knowledge set (`namespace` option). Keys are `kb:<namespace>:...`.
+- Log lines carry the namespace, chunk count and durations, never chunk or query text.
+
 ## Multiplayer / shared state
 
 Each end-user connection must call **`startSession()`** once — one orchestrator session id per client (one signaling room per client). Do **not** join multiple browsers to the same session credentials.

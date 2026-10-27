@@ -73,3 +73,21 @@ export { CALL_AGENT_PROMPT_GUIDANCE } from "./agent/prompt-guidance.js";
 export { SentenceSplitter } from "./agent/sentence-splitter.js";
 export { ConversationHistory } from "./agent/history.js";
 export type { LlmAgentHooks, TurnContext, TurnSummary } from "./agent/hooks.js";
+export {
+  chunkMarkdown,
+  createRedisKnowledgeBase,
+  KnowledgeIndexError,
+} from "./knowledge/index.js";
+export type {
+  ChunkOptions,
+  IndexReport,
+  KnowledgeBase,
+  KnowledgeDocument,
+  KnowledgeHit,
+  KnowledgeIndexErrorCode,
+  KnowledgeLimits,
+  KnowledgeLogger,
+  KnowledgeRedisClient,
+  MarkdownChunk,
+  RedisKnowledgeBaseOptions,
+} from "./knowledge/index.js";

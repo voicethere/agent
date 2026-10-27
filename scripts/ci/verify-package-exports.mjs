@@ -67,6 +67,7 @@ for (const subpath of [
     }
     const productIds = mod
       .listTemplates({ kind: "product" })
+      .filter((template) => template.seedOnCreate)
       .map((template) => template.id);
     for (const id of productIds) {
       if (!mod.hasSeedBundle(id)) {

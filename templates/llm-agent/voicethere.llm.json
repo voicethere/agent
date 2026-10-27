@@ -33,5 +33,15 @@
     "timeoutMs": 15000
   },
   "toolSources": [],
+  "knowledge": {
+    "store": "off",
+    "topK": 4,
+    "embeddings": {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "dimensions": 512,
+      "apiKeySecret": "AGENT_OPENAI_API_KEY"
+    }
+  },
   "interruptPolicy": "cancel"
 }

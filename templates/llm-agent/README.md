@@ -9,6 +9,7 @@ A voice and chat agent powered by an LLM, with custom tools and MCP servers. Sou
 - `prompt.md` is the system prompt. The dashboard LLM tab edits this file too.
 - `tools.ts` lists your own tools. It ships with `get_current_time`.
 - `hooks.ts` is where you adjust a turn in code. It is empty by default.
+- `knowledge/about.md` is a sample document for retrieval (off by default).
 - `md.d.ts` lets TypeScript accept `import prompt from "./prompt.md"`.
 
 ## Set the API key
@@ -67,6 +68,16 @@ Only the provider you import in `agent.ts` is bundled. When you change `provider
 - `openrouter` uses the `openai` module.
 
 If they do not match, `createLlmAgent` throws when the bundle loads, and the deploy check reports it.
+
+## Knowledge (RAG)
+
+The `knowledge` block in `voicethere.llm.json` ships with `"store": "off"`, so the template runs without Redis. Turning it on takes three steps:
+
+1. Put your Markdown files in `knowledge/`, import each one in `agent.ts` and add it to the `documents` list. The agent splits every file by heading and indexes the pieces.
+2. Set `"store": "redis"` and enable Project Redis for the project. Create the project secret `AGENT_OPENAI_API_KEY` for the embeddings (or change `knowledge.embeddings`; Anthropic has no embeddings API). The agent indexes in the background on start and skips files that did not change.
+3. Redeploy. The model now has a `search_knowledge` tool and answers from the retrieved chunks.
+
+For a large or changing data set use your own Supabase project instead: set `"store": "supabase"`, add a `supabase` block with `urlSecret` and `keySecret` (see the knowledge section of the package README for the SQL to run in your project), and fill the table yourself. Set `dimensions` to match your table. Chunk and query text never reach VoiceThere logs.
 
 ## Learn more
 

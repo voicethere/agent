@@ -22,7 +22,7 @@ import {
 | **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `language-switch`, `world-sync`, `world-sync-binary`, `game-sync`, `voice-showcase`, `recording-consent`, `positional-tts`, `spatial-showcase`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
 | **e2e**     | No                                                                                                                                                                                                                     | No — build from sources at test time | `voicethere/e2e` smokes |
 
-Product templates always set `seedOnCreate: true`. CI fails if a product template is missing its prebuilt bundle after `npm run build`.
+Product templates set `seedOnCreate: true` unless they are created from sources only (`llm-mcp-service`). CI fails if a `seedOnCreate` template is missing its prebuilt bundle after `npm run build`.
 
 ## Sources vs prebuilt
 
@@ -74,6 +74,8 @@ Each folder has its own README. Summary:
 | `spatial-showcase`  | `spatial-showcase/`  | Orbit / soundboard / proximity                                    |
 | `webhooks`          | `webhooks/`          | Inbound HMAC webhooks                                             |
 | `webhooks-redis`    | `webhooks-redis/`    | Webhooks plus Redis counter                                       |
+| `llm-agent`         | `llm-agent/`         | LLM voice and chat agent, tools, MCP, optional knowledge (RAG)    |
+| `llm-mcp-service`   | `llm-mcp-service/`   | `llm-agent` plus a project service that serves MCP tools          |
 
 ## E2e templates
 

@@ -11,6 +11,7 @@ on:
 permissions:
   contents: write
   pull-requests: read
+  packages: write
 
 jobs:
   quality:
@@ -87,3 +88,28 @@ jobs:
           name: Release ${{ steps.version.outputs.version }}
           body_path: ${{ steps.release_notes.outputs.body_file }}
           generate_release_notes: false
+
+  mcp-example-image:
+    name: Publish MCP example service image
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#release/}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/mcp-example
+          push: true
+          tags: |
+            ghcr.io/voicethere/mcp-example-service:${{ steps.version.outputs.version }}
+            ghcr.io/voicethere/mcp-example-service:latest

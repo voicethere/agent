@@ -186,7 +186,10 @@ describe.skipIf(!supported)("createRedisKnowledgeBase (real Redis 8)", () => {
       logger: { info: (m) => void waiting.push(m) },
     }).ensureIndexed();
     await expect
-      .poll(() => waiting.includes("kb waiting for other worker"))
+      .poll(() => waiting.includes("kb waiting for other worker"), {
+        timeout: 5_000,
+        interval: 50,
+      })
       .toBe(true);
     release();
 
@@ -247,9 +250,20 @@ describe.skipIf(!supported)("createRedisKnowledgeBase (real Redis 8)", () => {
       .poll(
         async () =>
           Date.now() - startedAt >= 600 && (await kbRedis!.pttl(h12)) > 0,
+        { timeout: 5_000, interval: 50 },
       )
       .toBe(true);
-    const second = kb(namespace, b, { limits }).ensureIndexed();
+    const waiting: string[] = [];
+    const second = kb(namespace, b, {
+      limits,
+      logger: { info: (m) => void waiting.push(m) },
+    }).ensureIndexed();
+    await expect
+      .poll(() => waiting.includes("kb waiting for other worker"), {
+        timeout: 5_000,
+        interval: 50,
+      })
+      .toBe(true);
     release();
 
     expect((await first).status).toBe("rebuilt");
@@ -307,6 +321,38 @@ describe.skipIf(!supported)("createRedisKnowledgeBase (real Redis 8)", () => {
     expect(await kbRedis!.exists(`kb:${namespace}:ready:${oldH}`)).toBe(0);
   });
 
+  it("the version is marked live before its build lock is released", async () => {
+    const namespace = ns();
+    let release!: () => void;
+    const a = fakeEmbedder();
+    a.gate = new Promise<void>((r) => (release = r));
+    const embeddingStarted = new Promise<void>((r) => (a.onEmbed = r));
+
+    const building = kb(namespace, a).ensureIndexed();
+    await embeddingStarted;
+    const [lockName] = await kbRedis!.keys(`kb:${namespace}:lock:*`);
+    const h12 = lockName!.split(":").pop();
+    expect(await kbRedis!.exists(`kb:${namespace}:live:${h12}`)).toBe(1);
+    release();
+    expect((await building).status).toBe("rebuilt");
+  });
+
+  it("gc removes chunk keys of an abandoned version that never got an index", async () => {
+    const namespace = ns();
+    const base = kb(namespace, fakeEmbedder());
+    await base.ensureIndexed();
+    const dead = `kb:${namespace}:v:deadbeef0000:chunk:0`;
+    const alive = `kb:${namespace}:v:cafe00000000:chunk:0`;
+    await kbRedis!.hset(dead, "text", "x");
+    await kbRedis!.hset(alive, "text", "y");
+    await kbRedis!.set(`kb:${namespace}:live:cafe00000000`, "1");
+    const dropped = await base.gc();
+    expect(dropped).toContain("deadbeef0000");
+    expect(dropped).not.toContain("cafe00000000");
+    expect(await kbRedis!.exists(dead)).toBe(0);
+    expect(await kbRedis!.exists(alive)).toBe(1);
+  });
+
   it("an index wiped between queries is rebuilt at query time", async () => {
     const namespace = ns();
     const e = fakeEmbedder();
@@ -327,7 +373,8 @@ describe.skipIf(!supported)("createRedisKnowledgeBase (real Redis 8)", () => {
     expect(err).toBeInstanceOf(KnowledgeIndexError);
     expect((err as KnowledgeIndexError).code).toBe("KB_MEMORY_LIMIT");
     expect(e.calls).toBe(0);
-    expect(await kbRedis!.keys(`kb:${namespace}:*`)).toEqual([]);
+    expect(await kbRedis!.keys(`kb:${namespace}:v:*`)).toEqual([]);
+    expect(await kbRedis!.keys(`kb:${namespace}:ready:*`)).toEqual([]);
   });
 
   it("keeps namespaces apart", async () => {

@@ -30,6 +30,9 @@ const WRITE_BATCH = 200;
 const COMPARE_AND_DELETE = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end`;
 const COMPARE_AND_RENEW = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end`;
 const COMPARE = `if redis.call('get', KEYS[1]) == ARGV[1] then return 1 else return 0 end`;
+const COMPARE_AND_SET_READY = `if redis.call('get', KEYS[1]) == ARGV[1] then redis.call('set', KEYS[2], '1') return 1 else return 0 end`;
+const GC_SCAN_MAX_KEYS = 20_000;
+const GC_SCAN_MAX_MS = 2_000;
 const LIVE_TTL_MS = 90_000;
 const HEARTBEAT_MS = 30_000;
 const GC_MIN_INTERVAL_MS = 600_000;
@@ -362,16 +365,70 @@ export function createRedisKnowledgeBase(
       "TAG",
     );
     await waitIndexed(h12);
-    if (!(await ownsLock())) {
+    // Still the lock holder and mark ready, in one step.
+    const marked = await quick(
+      "EVAL",
+      COMPARE_AND_SET_READY,
+      2,
+      lockKey,
+      readyKey(h12),
+      workerId,
+    );
+    if (marked !== 1) {
       throw new KnowledgeIndexError(
         "KB_INDEX_TIMEOUT",
         "lost the knowledge index lock",
       );
     }
-    await quick("SET", readyKey(h12), "1");
   }
 
   let lastGc = 0;
+  /** Chunk keys of versions that never got an index (builder died before FT.CREATE). */
+  async function gcAbandonedKeys(
+    indexNames: Set<string>,
+    dropped: string[],
+  ): Promise<void> {
+    const versions = new Set<string>();
+    const prefix = `kb:${namespace}:v:`;
+    const started = Date.now();
+    let scanned = 0;
+    let cursor = "0";
+    let truncated = false;
+    do {
+      const reply = (await quick(
+        "SCAN",
+        cursor,
+        "MATCH",
+        `${prefix}*`,
+        "COUNT",
+        500,
+      )) as [string, string[]];
+      cursor = reply[0];
+      scanned += reply[1].length;
+      for (const key of reply[1]) {
+        const hash = key.slice(prefix.length).split(":")[0];
+        if (hash) versions.add(hash);
+      }
+      if (
+        cursor !== "0" &&
+        (scanned >= GC_SCAN_MAX_KEYS || Date.now() - started >= GC_SCAN_MAX_MS)
+      ) {
+        truncated = true;
+        break;
+      }
+    } while (cursor !== "0");
+    if (truncated) log("kb gc scan truncated", { scanned });
+    for (const other of versions) {
+      if (other === h12 || indexNames.has(indexName(other))) continue;
+      const live = Number(await quick("EXISTS", liveKey(other)));
+      const locked = Number(await quick("EXISTS", lockKeyOf(other)));
+      if (live > 0 || locked > 0) continue;
+      await deleteKeys(other);
+      await quick("DEL", readyKey(other));
+      dropped.push(other);
+    }
+  }
+
   /**
    * Drops indexes of other versions whose workers are gone (no live key, no
    * build lock). Returns the dropped version ids.
@@ -393,6 +450,7 @@ export function createRedisKnowledgeBase(
         await quick("DEL", readyKey(other));
         dropped.push(other);
       }
+      await gcAbandonedKeys(new Set(names), dropped);
       if (dropped.length > 0)
         log("kb dropped old versions", { dropped: dropped.length });
     } catch (err) {
@@ -428,6 +486,9 @@ export function createRedisKnowledgeBase(
 
   async function ensure(): Promise<IndexReport> {
     const started = Date.now();
+    // Live before the build lock is released, so another version's gc never
+    // sees this version with neither a lock nor a live key.
+    await startHeartbeat();
     const report = (status: IndexReport["status"]): IndexReport => {
       const done = {
         status,

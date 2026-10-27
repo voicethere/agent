@@ -132,4 +132,28 @@ describe("createRedactor", () => {
       "production [redacted:secret]",
     );
   });
+
+  it("adversarial 50 000-character inputs finish quickly", () => {
+    const r = red();
+    for (const input of [
+      "%".repeat(50_000),
+      "1 ".repeat(25_000),
+      "a@".repeat(25_000),
+      "DE12".repeat(12_500),
+      "1-".repeat(25_000),
+      "4111 ".repeat(10_000),
+      "+".repeat(50_000),
+      `${"a".repeat(30_000)}@${"b.".repeat(10_000)}`,
+    ]) {
+      const t0 = performance.now();
+      r.redact(input);
+      expect(performance.now() - t0).toBeLessThan(200);
+    }
+  });
+
+  it("an IBAN followed by words is redacted without eating the words", () => {
+    expect(red().redact("pay DE89 3704 0044 0532 0130 00 now")).toBe(
+      "pay [redacted:iban] now",
+    );
+  });
 });

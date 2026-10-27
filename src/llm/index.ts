@@ -33,8 +33,11 @@ export type {
   McpToolSourceOptions,
   RegisteredTool,
   ToolCallContext,
+  ToolCallLogOptions,
   ToolCallResult,
 } from "./mcp/index.js";
+export { secretValuesFromEnv } from "./agent/redact.js";
+export type { ToolCallLogMode } from "./agent/redact.js";
 export { createLlmAgent } from "./agent/create-llm-agent.js";
 export type { CreateLlmAgentOptions } from "./agent/create-llm-agent.js";
 export { defineTool } from "./agent/define-tool.js";

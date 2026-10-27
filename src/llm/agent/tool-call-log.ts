@@ -5,7 +5,7 @@ export const TOOL_CALL_EVENT = "llm.tool.call";
 const MAX_PART_CHARS = 2048;
 const MAX_FIELDS_CHARS = AGENT_LOG_FIELDS_MAX_CHARS - 192;
 
-export type ToolCallKind = "mcp" | "service" | "custom";
+export type ToolCallKind = "mcp" | "service" | "custom" | "hook" | "unknown";
 
 export interface ToolCallFields {
   event: typeof TOOL_CALL_EVENT;

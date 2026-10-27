@@ -3,7 +3,7 @@ import type { McpLogFn, McpToolSource } from "./mcp-tool-source.js";
 import { createRedactor } from "../agent/redact.js";
 import type { ToolCallLogMode } from "../agent/redact.js";
 import { buildToolCallFields } from "../agent/tool-call-log.js";
-import type { ToolCallFields } from "../agent/tool-call-log.js";
+import type { ToolCallFields, ToolCallKind } from "../agent/tool-call-log.js";
 
 export const MAX_TOOLS = 128;
 export const MAX_RESULT_BYTES = 16_384;
@@ -23,7 +23,7 @@ export interface ToolCallLogOptions {
   mode: ToolCallLogMode;
   /** Values (env/project secrets) removed from every logged input and output. */
   secretValues: string[];
-  emit: (fields: ToolCallFields) => void;
+  emit: (fields: ToolCallFields, sessionId: string) => void;
   now?: () => number;
 }
 
@@ -115,7 +115,20 @@ export class ToolRegistry {
   ): Promise<ToolCallResult> {
     const entry = this.build().find((e) => e.spec.name === exposedName);
     if (!entry) {
-      return { isError: true, content: `tool ${exposedName} is not available` };
+      const unavailable = {
+        isError: true,
+        content: `tool ${exposedName} is not available`,
+      };
+      const at = (this.toolCallLog?.now ?? Date.now)();
+      this.emitCall(
+        { tool: exposedName, source: "", kind: "unknown" },
+        args,
+        opts,
+        at,
+        at,
+        unavailable,
+      );
+      return unavailable;
     }
     const clock = this.toolCallLog?.now ?? Date.now;
     const startedAt = clock();
@@ -148,10 +161,51 @@ export class ToolRegistry {
     return { isError: result.isError, content: truncateResult(result.content) };
   }
 
-  /** One `llm.tool.call` line per call; never throws into the call path. */
+  /** Same log path for calls answered outside the registry (the onToolCall hook). */
+  logExternalCall(
+    name: string,
+    args: unknown,
+    opts: ToolCallContext,
+    startedAt: number,
+    endedAt: number,
+    result: ToolCallResult,
+  ): void {
+    this.emitCall(
+      { tool: name, source: "onToolCall", kind: "hook" },
+      args,
+      opts,
+      startedAt,
+      endedAt,
+      result,
+    );
+  }
+
   private logToolCall(
     entry: Entry,
     exposedName: string,
+    args: unknown,
+    opts: ToolCallContext,
+    startedAt: number,
+    endedAt: number,
+    result: ToolCallResult,
+  ): void {
+    this.emitCall(
+      {
+        tool: exposedName,
+        source: entry.custom ? "custom" : entry.owner,
+        kind: entry.custom ? "custom" : (entry.source?.kind ?? "mcp"),
+      },
+      args,
+      opts,
+      startedAt,
+      endedAt,
+      result,
+    );
+  }
+
+  /** One `llm.tool.call` line per call; never throws into the call path. */
+  private emitCall(
+    id: { tool: string; source: string; kind: ToolCallKind },
     args: unknown,
     opts: ToolCallContext,
     startedAt: number,
@@ -166,9 +220,9 @@ export class ToolRegistry {
         buildToolCallFields({
           turnId: opts.turnId ?? "",
           callId: opts.callId ?? "",
-          tool: exposedName,
-          source: entry.custom ? "custom" : entry.owner,
-          kind: entry.custom ? "custom" : (entry.source?.kind ?? "mcp"),
+          tool: id.tool,
+          source: id.source,
+          kind: id.kind,
           startedAt,
           endedAt,
           input: redactor.redact(args),
@@ -176,10 +230,11 @@ export class ToolRegistry {
           isError: result.isError,
           mode: cfg.mode,
         }),
+        opts.sessionId,
       );
     } catch (err) {
       this.log("warn", "tool call log failed", {
-        tool: exposedName,
+        tool: id.tool,
         error: err instanceof Error ? err.name : "error",
       });
     }

@@ -79,6 +79,34 @@ describe("llm.tool.call log line", () => {
     );
   });
 
+  it("emits with the call's sessionId", async () => {
+    const ids: string[] = [];
+    const reg = new ToolRegistry({
+      toolCallLog: {
+        mode: "redacted",
+        secretValues: [],
+        emit: (_f, sid) => ids.push(sid),
+      },
+    });
+    reg.addSource(source("crm", "mcp", "ok"));
+    await reg.call("lookup", {}, ctx);
+    expect(ids).toEqual(["s1"]);
+  });
+
+  it("unknown tool writes one error line with kind unknown", async () => {
+    const { reg, lines } = make();
+    const r = await reg.call("ghost", { a: 1 }, ctx);
+    expect(r.isError).toBe(true);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      kind: "unknown",
+      source: "",
+      isError: true,
+      tool: "ghost",
+      output: "tool ghost is not available",
+    });
+  });
+
   it("writes nothing when mode is off", async () => {
     const { reg, lines } = make("off");
     reg.addSource(source("crm", "mcp", "ok"));

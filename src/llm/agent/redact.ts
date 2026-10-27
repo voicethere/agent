@@ -11,8 +11,37 @@ const EMAIL_RE =
   /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
 const IBAN_RE =
   /\b[A-Z]{2}\d{2}(?:[ ]?[A-Za-z0-9]{3,5}){3,8}(?:[ ]?[A-Za-z0-9]{1,3})?\b/g;
-const CARD_RE = /\b\d(?:[ -]?\d){12,18}\b/g;
-const PHONE_RE = /\+?\d[\d\s().-]{6,}\d/g;
+const CARD_RE = /\b\d(?:[ -]?\d){14,18}\b/g;
+const PHONE_RE = /(?<![\w.:/+-])(?:\+|\()?\d[\d ().-]{6,}\d(?![\w.:/-])/g;
+const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isPhone(m: string): boolean {
+  const d = m.replace(/\D/g, "");
+  if (d.length < 8 || d.length > 15) return false;
+  if (IPV4_RE.test(m) || ISO_DATE_RE.test(m)) return false;
+  if (m.startsWith("+") || m.includes("(")) return true;
+  return (m.match(/[ .-]/g) ?? []).length >= 2;
+}
+
+const NON_SECRET_AGENT_KEYS = new Set([
+  "AGENT_CUSTOMER_CONTEXT",
+  "AGENT_SERVICE_URL",
+]);
+
+/** Project secrets are the AGENT_* variables plus any variable the config names. */
+export function secretValuesFromEnv(
+  env: Record<string, string | undefined>,
+  referenced: string[],
+): string[] {
+  const names = new Set(referenced);
+  for (const k of Object.keys(env)) {
+    if (k.startsWith("AGENT_") && !NON_SECRET_AGENT_KEYS.has(k)) names.add(k);
+  }
+  return [...names]
+    .map((n) => env[n])
+    .filter((v): v is string => typeof v === "string");
+}
 
 function luhn(digits: string): boolean {
   let sum = 0;
@@ -49,13 +78,13 @@ function redactPii(text: string): string {
     .replace(IBAN_RE, (m) => (ibanValid(m) ? "[redacted:iban]" : m))
     .replace(CARD_RE, (m) => {
       const digits = m.replace(/[ -]/g, "");
-      return digits.length >= 13 && digits.length <= 19 && luhn(digits)
+      return [15, 16, 19].includes(digits.length) &&
+        "3456".includes(digits[0]) &&
+        luhn(digits)
         ? "[redacted:card]"
         : m;
     })
-    .replace(PHONE_RE, (m) =>
-      m.replace(/\D/g, "").length >= 8 ? "[redacted:phone]" : m,
-    );
+    .replace(PHONE_RE, (m) => (isPhone(m) ? "[redacted:phone]" : m));
 }
 
 export interface Redactor {

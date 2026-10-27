@@ -10,7 +10,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Added
 
-- An LLM agent writes one `llm.tool.call` line to the project's agent logs for every tool call (project service, MCP server or custom tool): tool name, source, input, output, error flag and duration, with the turn and the model's call id. Input and output are cut to 2048 characters.
+- An LLM agent writes one `llm.tool.call` line to the project's agent logs for every tool call (project service, MCP server, custom tool, a call answered by the `onToolCall` hook, or a call to a tool name that does not exist; `kind` is `service`, `mcp`, `custom`, `hook` or `unknown`): tool name, source, input, output, error flag and duration, with the turn and the model's call id. Input and output are cut to 2048 characters.
 - Tool-call lines are redacted by default: values of the agent's secrets, values under keys such as `password`, `token`, `apiKey` or `authorization`, and emails, phone numbers, card numbers and IBANs are replaced. Set `"toolCallLogs": "full"` in `voicethere.llm.json` to keep personal data in the line (secret values are still removed), or `"off"` to write no line.
 
 ## [0.16.0] - 2026-10-27

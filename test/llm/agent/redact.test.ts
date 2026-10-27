@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createRedactor } from "../../../src/llm/agent/redact.js";
+import {
+  createRedactor,
+  secretValuesFromEnv,
+} from "../../../src/llm/agent/redact.js";
 
 const SECRET = "sk-live-abcdef123456";
 
@@ -74,5 +77,59 @@ describe("createRedactor", () => {
 
   it("does not redact PII in full mode", () => {
     expect(red("full").redact("a@b.com")).toBe("a@b.com");
+  });
+
+  it("leaves timestamps, ids and IPs alone", () => {
+    for (const v of [
+      "2026-10-27T12:34:56.789Z",
+      "on 2026-10-27 at 12:00",
+      "1761571200000",
+      "1761571200000000",
+      "550e8400-e29b-41d4-a716-446655440000",
+      "order 12345678",
+      "192.168.100.200",
+      "1234.5678",
+      "4111111111111112",
+    ]) {
+      expect(red().redact(v)).toBe(v);
+    }
+  });
+
+  it("redacts formatted phones", () => {
+    expect(red().redact("+49 30 1234567")).toBe("[redacted:phone]");
+    expect(red().redact("+14155552671")).toBe("[redacted:phone]");
+    expect(red().redact("call (415) 555-2671 now")).toBe(
+      "call [redacted:phone] now",
+    );
+    expect(red().redact("415 555 2671")).toContain("[redacted:phone]");
+    expect(red().redact("415.555.2671")).toContain("[redacted:phone]");
+  });
+
+  it("redacts cards", () => {
+    for (const v of [
+      "4111 1111 1111 1111",
+      "4111-1111-1111-1111",
+      "378282246310005",
+    ]) {
+      expect(red().redact(v)).toBe("[redacted:card]");
+    }
+  });
+
+  it("secret values come from AGENT_* and referenced names only", () => {
+    const values = secretValuesFromEnv(
+      {
+        NODE_ENV: "production",
+        SESSION_ID: "6f1c2a9e-0000-4000-8000-000000000001",
+        AGENT_SERVICE_URL: "http://svc.local:8080",
+        AGENT_X_KEY: "abcdefgh12",
+        MY_KEY: "zzzzzzzz9",
+      },
+      ["MY_KEY"],
+    );
+    expect([...values].sort()).toEqual(["abcdefgh12", "zzzzzzzz9"]);
+    const r = createRedactor({ secretValues: values, mode: "redacted" });
+    expect(r.redact("production abcdefgh12")).toBe(
+      "production [redacted:secret]",
+    );
   });
 });

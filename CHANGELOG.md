@@ -6,6 +6,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-27
+
+### Added
+
+- The `llm-agent` template ships a sample `knowledge/about.md` and a `knowledge` block in `voicethere.llm.json` with `"store": "off"`. Set `"store": "redis"` (Project Redis) or `"supabase"` to turn retrieval on; the template README explains the three steps.
+- New product template `llm-mcp-service`: the `llm-agent` template with the project service as its tool source (`toolSources: [{ "kind": "service", "path": "/mcp" }]`), plus a README section for external MCP servers (`kind: "mcp"` with bearer auth).
+- Example MCP server `services/mcp-example` (streamable HTTP at `/mcp`, `GET /healthz`, tools `get_plan_price` with sample data and `get_server_time`), published on each release as the public image `ghcr.io/voicethere/mcp-example-service:<version>` and `:latest`. Set it as the project service image, port 8080, health check `/healthz`.
+- `@voicethere/agent/llm` exports `createLlmEmbedder` and `withEmbedBounds`: text embeddings for `openai`, `openrouter` and `gemini` (the OpenAI and Gemini provider modules gain `createEmbedder`). Calls are bounded (15 s per attempt, two retries, 96 inputs per request), check the vector length and return L2-normalized vectors. `anthropic` throws the new error code `LLM_EMBEDDINGS_UNSUPPORTED`. Also exported: `DEFAULT_EMBEDDING_MODEL` (`text-embedding-3-small`, `gemini-embedding-001`), `DEFAULT_EMBEDDING_DIMS` (512) and the types `LlmEmbedder`, `EmbeddingsRequest`, `EmbeddingsResult`, `EmbedBounds`.
+
+- `@voicethere/agent/llm` exports `createRedisKnowledgeBase` and `chunkMarkdown`: a knowledge base (RAG) on Project Redis 8 vector search. Markdown documents are split by heading into chunks of about 300 words (50-word overlap), embedded with your embedder and stored as a versioned HNSW index (cosine, no TTL). `ensureIndexed()` hashes the documents, model and dimensions and skips embedding when nothing changed; when several workers with the same content start together one builds and the others wait (the build lock is renewed while it runs). Every content version has its own index, so old and new workers of a rolling deploy each search their own version; open knowledge bases send a heartbeat, and `gc()` (also run after a build) drops the index of a version whose workers stopped. `search(query, k)` returns the top chunks with title, source and score and rebuilds the index if it is missing. The index refuses to grow past 80 % of `maxmemory` with `KnowledgeIndexError` code `KB_MEMORY_LIMIT`. Every Redis call is bounded and log lines carry counts and durations only, never chunk or query text. Needs Redis with the Query Engine (Redis 8) and `ioredis` in your agent. Also exported: `KnowledgeIndexError` and the types `KnowledgeBase`, `KnowledgeDocument`, `KnowledgeHit`, `IndexReport`, `RedisKnowledgeBaseOptions`.
+
+- `@voicethere/agent/llm` exports `createSupabaseKnowledgeBase`, `searchKnowledgeTool` and a `knowledge` block for `voicethere.llm.json`. `createSupabaseKnowledgeBase` calls your own Supabase project's `match_documents` function (the one from the Supabase pgvector guide) over REST: `POST {url}/rest/v1/rpc/match_documents` with `apikey` and bearer headers, bounded to 8 s with one retry on a 5xx or network error. Errors carry the HTTP status only (`KB_SUPABASE_ERROR`), never the key, body or query. With Project Redis the results are cached for 10 minutes (the cache keys carry a TTL, so `volatile-lru` can evict them); a cache failure never fails a search. `searchKnowledgeTool(kb)` is the `search_knowledge` tool the model calls. In `voicethere.llm.json`, `knowledge: { store: "redis" | "supabase" | "off", topK, embeddings, redis, supabase }` wires it up: `createLlmAgent({ knowledge: { documents } })` indexes `store: "redis"` on start (in the background) and registers the tool; without `AGENT_REDIS_URL` or documents it logs once and registers no tool. `anthropic` is rejected as an embeddings provider. The JSON schema gains the `knowledge` block.
+
+### Changed
+
+- `prettier` is pinned to an exact version in `devDependencies`.
+
 ## [0.17.0] - 2026-10-27
 
 ### Added

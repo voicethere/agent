@@ -74,6 +74,8 @@ Each folder has its own README. Summary:
 | `spatial-showcase`  | `spatial-showcase/`  | Orbit / soundboard / proximity                                    |
 | `webhooks`          | `webhooks/`          | Inbound HMAC webhooks                                             |
 | `webhooks-redis`    | `webhooks-redis/`    | Webhooks plus Redis counter                                       |
+| `llm-agent`         | `llm-agent/`         | LLM voice and chat agent, tools, MCP, optional knowledge (RAG)    |
+| `llm-mcp-service`   | `llm-mcp-service/`   | `llm-agent` plus a project service that serves MCP tools          |
 
 ## E2e templates
 

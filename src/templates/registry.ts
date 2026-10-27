@@ -231,12 +231,42 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
       "llm-agent/tools.ts",
       "llm-agent/hooks.ts",
       "llm-agent/md.d.ts",
+      "llm-agent/knowledge/about.md",
     ],
     npmDependencies: {
       openai: "^7.43.0",
       "@anthropic-ai/sdk": "^1.3.0",
       "@google/genai": "^2.31.0",
       "@modelcontextprotocol/sdk": "^1.32.2",
+      ioredis: "^5.11.1",
+    },
+  },
+  {
+    id: "llm-mcp-service",
+    entry: "llm-mcp-service/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    title: "LLM agent + MCP tool service",
+    summary:
+      "LLM agent that calls tools served by a project service over MCP, plus an example server image.",
+    category: "voice-data",
+    description:
+      "Same LLM agent as llm-agent, wired to the project service as its tool source (toolSources kind service, path /mcp). The README names the public example MCP server image to run as the service and shows how to add an external MCP server.",
+    sourceFiles: [
+      "llm-mcp-service/agent.ts",
+      "llm-mcp-service/voicethere.llm.json",
+      "llm-mcp-service/prompt.md",
+      "llm-mcp-service/tools.ts",
+      "llm-mcp-service/hooks.ts",
+      "llm-mcp-service/md.d.ts",
+      "llm-mcp-service/knowledge/about.md",
+    ],
+    npmDependencies: {
+      openai: "^7.43.0",
+      "@anthropic-ai/sdk": "^1.3.0",
+      "@google/genai": "^2.31.0",
+      "@modelcontextprotocol/sdk": "^1.32.2",
+      ioredis: "^5.11.1",
     },
   },
   {

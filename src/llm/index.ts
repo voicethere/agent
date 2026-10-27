@@ -1,10 +1,19 @@
-export { createLlmProvider } from "./providers.js";
+export { createLlmProvider, createLlmEmbedder } from "./providers.js";
+export {
+  withEmbedBounds,
+  DEFAULT_EMBEDDING_DIMS,
+  DEFAULT_EMBEDDING_MODEL,
+} from "./bounded-embedder.js";
+export type { EmbedBounds } from "./bounded-embedder.js";
 export type { LlmProviderConfig } from "./providers.js";
 export { LLM_PROVIDERS, resolveModel } from "./catalog.js";
 export { withStreamBounds, toLlmError } from "./bounded-provider.js";
 export type { StreamBounds } from "./bounded-provider.js";
 export { LlmProviderError } from "./types.js";
 export type {
+  EmbeddingsRequest,
+  EmbeddingsResult,
+  LlmEmbedder,
   LlmErrorCode,
   LlmProviderModule,
   LlmMessage,
@@ -53,6 +62,8 @@ export type {
   LlmAgentFillerSituation,
   LlmAgentFillers,
   LlmAgentGreeting,
+  LlmAgentKnowledgeConfig,
+  LlmAgentKnowledgeEmbeddings,
   LlmAgentMcpAuth,
   LlmAgentMcpSource,
   LlmAgentServiceSource,
@@ -64,3 +75,26 @@ export { CALL_AGENT_PROMPT_GUIDANCE } from "./agent/prompt-guidance.js";
 export { SentenceSplitter } from "./agent/sentence-splitter.js";
 export { ConversationHistory } from "./agent/history.js";
 export type { LlmAgentHooks, TurnContext, TurnSummary } from "./agent/hooks.js";
+export {
+  chunkMarkdown,
+  createRedisKnowledgeBase,
+  createSupabaseKnowledgeBase,
+  KnowledgeIndexError,
+  searchKnowledgeTool,
+} from "./knowledge/index.js";
+export type {
+  ChunkOptions,
+  IndexReport,
+  KnowledgeBase,
+  KnowledgeDocument,
+  KnowledgeHit,
+  KnowledgeIndexErrorCode,
+  KnowledgeLimits,
+  KnowledgeLogger,
+  KnowledgeRedisClient,
+  MarkdownChunk,
+  RedisKnowledgeBaseOptions,
+  SearchKnowledgeToolOptions,
+  SupabaseKnowledgeBaseOptions,
+  SupabaseKnowledgeCacheOptions,
+} from "./knowledge/index.js";

@@ -424,6 +424,128 @@ Runners that do not advertise speak control (`isSpeakControlAvailable(ctx)` is `
 
 `SessionSpeakController` implements the parent-side rules: speak results, cancellation, flushing queued speaks on barge-in, and the interruption report. It has no transport, so the VoiceThere runner and local tooling both drive it with the same code.
 
+## Embeddings (`@voicethere/agent/llm`)
+
+`createLlmEmbedder` returns an embedder for providers that publish an embeddings API: `openai`, `openrouter` and `gemini`. `anthropic` throws `LLM_EMBEDDINGS_UNSUPPORTED` (Anthropic has no embeddings API). Calls are bounded: 15 s per attempt, two retries on rate limits, 5xx and timeouts, 96 inputs per request. Returned vectors are L2-normalized (unit length) for every provider, so cosine similarity and inner product give the same ranking. Error messages never contain the input text.
+
+```ts
+import {
+  createLlmEmbedder,
+  DEFAULT_EMBEDDING_DIMS,
+  DEFAULT_EMBEDDING_MODEL,
+} from "@voicethere/agent/llm";
+import { openai } from "@voicethere/agent/llm/openai";
+
+const embedder = createLlmEmbedder({ provider: "openai", apiKey }, [openai]);
+const { vectors } = await embedder.embed({
+  model: DEFAULT_EMBEDDING_MODEL.openai,
+  inputs: ["hello"],
+  dimensions: DEFAULT_EMBEDDING_DIMS, // 512
+});
+```
+
+## Knowledge base (RAG) on Project Redis (`@voicethere/agent/llm`)
+
+`createRedisKnowledgeBase` indexes Markdown documents in the project's Redis (Redis 8 Query Engine, HNSW vector index, cosine) and returns the chunks closest to a question. It needs `ioredis` in your agent and an embedder from `createLlmEmbedder`. Redis 7 has no vector search: the call fails with `KB_REDIS_ERROR`.
+
+```ts
+import {
+  createLlmEmbedder,
+  createRedisKnowledgeBase,
+  DEFAULT_EMBEDDING_DIMS,
+  DEFAULT_EMBEDDING_MODEL,
+} from "@voicethere/agent/llm";
+import { openai } from "@voicethere/agent/llm/openai";
+import pricing from "./knowledge/pricing.md";
+
+const kb = createRedisKnowledgeBase({
+  redisUrl: process.env.AGENT_REDIS_URL,
+  documents: [{ id: "pricing.md", text: pricing }],
+  embedder: createLlmEmbedder({ provider: "openai", apiKey }, [openai]),
+  model: DEFAULT_EMBEDDING_MODEL.openai,
+  dims: DEFAULT_EMBEDDING_DIMS,
+});
+await kb.ensureIndexed(); // embeds only when the documents, model or dims changed
+const hits = await kb.search("how much is the starter plan?", 4);
+// [{ text, title: "Pricing › Plans", source: "pricing.md", score }]
+```
+
+- Documents are split on `#`..`###` headings into chunks of about 300 words with 50 words of overlap. The same content (documents, model, dimensions) is not embedded twice, also across workers: one worker builds, the others wait and report `built-by-other-worker`. Each content version has its own index (`kb:<namespace>:idx:<hash>`), so during a rolling deploy old and new workers each search their own version. Open knowledge bases keep their version alive with a heartbeat; an index whose workers stopped is dropped about 90 s later (`gc()` forces a pass).
+- Vectors have no TTL, so `maxmemory-policy volatile-lru` never evicts them. The index refuses to grow past 80 % of `maxmemory` (`KB_MEMORY_LIMIT`). Plan on about 6.5 KB per 300-word chunk at 512 dimensions, which puts roughly 30,000 chunks in a 256 MB Project Redis (estimate; measured figures follow). Two versions side by side during a deploy both count.
+- Use a namespace per knowledge set (`namespace` option). Keys are `kb:<namespace>:...`.
+- Log lines carry the namespace, chunk count and durations, never chunk or query text.
+
+### Config block and the `search_knowledge` tool
+
+An LLM agent turns retrieval on with a `knowledge` block in `voicethere.llm.json`:
+
+```json
+{
+  "knowledge": {
+    "store": "redis",
+    "topK": 4,
+    "embeddings": { "provider": "openai", "dimensions": 512 },
+    "redis": { "namespace": "default" }
+  }
+}
+```
+
+`store` is `redis`, `supabase` or `off`. `embeddings.provider` is `openai`, `gemini` or `openrouter` (Anthropic has no embeddings API); `apiKeySecret` defaults to the top-level one when the provider is the same, and must be an `AGENT_*` secret name. Register the embeddings provider module in `providers`. With `store: "redis"` pass the documents to `createLlmAgent({ knowledge: { documents: [{ id: "pricing.md", text: pricing }] } })`; the agent needs `AGENT_REDIS_URL` (Project Redis) and indexes in the background on start. The model gets one tool, `search_knowledge({ query, k })`, which returns numbered chunks with title and score.
+
+The `llm-agent` template ships this block with `"store": "off"` and a sample `knowledge/about.md`, so turning retrieval on is one edit. The `llm-mcp-service` template adds a project service as an MCP tool source; its example server is the public image `ghcr.io/voicethere/mcp-example-service`.
+
+### Your own Supabase pgvector table
+
+With `store: "supabase"` the agent searches a table in **your** Supabase project; VoiceThere never stores your vectors. Run this SQL in your own project, then fill the table yourself:
+
+```sql
+create extension if not exists vector;
+
+create table documents (
+  id bigint primary key generated always as identity,
+  content text not null,
+  embedding vector(512)
+);
+
+create or replace function match_documents (
+  query_embedding vector(512),
+  match_threshold float,
+  match_count int
+)
+returns table (id bigint, content text, similarity float)
+language sql stable
+as $$
+  select
+    documents.id,
+    documents.content,
+    1 - (documents.embedding <=> query_embedding) as similarity
+  from documents
+  where 1 - (documents.embedding <=> query_embedding) > match_threshold
+  order by documents.embedding <=> query_embedding asc
+  limit least(match_count, 200);
+$$;
+```
+
+It is adapted from the two Supabase guides ([Semantic search](https://supabase.com/docs/guides/ai/semantic-search) and [Vector columns](https://supabase.com/docs/guides/ai/vector-columns)). The returns clause `table (id bigint, content text, similarity float)` is required, and the vector size must match `knowledge.embeddings.dimensions` (512 by default).
+
+```json
+{
+  "knowledge": {
+    "store": "supabase",
+    "embeddings": { "provider": "openai", "dimensions": 512 },
+    "supabase": {
+      "urlSecret": "AGENT_SUPABASE_URL",
+      "keySecret": "AGENT_SUPABASE_KEY",
+      "rpc": "match_documents",
+      "matchThreshold": 0.5,
+      "cacheTtlSeconds": 600
+    }
+  }
+}
+```
+
+The agent calls `POST {AGENT_SUPABASE_URL}/rest/v1/rpc/match_documents` with the arguments `query_embedding`, `match_threshold` and `match_count` and reads `id`, `content` and `similarity` from each row. Use a key that may only execute that function (a restricted role), not a service-role key. With Project Redis enabled, identical questions are answered from a Redis cache for `cacheTtlSeconds` (10 minutes by default; cache entries have a TTL so they are evicted first when memory is full). `createSupabaseKnowledgeBase` and `searchKnowledgeTool` are exported for custom agents.
+
 ## Multiplayer / shared state
 
 Each end-user connection must call **`startSession()`** once — one orchestrator session id per client (one signaling room per client). Do **not** join multiple browsers to the same session credentials.

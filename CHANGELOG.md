@@ -8,7 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Added
 
-- `@voicethere/agent/llm` exports `createLlmEmbedder` and `withEmbedBounds`: text embeddings for `openai`, `openrouter` and `gemini` (the OpenAI and Gemini provider modules gain `createEmbedder`). Calls are bounded (15 s per attempt, two retries, 96 inputs per request) and check the vector length. `anthropic` throws the new error code `LLM_EMBEDDINGS_UNSUPPORTED`. Also exported: `DEFAULT_EMBEDDING_MODEL` (`text-embedding-3-small`, `gemini-embedding-001`), `DEFAULT_EMBEDDING_DIMS` (512) and the types `LlmEmbedder`, `EmbeddingsRequest`, `EmbeddingsResult`, `EmbedBounds`.
+- `@voicethere/agent/llm` exports `createLlmEmbedder` and `withEmbedBounds`: text embeddings for `openai`, `openrouter` and `gemini` (the OpenAI and Gemini provider modules gain `createEmbedder`). Calls are bounded (15 s per attempt, two retries, 96 inputs per request) check the vector length and return L2-normalized vectors. `anthropic` throws the new error code `LLM_EMBEDDINGS_UNSUPPORTED`. Also exported: `DEFAULT_EMBEDDING_MODEL` (`text-embedding-3-small`, `gemini-embedding-001`), `DEFAULT_EMBEDDING_DIMS` (512) and the types `LlmEmbedder`, `EmbeddingsRequest`, `EmbeddingsResult`, `EmbedBounds`.
 
 ## [0.17.0] - 2026-10-27
 

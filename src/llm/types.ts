@@ -73,7 +73,7 @@ export interface EmbeddingsRequest {
 }
 
 export interface EmbeddingsResult {
-  /** One vector per input, in input order. */
+  /** One vector per input, in input order. Vectors are L2-normalized (unit length), so cosine and inner product agree. */
   vectors: number[][];
   model: string;
   dims: number;

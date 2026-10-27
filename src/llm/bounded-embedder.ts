@@ -107,15 +107,9 @@ export function withEmbedBounds(
     inputs: string[],
   ): Promise<EmbeddingsResult> {
     for (let n = 0; ; n++) {
+      let res: EmbeddingsResult;
       try {
-        const res = await attemptOnce(inner, { ...req, inputs }, timeoutMs);
-        if (res.vectors.length !== inputs.length) {
-          throw new LlmProviderError(
-            "LLM_PROVIDER_ERROR",
-            `${inner.id} embedding count mismatch`,
-          );
-        }
-        return res;
+        res = await attemptOnce(inner, { ...req, inputs }, timeoutMs);
       } catch (err) {
         const e = toLlmError(err, inner.id);
         if (!retryable(e) || n >= retries || req.signal?.aborted) throw e;
@@ -126,7 +120,22 @@ export function withEmbedBounds(
             `${inner.id} embeddings aborted`,
           );
         }
+        continue;
       }
+      // A malformed 200 is not retried: another attempt would be billed again.
+      if (res.vectors.length !== inputs.length) {
+        throw new LlmProviderError(
+          "LLM_PROVIDER_ERROR",
+          `${inner.id} embedding count mismatch`,
+        );
+      }
+      if (res.vectors.some((v) => v.length === 0)) {
+        throw new LlmProviderError(
+          "LLM_PROVIDER_ERROR",
+          `${inner.id} embedding is empty`,
+        );
+      }
+      return res;
     }
   }
 
@@ -155,6 +164,18 @@ export function withEmbedBounds(
           "LLM_PROVIDER_ERROR",
           `${inner.id} embedding dims mismatch`,
         );
+      }
+      for (const v of vectors) {
+        let sum = 0;
+        for (const x of v) sum += x * x;
+        const norm = Math.sqrt(sum);
+        if (!(norm > 0)) {
+          throw new LlmProviderError(
+            "LLM_PROVIDER_ERROR",
+            `${inner.id} embedding is all zeros`,
+          );
+        }
+        for (let i = 0; i < v.length; i++) v[i] /= norm;
       }
       return {
         vectors,

@@ -426,7 +426,7 @@ Runners that do not advertise speak control (`isSpeakControlAvailable(ctx)` is `
 
 ## Embeddings (`@voicethere/agent/llm`)
 
-`createLlmEmbedder` returns an embedder for providers that publish an embeddings API: `openai`, `openrouter` and `gemini`. `anthropic` throws `LLM_EMBEDDINGS_UNSUPPORTED` (Anthropic has no embeddings API). Calls are bounded: 15 s per attempt, two retries on rate limits, 5xx and timeouts, 96 inputs per request. Error messages never contain the input text.
+`createLlmEmbedder` returns an embedder for providers that publish an embeddings API: `openai`, `openrouter` and `gemini`. `anthropic` throws `LLM_EMBEDDINGS_UNSUPPORTED` (Anthropic has no embeddings API). Calls are bounded: 15 s per attempt, two retries on rate limits, 5xx and timeouts, 96 inputs per request. Returned vectors are L2-normalized (unit length) for every provider, so cosine similarity and inner product give the same ranking. Error messages never contain the input text.
 
 ```ts
 import {

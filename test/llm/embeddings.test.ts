@@ -75,7 +75,9 @@ const openaiReply = (inputs: string[], dims = 4) => ({
     .map((_, index) => ({
       object: "embedding",
       index,
-      embedding: vec(index, dims),
+      embedding: Array.from({ length: dims }, (_, i) =>
+        i === index % dims ? 1 : 0.5,
+      ),
     }))
     .reverse(),
   usage: { prompt_tokens: inputs.length * 2, total_tokens: inputs.length * 2 },
@@ -120,7 +122,9 @@ describe("embeddings", () => {
       dimensions: 4,
       encoding_format: "float",
     });
-    expect(res.vectors.map((v) => v[0])).toEqual([0, 1, 2]);
+    expect(res.vectors.map((v) => v.indexOf(Math.max(...v)))).toEqual([
+      0, 1, 2,
+    ]);
     expect(res.dims).toBe(4);
     expect(res.inputTokens).toBe(6);
   });
@@ -178,7 +182,7 @@ describe("embeddings", () => {
         data: (body.input as string[]).map((s, index) => ({
           object: "embedding",
           index,
-          embedding: [Number(s)],
+          embedding: [1, Number(s)],
         })),
         usage: { prompt_tokens: 1, total_tokens: 1 },
       },
@@ -190,7 +194,9 @@ describe("embeddings", () => {
     const inputs = Array.from({ length: 200 }, (_, i) => String(i));
     const res = await e.embed({ model: "m", inputs });
     expect(mock.requests.map((r) => r.body.input.length)).toEqual([96, 96, 8]);
-    expect(res.vectors.map((v) => v[0])).toEqual(inputs.map(Number));
+    expect(res.vectors.map((v) => Math.round(v[1] / v[0]))).toEqual(
+      inputs.map(Number),
+    );
     expect(res.inputTokens).toBe(3);
   });
 
@@ -297,6 +303,61 @@ describe("embeddings", () => {
       .catch((e) => e);
     expect(err.code).toBe("LLM_PROVIDER_ERROR");
     expect(err.message).not.toContain(SENTINEL);
+  });
+
+  const one = (embedding: number[]) => ({
+    json: {
+      object: "list",
+      model: "m",
+      data: [{ object: "embedding", index: 0, embedding }],
+      usage: { prompt_tokens: 1, total_tokens: 1 },
+    },
+  });
+
+  it("count mismatch fails fast without retry", async () => {
+    mock = await startServer(() => ({ json: openaiReply(["only-one"]) }));
+    const err = await make(mock.baseUrl)
+      .embed({ model: "m", inputs: ["a", "b"] })
+      .catch((e) => e);
+    expect(err.code).toBe("LLM_PROVIDER_ERROR");
+    expect(err.message).toContain("count mismatch");
+    expect(mock.requests).toHaveLength(1);
+  });
+
+  it("normalizes vectors to unit length", async () => {
+    mock = await startServer(() => one([3, 4]));
+    const res = await make(mock.baseUrl).embed({ model: "m", inputs: ["a"] });
+    expect(res.vectors[0][0]).toBeCloseTo(0.6, 10);
+    expect(res.vectors[0][1]).toBeCloseTo(0.8, 10);
+  });
+
+  it("zero vector fails fast", async () => {
+    mock = await startServer(() => one([0, 0]));
+    const err = await make(mock.baseUrl)
+      .embed({ model: "m", inputs: ["a"] })
+      .catch((e) => e);
+    expect(err.code).toBe("LLM_PROVIDER_ERROR");
+    expect(err.message).toContain("all zeros");
+    expect(mock.requests).toHaveLength(1);
+  });
+
+  it("gemini: embedding without values fails fast as empty", async () => {
+    mock = await startServer(() => ({ json: { embeddings: [{}] } }));
+    const e = createLlmEmbedder(
+      {
+        provider: "gemini",
+        apiKey: "k",
+        baseUrl: mock.baseUrl,
+        embedBounds: { retryDelayMs: 1, timeoutMs: 2000 },
+      },
+      [gemini],
+    );
+    const err = await e
+      .embed({ model: "gemini-embedding-001", inputs: ["a"] })
+      .catch((x) => x);
+    expect(err.code).toBe("LLM_PROVIDER_ERROR");
+    expect(err.message).toContain("empty");
+    expect(mock.requests).toHaveLength(1);
   });
 
   it("withEmbedBounds: a 4xx other than the mapped ones is not retried", async () => {

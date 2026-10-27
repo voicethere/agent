@@ -34,6 +34,13 @@ const done = (text: string, toolCalls: LlmToolCall[] = []): Step => ({
   toolCalls,
   usage: { inputTokens: 3, outputTokens: 4 },
 });
+const doneWithState = (text: string, providerState: unknown): Step => ({
+  type: "done",
+  stopReason: "end",
+  text,
+  toolCalls: [],
+  providerState,
+});
 const call = (id: string, name: string, input: unknown = {}): LlmToolCall => ({
   id,
   name,
@@ -183,6 +190,69 @@ describe("createLlmAgent", () => {
       status: "played",
       playedMs: 100,
     });
+
+  it("never speaks or keeps a <thinking> block, and counts the stripped characters", async () => {
+    const full =
+      "<thinking> The user wants a word. </thinking> Sorry, I cannot share it.";
+    const { requests } = await boot([
+      [
+        delta("<thi"),
+        delta("nking> The user wants a word. </thin"),
+        delta("king> Sorry, I cannot "),
+        delta("share it."),
+        done(full),
+      ],
+      [delta("Fine."), done("Fine.")],
+    ]);
+    say("hi");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    expect(speaks().map((m) => m.text)).toEqual(["Sorry, I cannot share it."]);
+    expect(summaries[0].assistantText).toBe("Sorry, I cannot share it.");
+    say("again");
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const prior = requests[1].messages.find((m) => m.role === "assistant");
+    expect(prior && "text" in prior ? prior.text.trim() : "").toBe(
+      "Sorry, I cannot share it.",
+    );
+    const turnLog = sent("log").find((m) => m.message === "llm turn");
+    expect(JSON.stringify(turnLog)).toContain(
+      `"thinkingCharsStripped":${"<thinking> The user wants a word. </thinking>".length}`,
+    );
+    expect(JSON.stringify(sent())).not.toContain("The user wants a word");
+  });
+
+  it("drops providerState when a thinking block was stripped", async () => {
+    const full = "<thinking>x</thinking> Hi.";
+    const { requests } = await boot([
+      [delta(full), doneWithState(full, [{ type: "text", text: full }])],
+      [delta("Ok."), done("Ok.")],
+    ]);
+    say("hi");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    say("again");
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const prior = requests[1].messages.find((m) => m.role === "assistant");
+    expect(prior && "text" in prior ? prior.text.trim() : "").toBe("Hi.");
+    expect(
+      prior && "providerState" in prior ? prior.providerState : undefined,
+    ).toBeUndefined();
+  });
+
+  it("keeps providerState when nothing was stripped", async () => {
+    const state = [{ type: "text", text: "Hi." }];
+    const { requests } = await boot([
+      [delta("Hi."), doneWithState("Hi.", state)],
+      [delta("Ok."), done("Ok.")],
+    ]);
+    say("hi");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    say("again");
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const prior = requests[1].messages.find((m) => m.role === "assistant");
+    expect(
+      prior && "providerState" in prior ? prior.providerState : undefined,
+    ).toEqual(state);
+  });
 
   it("a final streams sentences as speaks with one turnId", async () => {
     const { requests } = await boot([

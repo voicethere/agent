@@ -49,6 +49,7 @@ import type { LlmAgentConfig } from "./config.js";
 import { ConversationHistory } from "./history.js";
 import type { LlmAgentHooks, TurnContext, TurnSummary } from "./hooks.js";
 import { SentenceSplitter } from "./sentence-splitter.js";
+import { ThinkingStripper, stripThinking } from "./thinking-stripper.js";
 
 const D = LLM_AGENT_CONFIG_DEFAULTS;
 const CANCEL_SETTLE_MS = 2_000;
@@ -124,6 +125,8 @@ interface TurnState {
   pendingChars: number;
   coalesceTimer?: ReturnType<typeof setTimeout>;
   fallbackSpoken: boolean;
+  /** Characters of `<thinking>` blocks removed from the reply this turn. */
+  thinkingCharsStripped: number;
   status: TurnSummary["status"];
 }
 
@@ -826,6 +829,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     t.roundOpen = true;
     t.roundText = "";
     const splitter = new SentenceSplitter();
+    const stripper = new ThinkingStripper();
     let done: Extract<LlmStreamEvent, { type: "done" }> | undefined;
     const stream = provider!.stream({
       model: resolveModel(config.provider, config.model),
@@ -840,7 +844,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       if (signal.aborted) break;
       if (ev.type === "text_delta") {
         if (t.firstTokenMs === undefined) t.firstTokenMs = now() - t.startedAt;
-        for (const sentence of splitter.push(ev.text)) {
+        for (const sentence of splitter.push(stripper.push(ev.text))) {
           await emitSentence(s, t, ctx, sentence);
         }
       } else {
@@ -854,8 +858,23 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         "stream ended without done",
       );
     }
-    for (const sentence of splitter.end()) {
+    const tail = stripper.end();
+    const sentences = tail
+      ? [...splitter.push(tail), ...splitter.end()]
+      : splitter.end();
+    for (const sentence of sentences) {
       await emitSentence(s, t, ctx, sentence);
+    }
+    t.thinkingCharsStripped += stripper.strippedChars;
+    // History keeps what was spoken, not the model's private reasoning.
+    const cleaned = stripThinking(done.text);
+    if (cleaned.strippedChars > 0) {
+      // Anthropic/Gemini resend providerState instead of text, so drop it when
+      // text was stripped (same as history.replaceAssistantText).
+      const { providerState: _drop, ...rest } = done;
+      done = { ...rest, text: cleaned.text };
+    } else {
+      done = { ...done, text: cleaned.text };
     }
     flushSpeech(s, t);
     if (done.usage) {
@@ -1096,6 +1115,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         firstTokenMs: summary.firstTokenMs,
         inputTokens: summary.inputTokens,
         outputTokens: summary.outputTokens,
+        thinkingCharsStripped: t.thinkingCharsStripped,
       },
       s.sessionId,
     );
@@ -1126,6 +1146,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       pending: [],
       pendingChars: 0,
       fallbackSpoken: false,
+      thinkingCharsStripped: 0,
       status: "completed",
     };
     const ctx: TurnContext = {

@@ -10,7 +10,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Added
 
-- When an LLM agent connects to a tool source (the project service or an MCP server), it writes one `llm tools discovered` line to the project's agent logs with every tool the source offers: name, a description cut to 120 characters and whether the `allow` / `deny` lists expose it. The line is written again only when the tool list changes.
+- When an LLM agent connects to a tool source (the project service or an MCP server), it writes one `llm tools discovered` line to the project's agent logs with the tools the source offers (as many as fit the agent log size limit; `truncated` is set when some are left out): name, a description cut to 120 characters and whether the `allow` / `deny` lists expose it. The line is written again only when the tool list changes.
 
 ## [0.15.0] - 2026-10-27
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   buildDiscoveryFields,
@@ -101,18 +101,15 @@ describe("tool discovery log", () => {
 
   it("logs again when the server's tools change", async () => {
     const { srv, discovered } = await run();
+    await srv.standaloneSseOpen();
     srv.servers[0].registerTool(
       "extra",
       { description: "new tool", inputSchema: { x: z.string() } },
       async () => ({ content: [{ type: "text", text: "x" }] }),
     );
-    // The client opens its notification stream right after ready, so the
-    // first notification can race it; sending again is harmless.
-    const deadline = Date.now() + 5_000;
-    while (Date.now() < deadline && discovered().length < 2) {
-      srv.servers[0].sendToolListChanged();
-      await new Promise((r) => setTimeout(r, 100));
-    }
+    await vi.waitFor(() => expect(discovered()).toHaveLength(2), {
+      timeout: 5_000,
+    });
     expect(discovered()).toHaveLength(2);
     const f = discovered()[1].fields as unknown as Fields;
     expect(f.tools.map((t) => t.name)).toContain("extra");

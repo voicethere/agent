@@ -15,6 +15,8 @@ export interface TestMcpServer {
   url: string;
   port: number;
   servers: McpServer[];
+  /** Resolves once a client's standalone GET SSE stream has been accepted (200). */
+  standaloneSseOpen(): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -61,6 +63,10 @@ function buildServer(headers: IncomingMessage["headers"]): McpServer {
 export async function startTestMcpServer(port = 0): Promise<TestMcpServer> {
   const transports = new Map<string, StreamableHTTPServerTransport>();
   const servers: McpServer[] = [];
+  let resolveSse!: () => void;
+  const sseOpen = new Promise<void>((resolve) => {
+    resolveSse = resolve;
+  });
   const http: Server = createServer(
     (req: IncomingMessage, res: ServerResponse) => {
       void (async () => {
@@ -85,6 +91,14 @@ export async function startTestMcpServer(port = 0): Promise<TestMcpServer> {
             return;
           }
         }
+        if (req.method === "GET") {
+          const orig = res.writeHead.bind(res);
+          res.writeHead = ((...a: Parameters<typeof res.writeHead>) => {
+            const r = orig(...a);
+            if (a[0] === 200) resolveSse();
+            return r;
+          }) as typeof res.writeHead;
+        }
         await transport.handleRequest(req, res, body);
       })();
     },
@@ -95,6 +109,7 @@ export async function startTestMcpServer(port = 0): Promise<TestMcpServer> {
     url: `http://127.0.0.1:${actual}/mcp`,
     port: actual,
     servers,
+    standaloneSseOpen: () => sseOpen,
     stop: () =>
       new Promise<void>((resolve) => {
         http.closeAllConnections();

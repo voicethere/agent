@@ -73,6 +73,11 @@ export type {
 } from "./agent/config.js";
 export { CALL_AGENT_PROMPT_GUIDANCE } from "./agent/prompt-guidance.js";
 export { SentenceSplitter } from "./agent/sentence-splitter.js";
+export {
+  ThinkingStripper,
+  stripThinking,
+  THINKING_TAGS,
+} from "./agent/thinking-stripper.js";
 export { ConversationHistory } from "./agent/history.js";
 export type { LlmAgentHooks, TurnContext, TurnSummary } from "./agent/hooks.js";
 export {

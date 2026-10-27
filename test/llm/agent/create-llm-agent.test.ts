@@ -184,6 +184,36 @@ describe("createLlmAgent", () => {
       playedMs: 100,
     });
 
+  it("never speaks or keeps a <thinking> block, and counts the stripped characters", async () => {
+    const full =
+      "<thinking> The user wants a word. </thinking> Sorry, I cannot share it.";
+    const { requests } = await boot([
+      [
+        delta("<thi"),
+        delta("nking> The user wants a word. </thin"),
+        delta("king> Sorry, I cannot "),
+        delta("share it."),
+        done(full),
+      ],
+      [delta("Fine."), done("Fine.")],
+    ]);
+    say("hi");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    expect(speaks().map((m) => m.text)).toEqual(["Sorry, I cannot share it."]);
+    expect(summaries[0].assistantText).toBe("Sorry, I cannot share it.");
+    say("again");
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const prior = requests[1].messages.find((m) => m.role === "assistant");
+    expect(prior && "text" in prior ? prior.text.trim() : "").toBe(
+      "Sorry, I cannot share it.",
+    );
+    const turnLog = sent("log").find((m) => m.message === "llm turn");
+    expect(JSON.stringify(turnLog)).toContain(
+      `"thinkingCharsStripped":${"<thinking> The user wants a word. </thinking>".length}`,
+    );
+    expect(JSON.stringify(sent())).not.toContain("The user wants a word");
+  });
+
   it("a final streams sentences as speaks with one turnId", async () => {
     const { requests } = await boot([
       [

@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-27
+
+### Fixed
+
+- An LLM agent no longer speaks or shows `<thinking>...</thinking>` blocks. The blocks are removed from chat messages, speech and the history the model sees on the next turn, also when a tag arrives split over several chunks; an opening tag without a closing tag drops the rest of that reply. The `llm turn` log line carries `thinkingCharsStripped`, a count only, never the text.
+
 ## [0.18.0] - 2026-10-27
 
 ### Added

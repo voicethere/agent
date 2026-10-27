@@ -867,7 +867,15 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     }
     t.thinkingCharsStripped += stripper.strippedChars;
     // History keeps what was spoken, not the model's private reasoning.
-    done = { ...done, text: stripThinking(done.text).text };
+    const cleaned = stripThinking(done.text);
+    if (cleaned.strippedChars > 0) {
+      // Anthropic/Gemini resend providerState instead of text, so drop it when
+      // text was stripped (same as history.replaceAssistantText).
+      const { providerState: _drop, ...rest } = done;
+      done = { ...rest, text: cleaned.text };
+    } else {
+      done = { ...done, text: cleaned.text };
+    }
     flushSpeech(s, t);
     if (done.usage) {
       if (done.usage.inputTokens !== undefined) {

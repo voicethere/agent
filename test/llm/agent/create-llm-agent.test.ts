@@ -34,6 +34,13 @@ const done = (text: string, toolCalls: LlmToolCall[] = []): Step => ({
   toolCalls,
   usage: { inputTokens: 3, outputTokens: 4 },
 });
+const doneWithState = (text: string, providerState: unknown): Step => ({
+  type: "done",
+  stopReason: "end",
+  text,
+  toolCalls: [],
+  providerState,
+});
 const call = (id: string, name: string, input: unknown = {}): LlmToolCall => ({
   id,
   name,
@@ -212,6 +219,39 @@ describe("createLlmAgent", () => {
       `"thinkingCharsStripped":${"<thinking> The user wants a word. </thinking>".length}`,
     );
     expect(JSON.stringify(sent())).not.toContain("The user wants a word");
+  });
+
+  it("drops providerState when a thinking block was stripped", async () => {
+    const full = "<thinking>x</thinking> Hi.";
+    const { requests } = await boot([
+      [delta(full), doneWithState(full, [{ type: "text", text: full }])],
+      [delta("Ok."), done("Ok.")],
+    ]);
+    say("hi");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    say("again");
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const prior = requests[1].messages.find((m) => m.role === "assistant");
+    expect(prior && "text" in prior ? prior.text.trim() : "").toBe("Hi.");
+    expect(
+      prior && "providerState" in prior ? prior.providerState : undefined,
+    ).toBeUndefined();
+  });
+
+  it("keeps providerState when nothing was stripped", async () => {
+    const state = [{ type: "text", text: "Hi." }];
+    const { requests } = await boot([
+      [delta("Hi."), doneWithState("Hi.", state)],
+      [delta("Ok."), done("Ok.")],
+    ]);
+    say("hi");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    say("again");
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const prior = requests[1].messages.find((m) => m.role === "assistant");
+    expect(
+      prior && "providerState" in prior ? prior.providerState : undefined,
+    ).toEqual(state);
   });
 
   it("a final streams sentences as speaks with one turnId", async () => {

@@ -86,6 +86,8 @@ export interface LlmAgentConfig {
   serviceWaitMs?: number;
   fallbackText?: string;
   speakChatReplies?: boolean;
+  /** Tool-call log lines: `redacted` (default), `full` (secrets still removed) or `off`. */
+  toolCallLogs?: "full" | "redacted" | "off";
 }
 
 export const LLM_AGENT_CONFIG_DEFAULTS = {
@@ -109,6 +111,7 @@ export const LLM_AGENT_CONFIG_DEFAULTS = {
   serviceWaitMs: 20_000,
   fallbackText: "Sorry, something went wrong. Please try again.",
   speakChatReplies: true,
+  toolCallLogs: "redacted",
 } as const;
 
 export interface LlmAgentConfigError {
@@ -418,6 +421,7 @@ const TOP_KEYS = [
   "serviceWaitMs",
   "fallbackText",
   "speakChatReplies",
+  "toolCallLogs",
 ] as const;
 
 export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
@@ -715,6 +719,18 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
     if (b !== undefined) config.speakChatReplies = b;
   }
 
+  if (root.toolCallLogs !== undefined) {
+    if (
+      root.toolCallLogs === "full" ||
+      root.toolCallLogs === "redacted" ||
+      root.toolCallLogs === "off"
+    ) {
+      config.toolCallLogs = root.toolCallLogs;
+    } else {
+      c.err("toolCallLogs", 'must be one of "full", "redacted", "off"');
+    }
+  }
+
   if (c.errors.length > 0) return { ok: false, errors: c.errors };
   return { ok: true, config: config as LlmAgentConfig, warnings };
 }
@@ -993,5 +1009,11 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
       default: "Sorry, something went wrong. Please try again.",
     },
     speakChatReplies: { type: "boolean", default: true },
+    toolCallLogs: {
+      enum: ["full", "redacted", "off"],
+      default: "redacted",
+      description:
+        "Agent log line per tool call. redacted removes secret values, sensitive keys and common personal data; full removes only secret values; off writes nothing.",
+    },
   },
 } as const;

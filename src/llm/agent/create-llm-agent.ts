@@ -420,6 +420,13 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
   function buildRegistry(env: Record<string, string | undefined>): void {
     const reg = new ToolRegistry({
       log: (level, message, fields) => agentLog(level, message, fields ?? {}),
+      toolCallLog: {
+        mode: config.toolCallLogs ?? D.toolCallLogs,
+        secretValues: Object.values(env).filter(
+          (v): v is string => typeof v === "string",
+        ),
+        emit: (fields) => agentLog("info", "llm tool call", { ...fields }),
+      },
     });
     for (const tool of opts.tools ?? []) reg.addCustomTool(tool);
     const sources: McpToolSource[] = [];
@@ -533,6 +540,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
           signal,
           timeoutMs: toolTimeoutMs,
           sessionId: s.sessionId,
+          turnId: t.turnId,
+          callId: call.id,
         });
       })();
       const raced = await Promise.race([work, aborted]);

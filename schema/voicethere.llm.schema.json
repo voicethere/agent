@@ -413,6 +413,15 @@
     "speakChatReplies": {
       "type": "boolean",
       "default": true
+    },
+    "toolCallLogs": {
+      "enum": [
+        "full",
+        "redacted",
+        "off"
+      ],
+      "default": "redacted",
+      "description": "Agent log line per tool call. redacted removes secret values, sensitive keys and common personal data; full removes only secret values; off writes nothing."
     }
   }
 }

@@ -245,7 +245,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     id: "llm-mcp-service",
     entry: "llm-mcp-service/agent.ts",
     kind: "product",
-    seedOnCreate: false,
+    seedOnCreate: true,
     title: "LLM agent + MCP tool service",
     summary:
       "LLM agent that calls tools served by a project service over MCP, plus an example server image.",

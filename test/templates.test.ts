@@ -190,6 +190,7 @@ describe("seed template bundles", () => {
         "game-sync",
         "language-switch",
         "llm-agent",
+        "llm-mcp-service",
         "positional-tts",
         "spatial-showcase",
         "recording-consent",

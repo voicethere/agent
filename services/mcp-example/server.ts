@@ -21,7 +21,8 @@ export const SAMPLE_PLANS: Record<
   team: { pricePerMonthUsd: 99, note: "Sample data: several projects." },
 };
 
-const MAX_BODY_BYTES = 1_000_000;
+const MAX_BODY_BYTES = 1_048_576; // 1 MiB
+const BODY_TIMEOUT_MS = 10_000;
 const HANDLER_TIMEOUT_MS = 5_000;
 
 export interface McpExampleOptions {
@@ -29,6 +30,8 @@ export interface McpExampleOptions {
   host?: string;
   /** When set, requests to /mcp need `Authorization: Bearer <token>`. */
   token?: string;
+  /** Time allowed to receive a request body. Default 10 s. */
+  bodyTimeoutMs?: number;
   /** One JSON line per event. Never receives tool arguments. */
   log?: (line: Record<string, unknown>) => void;
 }
@@ -109,28 +112,51 @@ function buildServer(log: (line: Record<string, unknown>) => void): McpServer {
   return server;
 }
 
-function readBody(req: IncomingMessage): Promise<unknown> {
+type BodyFailure = "too_large" | "timeout" | "invalid_json" | "aborted";
+
+class BodyError extends Error {
+  constructor(readonly reason: BodyFailure) {
+    super(reason);
+  }
+}
+
+function readBody(req: IncomingMessage, timeoutMs: number): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    req.on("data", (c: Buffer) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      req.off("data", onData);
+      fn();
+    };
+    const timer = setTimeout(
+      () => finish(() => reject(new BodyError("timeout"))),
+      timeoutMs,
+    );
+    const onData = (c: Buffer) => {
       size += c.length;
       if (size > MAX_BODY_BYTES) {
-        reject(new Error("body too large"));
-        req.destroy();
+        finish(() => reject(new BodyError("too_large")));
         return;
       }
       chunks.push(c);
-    });
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks).toString("utf8");
-      try {
-        resolve(raw ? JSON.parse(raw) : undefined);
-      } catch {
-        reject(new Error("invalid json"));
-      }
-    });
-    req.on("error", reject);
+    };
+    req.on("data", onData);
+    req.on("end", () =>
+      finish(() => {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        try {
+          resolve(raw ? JSON.parse(raw) : undefined);
+        } catch {
+          reject(new BodyError("invalid_json"));
+        }
+      }),
+    );
+    req.on("error", () => finish(() => reject(new BodyError("aborted"))));
+    req.on("close", () => finish(() => reject(new BodyError("aborted"))));
   });
 }
 
@@ -167,9 +193,14 @@ export async function startMcpExample(
       }
       let body: unknown;
       try {
-        body = await readBody(req);
-      } catch {
-        send(res, 400, "bad request");
+        body = await readBody(req, opts.bodyTimeoutMs ?? BODY_TIMEOUT_MS);
+      } catch (err) {
+        const reason = err instanceof BodyError ? err.reason : "aborted";
+        log({ event: "bad_body", reason });
+        res.setHeader("Connection", "close");
+        if (reason === "too_large") send(res, 413, "payload too large");
+        else if (reason === "timeout") send(res, 408, "request timeout");
+        else send(res, 400, "bad request");
         return;
       }
       const server = buildServer(log);

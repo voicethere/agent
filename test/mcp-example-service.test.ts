@@ -1,3 +1,4 @@
+import { connect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { McpToolSource } from "../src/llm/mcp/mcp-tool-source.js";
@@ -9,10 +10,11 @@ import {
 const handles: McpExampleHandle[] = [];
 const sources: McpToolSource[] = [];
 
-async function start(token?: string) {
+async function start(token?: string, bodyTimeoutMs?: number) {
   const lines: Record<string, unknown>[] = [];
   const handle = await startMcpExample({
     token,
+    bodyTimeoutMs,
     log: (l) => lines.push(l),
   });
   handles.push(handle);
@@ -128,5 +130,41 @@ describe("mcp example service", () => {
     const { handle } = await start();
     const res = await fetch(handle.url);
     expect(res.status).toBe(405);
+  });
+
+  it("a body above 1 MiB gets 413 and a log line without content", async () => {
+    const { handle, lines } = await start();
+    const res = await fetch(handle.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pad: "x".repeat(1_048_576 + 10) }),
+    });
+    expect(res.status).toBe(413);
+    expect(lines).toContainEqual({ event: "bad_body", reason: "too_large" });
+    expect(JSON.stringify(lines)).not.toContain("xxxx");
+  });
+
+  it("a client that sends headers and never finishes the body gets 408", async () => {
+    const { handle, lines } = await start(undefined, 150);
+    const status = await new Promise<number>((resolve, reject) => {
+      const socket = connect(handle.port, "127.0.0.1", () => {
+        socket.write(
+          "POST /mcp HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{",
+        );
+      });
+      let data = "";
+      socket.on("data", (d) => {
+        data += d.toString();
+        const m = /^HTTP\/1\.1 (\d+)/.exec(data);
+        if (m) {
+          socket.destroy();
+          resolve(Number(m[1]));
+        }
+      });
+      socket.on("error", reject);
+      setTimeout(() => reject(new Error("no response")), 3_000).unref();
+    });
+    expect(status).toBe(408);
+    expect(lines).toContainEqual({ event: "bad_body", reason: "timeout" });
   });
 });

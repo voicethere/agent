@@ -12,10 +12,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const templatesDir = join(root, "templates");
 
 describe("llm-mcp-service template", () => {
-  it("is a creatable product template that does not seed a bundle", () => {
+  it("is a creatable product template that seeds a bundle", () => {
     const t = getTemplate("llm-mcp-service");
     expect(t.kind).toBe("product");
-    expect(t.seedOnCreate).toBe(false);
+    expect(t.seedOnCreate).toBe(true);
     expect(t.entry).toBe("llm-mcp-service/agent.ts");
   });
 

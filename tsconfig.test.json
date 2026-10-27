@@ -6,6 +6,11 @@
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "services/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "test/**/*.ts",
+    "services/**/*.ts"
+  ],
   "exclude": ["test/fixtures/ioredis-bundle-agent.ts"]
 }

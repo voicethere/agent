@@ -11,7 +11,7 @@ const SENSITIVE_KEY_RE =
 // constant factor per start position (js/polynomial-redos).
 const EMAIL_RE =
   /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,8}\.[A-Za-z]{2,24}/g;
-const IBAN_CANDIDATE_RE = /\b[A-Z]{2}\d{2}[A-Za-z0-9 ]{11,30}/g;
+const IBAN_CANDIDATE_RE = /\b[A-Z]{2}\d{2}[A-Za-z0-9 ]{11,40}/g;
 const CARD_RE = /\b\d(?:[ -]?\d){14,18}\b/g;
 const PHONE_RE = /(?<![\w.:/+-])(?:\+|\()?\d[\d ().-]{6,22}\d(?![\w.:/-])/g;
 /** Longest text the PII patterns see; the rest is dropped (the log line is cut far below this). */
@@ -81,6 +81,12 @@ function redactIbanCandidate(m: string): string {
     const head = m.slice(0, end);
     if (head.endsWith(" ")) continue;
     if (ibanValid(head)) return `[redacted:iban]${m.slice(end)}`;
+  }
+  // An IBAN-shaped word may hide a real IBAN later in the candidate.
+  const next = m.slice(1).search(/[A-Z]{2}\d{2}/);
+  if (next >= 0) {
+    const at = next + 1;
+    return m.slice(0, at) + redactIbanCandidate(m.slice(at));
   }
   return m;
 }

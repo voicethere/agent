@@ -156,4 +156,23 @@ describe("createRedactor", () => {
       "pay [redacted:iban] now",
     );
   });
+
+  it("redacts long space-grouped IBANs whole", () => {
+    for (const v of [
+      "MT84 MALT 0110 0001 2345 MTLC AST0 01S",
+      "MU17 BOMM 0101 1010 3030 0200 000M UR",
+      "BR15 0000 0000 0000 1093 2840 814P 2",
+    ]) {
+      expect(red().redact(v)).toBe("[redacted:iban]");
+    }
+    expect(red().redact("DE89 3704 0044 0532 0130 00 now")).toBe(
+      "[redacted:iban] now",
+    );
+  });
+
+  it("an IBAN-shaped word before a real IBAN does not hide it", () => {
+    const out = red().redact("ref AB12 DE89370400440532013000") as string;
+    expect(out).toContain("[redacted:iban]");
+    expect(out).not.toContain("DE89370400440532013000");
+  });
 });

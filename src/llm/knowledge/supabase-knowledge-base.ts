@@ -92,7 +92,9 @@ function checkUrl(raw: string, allowLocal: boolean): string {
   ) {
     throw fail("supabase url must use https");
   }
-  return raw.replace(/\/+$/, "");
+  let end = raw.length;
+  while (end > 0 && raw[end - 1] === "/") end--;
+  return raw.slice(0, end);
 }
 
 function withTimeout<T>(ms: number, work: Promise<T>): Promise<T> {

@@ -16,7 +16,27 @@ export interface ChunkOptions {
 export const DEFAULT_CHUNK_WORDS = 300;
 export const DEFAULT_CHUNK_OVERLAP_WORDS = 50;
 
-const HEADING = /^(#{1,3})\s+(.+?)\s*#*\s*$/;
+// Headings and fences are parsed by scanning, not by regex: the text comes
+// from customer documents and a backtracking regex is polynomial on it.
+const isSpace = (c: string | undefined) =>
+  c === " " || c === "\t" || c === "\v" || c === "\f";
+
+/** `#`..`###` ATX heading → level and text (closing `#`s removed), or null. */
+function parseHeading(line: string): { level: number; text: string } | null {
+  let level = 0;
+  while (level < line.length && line[level] === "#") level++;
+  if (level < 1 || level > 3 || !isSpace(line[level])) return null;
+  let text = line.slice(level).trim();
+  let end = text.length;
+  while (end > 0 && text[end - 1] === "#") end--;
+  if (end === 0 || isSpace(text[end - 1])) text = text.slice(0, end).trimEnd();
+  return text === "" ? null : { level, text };
+}
+
+function isFence(line: string): boolean {
+  const t = line.trimStart();
+  return t.startsWith("```") || t.startsWith("~~~");
+}
 
 /**
  * Splits Markdown on `#`..`###` headings, then into windows of `maxWords`
@@ -45,12 +65,12 @@ export function chunkMarkdown(
   let current = { title: titleOf(), lines: [] as string[] };
   let fenced = false;
   for (const line of doc.text.split(/\r?\n/)) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    const m = fenced ? null : HEADING.exec(line);
-    if (m) {
+    if (isFence(line)) fenced = !fenced;
+    const h = fenced ? null : parseHeading(line);
+    if (h) {
       sections.push(current);
-      const level = m[1]!.length;
-      stack[level - 1] = m[2]!;
+      const level = h.level;
+      stack[level - 1] = h.text;
       for (let i = level; i < stack.length; i++) stack[i] = "";
       current = { title: titleOf(), lines: [] };
     } else {

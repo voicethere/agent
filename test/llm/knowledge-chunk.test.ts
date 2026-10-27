@@ -64,6 +64,32 @@ describe("chunkMarkdown", () => {
     expect(a[0]!.text).toContain("# not a heading");
   });
 
+  it("parses closing hashes, keeps C#, and ignores #### and #word", () => {
+    const chunks = chunkMarkdown({
+      id: "h.md",
+      text: [
+        "#  Spaced  ##  ",
+        "a",
+        "## C#",
+        "b",
+        "#### Deep",
+        "#nospace",
+        "c",
+      ].join("\n"),
+    });
+    expect(chunks.map((c) => [c.title, c.text])).toEqual([
+      ["Spaced", "a"],
+      ["Spaced › C#", "b\n#### Deep\n#nospace\nc"],
+    ]);
+  });
+
+  it("stays linear on long runs of spaces and hashes", () => {
+    const start = Date.now();
+    chunkMarkdown({ id: "x", text: `# a${" ".repeat(200_000)}b` });
+    chunkMarkdown({ id: "y", text: `## ${"#".repeat(200_000)}x` });
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
   it("rejects an overlap that is not smaller than the window", () => {
     expect(() =>
       chunkMarkdown({ id: "x", text: "a" }, { maxWords: 10, overlapWords: 10 }),

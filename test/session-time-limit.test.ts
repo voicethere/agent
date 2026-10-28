@@ -137,7 +137,7 @@ describe("session time limit", () => {
     await start(capture, { available: false });
     await getSessionTimeLimit(SESSION);
     await getSessionTimeLimit(SESSION);
-    const warns = sentOfType(capture, "agent_log").filter((m) =>
+    const warns = sentOfType(capture, "log").filter((m) =>
       JSON.stringify(m).includes("session time limit control not available"),
     );
     expect(warns).toHaveLength(1);

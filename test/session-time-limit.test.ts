@@ -133,6 +133,26 @@ describe("session time limit", () => {
     expect(sentOfType(capture, "session_time_limit_control")).toHaveLength(0);
   });
 
+  it("unsupported warns once per session", async () => {
+    await start(capture, { available: false });
+    await getSessionTimeLimit(SESSION);
+    await getSessionTimeLimit(SESSION);
+    const warns = sentOfType(capture, "agent_log").filter((m) =>
+      JSON.stringify(m).includes("session time limit control not available"),
+    );
+    expect(warns).toHaveLength(1);
+  });
+
+  it("a pending request resolves session_closing on session_end", async () => {
+    await start(capture);
+    vi.useFakeTimers();
+    const p = getSessionTimeLimit(SESSION);
+    capture.emit({ type: "session_end", sessionId: SESSION });
+    expect(await p).toEqual({ ok: false, error: "session_closing" });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await p).toEqual({ ok: false, error: "session_closing" });
+  });
+
   it.each([
     ["0 minutes", { enabled: true, minutes: 0 }, "invalid_minutes"],
     ["1441 minutes", { enabled: true, minutes: 1441 }, "invalid_minutes"],

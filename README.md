@@ -424,6 +424,38 @@ Runners that do not advertise speak control (`isSpeakControlAvailable(ctx)` is `
 
 `SessionSpeakController` implements the parent-side rules: speak results, cancellation, flushing queued speaks on barge-in, and the interruption report. It has no transport, so the VoiceThere runner and local tooling both drive it with the same code.
 
+## Session time limit
+
+A project can end sessions after `max_session_minutes`. The agent controls the limit for the current session and can say goodbye before the close.
+
+```ts
+import {
+  defineAgent,
+  speak,
+  disableSessionTimeLimit,
+  enableSessionTimeLimit,
+  getSessionTimeLimit,
+} from "@voicethere/agent";
+
+defineAgent({
+  onSessionTimeLimit: async (ctx) => {
+    // Runs before the client is told; the runner waits up to ctx.graceMs.
+    await speak(ctx.sessionId, "Time is up, thanks for talking.").done;
+  },
+  onSessionStart: async (ctx) => {
+    const state = await getSessionTimeLimit(ctx.sessionId);
+    if (state.ok) console.log(state.state.remainingMs);
+    await enableSessionTimeLimit(ctx.sessionId, {
+      minutes: 10,
+      reason: "Demo time is up. Sign up to keep building.",
+    });
+    // await disableSessionTimeLimit(ctx.sessionId);
+  },
+});
+```
+
+Elapsed time counts from the start of the session. Enabling a limit that is already past closes the session at once. `minutes` is an integer from 1 to 1440, `reason` is trimmed, at most 200 characters, without control characters; `reason: null` goes back to the project reason. The tier limits bound the project setting only; the agent is your own code and controls the session. Results are `{ ok: true, state }` or `{ ok: false, error }`; runners without support return `unsupported`.
+
 ## Embeddings (`@voicethere/agent/llm`)
 
 `createLlmEmbedder` returns an embedder for providers that publish an embeddings API: `openai`, `openrouter` and `gemini`. `anthropic` throws `LLM_EMBEDDINGS_UNSUPPORTED` (Anthropic has no embeddings API). Calls are bounded: 15 s per attempt, two retries on rate limits, 5xx and timeouts, 96 inputs per request. Returned vectors are L2-normalized (unit length) for every provider, so cosine similarity and inner product give the same ranking. Error messages never contain the input text.

@@ -8,6 +8,10 @@ import type {
   AgentLogLevel,
   AgentStateName,
   BargeInControlAckMessage,
+  SessionTimeLimitControlAckMessage,
+  SessionTimeLimitError,
+  SessionTimeLimitMessage,
+  SessionTimeLimitState,
   AgentLogMessage,
   DataChannelKind,
   MixControlAckMessage,
@@ -77,6 +81,8 @@ export interface SessionContext {
   ttsPoseAvailable: boolean;
   /** `true` when the runner reports speak results and accepts speak cancel / barge-in control. */
   speakControlAvailable: boolean;
+  /** `true` when the runner accepts session time limit control and runs `onSessionTimeLimit`. */
+  sessionTimeLimitAvailable: boolean;
 }
 
 export interface SpeechContext {
@@ -191,6 +197,12 @@ export interface AgentHandlers {
    */
   onIdleTimeout?: (ctx: IdleTimeoutContext) => void | Promise<void>;
   /**
+   * The session time limit was reached. Runs before the client is told and before
+   * the session closes: speak a goodbye here. The runner waits up to `ctx.graceMs`
+   * (10 s) for this hook. Must not throw; errors are reported to your agent logs.
+   */
+  onSessionTimeLimit?: (ctx: SessionTimeLimitContext) => void | Promise<void>;
+  /**
    * Optional — runs when handler code throws before runner crash handling.
    * Must not throw; hook errors are logged via {@link agentLog}.
    */
@@ -204,6 +216,23 @@ export interface IdleTimeoutContext {
   env: Record<string, string>;
   idleTimeoutSeconds: number;
 }
+
+export interface SessionTimeLimitContext {
+  sessionId: string;
+  projectId?: string;
+  buildId?: string;
+  env: Record<string, string>;
+  limitMinutes: number;
+  elapsedMs: number;
+  /** How long the runner waits for this hook before it closes the session. */
+  graceMs: number;
+}
+
+export type { SessionTimeLimitState, SessionTimeLimitError };
+
+export type SessionTimeLimitResult =
+  | { ok: true; state: SessionTimeLimitState }
+  | { ok: false; error: SessionTimeLimitError | "unsupported" | "timeout" };
 
 export interface AgentErrorContext {
   sessionId: string;
@@ -227,6 +256,17 @@ function isBargeInControlAckMessage(
   const msg = value as { type?: string; requestId?: unknown };
   return (
     msg.type === "barge_in_control_ack" && typeof msg.requestId === "string"
+  );
+}
+
+function isSessionTimeLimitControlAckMessage(
+  value: unknown,
+): value is SessionTimeLimitControlAckMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return (
+    msg.type === "session_time_limit_control_ack" &&
+    typeof msg.requestId === "string"
   );
 }
 
@@ -376,6 +416,8 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "data_channel_message" ||
     msg.type === "data_channel_binary" ||
     msg.type === "idle_timeout" ||
+    msg.type === "session_time_limit" ||
+    msg.type === "session_time_limit_control_ack" ||
     msg.type === "recording_control_ack" ||
     msg.type === "conversation_history_control_ack" ||
     msg.type === "play_ack" ||
@@ -411,6 +453,7 @@ type SessionScopedParentMessage = Exclude<
   | VoiceReplayLastResultMessage
   | SpeakResultMessage
   | BargeInControlAckMessage
+  | SessionTimeLimitControlAckMessage
 >;
 
 function isSessionScopedParentMessage(
@@ -442,6 +485,10 @@ const lastVoiceLanguageBySessionId = new Map<string, string>();
 const ttsPoseAvailableBySessionId = new Map<string, boolean>();
 /** Cached from `session_start.speakControlAvailable` until `session_end`. */
 const speakControlAvailableBySessionId = new Map<string, boolean>();
+/** Cached from `session_start.sessionTimeLimitAvailable` until `session_end`. */
+const sessionTimeLimitAvailableBySessionId = new Map<string, boolean>();
+/** Sessions already warned that session time limit control is unavailable. */
+const sessionTimeLimitWarnedSessionIds = new Set<string>();
 /** Sessions already warned that speak control is unavailable. */
 const speakControlWarnedSessionIds = new Set<string>();
 /** Sessions that received `session_end`; `speak()` becomes a no-op when no live gen. */
@@ -451,6 +498,9 @@ const RECORDING_CONTROL_ACK_TIMEOUT_MS = 5000;
 const CONVERSATION_HISTORY_CONTROL_ACK_TIMEOUT_MS = 5000;
 const PLAY_CONTROL_ACK_TIMEOUT_MS = 5000;
 const BARGE_IN_CONTROL_ACK_TIMEOUT_MS = 5000;
+const SESSION_TIME_LIMIT_ACK_TIMEOUT_MS = 5_000;
+const SESSION_TIME_LIMIT_MINUTES_MAX = 1440;
+const SESSION_TIME_LIMIT_REASON_MAX = 200;
 const SPEAK_RESULT_SAFETY_TIMEOUT_MS = 600_000;
 
 type PendingSpeakResult = {
@@ -473,6 +523,34 @@ const pendingBargeInAcks = new Map<string, PendingBargeInAck>();
 export interface BargeInResult {
   ok: boolean;
   reason?: "applied" | "unsupported" | "timeout" | "session_ended";
+}
+
+type PendingSessionTimeLimitAck = {
+  sessionId: string;
+  resolve: (result: SessionTimeLimitResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const pendingSessionTimeLimitAcks = new Map<
+  string,
+  PendingSessionTimeLimitAck
+>();
+
+function handleSessionTimeLimitControlAck(
+  message: SessionTimeLimitControlAckMessage,
+): void {
+  const pending = pendingSessionTimeLimitAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingSessionTimeLimitAcks.delete(message.requestId);
+  if (message.ok && message.state) {
+    pending.resolve({ ok: true, state: message.state });
+    return;
+  }
+  pending.resolve({
+    ok: false,
+    error: message.error ?? "unknown_session",
+  });
 }
 
 function handleSpeakResult(message: SpeakResultMessage): void {
@@ -527,7 +605,14 @@ function clearPendingSpeakForSession(
     pendingBargeInAcks.delete(requestId);
     pending.resolve({ ok: false, reason: "session_ended" });
   }
+  for (const [requestId, pending] of pendingSessionTimeLimitAcks) {
+    if (pending.sessionId !== sessionId) continue;
+    clearTimeout(pending.timer);
+    pendingSessionTimeLimitAcks.delete(requestId);
+    pending.resolve({ ok: false, error: "session_closing" });
+  }
   speakControlWarnedSessionIds.delete(sessionId);
+  sessionTimeLimitWarnedSessionIds.delete(sessionId);
 }
 
 /** Max decoded bytes for optional inline `bytes` on {@link play} (base64 in IPC). */
@@ -1186,6 +1271,10 @@ async function handleParentMessage(
         message.sessionId,
         message.speakControlAvailable ?? false,
       );
+      sessionTimeLimitAvailableBySessionId.set(
+        message.sessionId,
+        message.sessionTimeLimitAvailable ?? false,
+      );
       if (message.voiceLanguageSwitch) {
         voiceLanguageSwitchSettingsBySessionId.set(
           message.sessionId,
@@ -1211,6 +1300,7 @@ async function handleParentMessage(
           message.voiceLanguageSwitchAvailable ?? false,
         ttsPoseAvailable: message.ttsPoseAvailable ?? false,
         speakControlAvailable: message.speakControlAvailable ?? false,
+        sessionTimeLimitAvailable: message.sessionTimeLimitAvailable ?? false,
       });
       sendParentMessage({
         type: "session_start_ack",
@@ -1294,6 +1384,7 @@ async function handleParentMessage(
       lastVoiceLanguageBySessionId.delete(message.sessionId);
       ttsPoseAvailableBySessionId.delete(message.sessionId);
       speakControlAvailableBySessionId.delete(message.sessionId);
+      sessionTimeLimitAvailableBySessionId.delete(message.sessionId);
       clearPendingSpeakForSession(message.sessionId, "session_ended");
       await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
         sessionId: message.sessionId,
@@ -1301,6 +1392,9 @@ async function handleParentMessage(
       break;
     case "idle_timeout":
       await runIdleTimeoutHook(handlers, message);
+      break;
+    case "session_time_limit":
+      await runSessionTimeLimitHook(handlers, message);
       break;
   }
 }
@@ -1336,6 +1430,10 @@ export function defineAgent(handlers: AgentHandlers): void {
     }
     if (isBargeInControlAckMessage(message)) {
       handleBargeInControlAck(message);
+      return;
+    }
+    if (isSessionTimeLimitControlAckMessage(message)) {
+      handleSessionTimeLimitControlAck(message);
       return;
     }
     if (isPlayAckMessage(message)) {
@@ -1559,6 +1657,55 @@ async function runIdleTimeoutHook(
   );
 }
 
+async function runSessionTimeLimitHook(
+  handlers: AgentHandlers,
+  message: SessionTimeLimitMessage,
+): Promise<void> {
+  const onSessionTimeLimit = handlers.onSessionTimeLimit;
+  agentLog(
+    "info",
+    `session_time_limit ipc received (maxGraceMs=${message.maxGraceMs}, onSessionTimeLimit=${typeof onSessionTimeLimit === "function"})`,
+    message.sessionId,
+  );
+
+  if (!onSessionTimeLimit) {
+    sendParentMessage({
+      type: "session_time_limit_done",
+      sessionId: message.sessionId,
+    });
+    return;
+  }
+
+  const env = peerEnvBySessionId.get(message.sessionId) ?? {
+    SESSION_ID: message.sessionId,
+    ...(process.env.PROJECT_ID ? { PROJECT_ID: process.env.PROJECT_ID } : {}),
+    ...(process.env.BUILD_ID ? { BUILD_ID: process.env.BUILD_ID } : {}),
+  };
+  const ctx: SessionTimeLimitContext = {
+    sessionId: message.sessionId,
+    projectId: env.PROJECT_ID,
+    buildId: env.BUILD_ID,
+    env,
+    limitMinutes: message.limitMinutes,
+    elapsedMs: message.elapsedMs,
+    graceMs: message.maxGraceMs,
+  };
+
+  let error: string | undefined;
+  try {
+    await onSessionTimeLimit(ctx);
+  } catch (hookError) {
+    error = hookError instanceof Error ? hookError.message : String(hookError);
+    agentLog("error", `onSessionTimeLimit failed: ${error}`, message.sessionId);
+  }
+
+  sendParentMessage({
+    type: "session_time_limit_done",
+    sessionId: message.sessionId,
+    ...(error !== undefined ? { error } : {}),
+  });
+}
+
 function buildIdleEnv(sessionId: string): Record<string, string> {
   return {
     SESSION_ID: sessionId,
@@ -1583,6 +1730,13 @@ export function resetAgentIpcStateForTests(): void {
   ttsPoseAvailableBySessionId.clear();
   speakControlAvailableBySessionId.clear();
   speakControlWarnedSessionIds.clear();
+  sessionTimeLimitAvailableBySessionId.clear();
+  sessionTimeLimitWarnedSessionIds.clear();
+  for (const [requestId, pending] of pendingSessionTimeLimitAcks) {
+    clearTimeout(pending.timer);
+    pendingSessionTimeLimitAcks.delete(requestId);
+    pending.resolve({ ok: false, error: "session_closing" });
+  }
   for (const [requestId, pending] of pendingSpeakResults) {
     clearTimeout(pending.timer);
     pendingSpeakResults.delete(requestId);
@@ -1804,6 +1958,122 @@ export function setBargeIn(
       enabled,
     });
   });
+}
+
+function validateSessionTimeLimitInput(options: {
+  enabled: boolean;
+  minutes?: number;
+  reason?: string | null;
+}):
+  | { ok: true; reason: string | null | undefined }
+  | { ok: false; error: SessionTimeLimitError } {
+  const { minutes, reason } = options;
+  if (
+    minutes !== undefined &&
+    (typeof minutes !== "number" ||
+      !Number.isInteger(minutes) ||
+      minutes < 1 ||
+      minutes > SESSION_TIME_LIMIT_MINUTES_MAX)
+  ) {
+    return { ok: false, error: "invalid_minutes" };
+  }
+  if (reason === undefined || reason === null) {
+    return { ok: true, reason };
+  }
+  if (typeof reason !== "string") return { ok: false, error: "invalid_reason" };
+  const trimmed = reason.trim();
+  if (trimmed.length > SESSION_TIME_LIMIT_REASON_MAX) {
+    return { ok: false, error: "invalid_reason" };
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001F\u007F]/.test(trimmed)) {
+    return { ok: false, error: "invalid_reason" };
+  }
+  return { ok: true, reason: trimmed === "" ? null : trimmed };
+}
+
+function sendSessionTimeLimitControl(
+  sessionId: string,
+  body: Pick<
+    Extract<
+      import("./protocol.js").ChildToParentMessage,
+      { type: "session_time_limit_control" }
+    >,
+    "action" | "enabled" | "minutes" | "reason"
+  >,
+): Promise<SessionTimeLimitResult> {
+  if (
+    !isVoicethereAgentChild() ||
+    !allowOutboundForSession(sessionId) ||
+    !(sessionTimeLimitAvailableBySessionId.get(sessionId) ?? false)
+  ) {
+    if (isVoicethereAgentChild() && allowOutboundForSession(sessionId)) {
+      if (!sessionTimeLimitWarnedSessionIds.has(sessionId)) {
+        sessionTimeLimitWarnedSessionIds.add(sessionId);
+        agentLog(
+          "warn",
+          "session time limit control not available on this runner",
+          sessionId,
+        );
+      }
+    }
+    return Promise.resolve({ ok: false, error: "unsupported" });
+  }
+  const requestId = randomUUID();
+  return new Promise<SessionTimeLimitResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingSessionTimeLimitAcks.delete(requestId);
+      resolve({ ok: false, error: "timeout" });
+    }, SESSION_TIME_LIMIT_ACK_TIMEOUT_MS);
+    pendingSessionTimeLimitAcks.set(requestId, { sessionId, resolve, timer });
+    sendParentMessage({
+      type: "session_time_limit_control",
+      sessionId,
+      requestId,
+      ...body,
+    });
+  });
+}
+
+/** Read the session time limit (elapsed counts from session start). */
+export function getSessionTimeLimit(
+  sessionId: string,
+): Promise<SessionTimeLimitResult> {
+  return sendSessionTimeLimitControl(sessionId, { action: "get" });
+}
+
+/**
+ * Disable or enable the time limit for this session. `minutes` is an integer
+ * 1..1440; enabling past the elapsed time closes the session at once. `reason`
+ * is the text the client sees (`null` resets to the project/default reason).
+ */
+export function setSessionTimeLimit(
+  sessionId: string,
+  options: { enabled: boolean; minutes?: number; reason?: string | null },
+): Promise<SessionTimeLimitResult> {
+  const checked = validateSessionTimeLimitInput(options);
+  if (!checked.ok) return Promise.resolve({ ok: false, error: checked.error });
+  return sendSessionTimeLimitControl(sessionId, {
+    action: "set",
+    enabled: options.enabled,
+    ...(options.minutes !== undefined ? { minutes: options.minutes } : {}),
+    ...(checked.reason !== undefined ? { reason: checked.reason } : {}),
+  });
+}
+
+/** Same as `setSessionTimeLimit(sessionId, { enabled: false })`. */
+export function disableSessionTimeLimit(
+  sessionId: string,
+): Promise<SessionTimeLimitResult> {
+  return setSessionTimeLimit(sessionId, { enabled: false });
+}
+
+/** Same as `setSessionTimeLimit(sessionId, { enabled: true, ... })`. */
+export function enableSessionTimeLimit(
+  sessionId: string,
+  options: { minutes?: number; reason?: string | null } = {},
+): Promise<SessionTimeLimitResult> {
+  return setSessionTimeLimit(sessionId, { enabled: true, ...options });
 }
 
 /** Run `fn` with caller barge-in switched off, then switch it back on (also when `fn` throws). */

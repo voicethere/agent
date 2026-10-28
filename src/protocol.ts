@@ -25,6 +25,8 @@ export type ParentToChildMessage =
   | DataChannelMessageMessage
   | DataChannelBinaryMessage
   | IdleTimeoutMessage
+  | SessionTimeLimitMessage
+  | SessionTimeLimitControlAckMessage
   | RecordingControlAckMessage
   | ConversationHistoryControlAckMessage
   | PlayAckMessage
@@ -51,6 +53,7 @@ export type ChildToParentMessage =
   | SpeakMessage
   | SpeakCancelMessage
   | BargeInControlMessage
+  | SessionTimeLimitControlMessage
   | AgentStateMessage
   | RecordingControlMessage
   | ConversationHistoryControlMessage
@@ -68,6 +71,7 @@ export type ChildToParentMessage =
   | SendToClientMessage
   | SendBinaryToClientMessage
   | IdleTimeoutDoneMessage
+  | SessionTimeLimitDoneMessage
   | DisconnectClientMessage
   | WebhookHandledMessage;
 
@@ -126,6 +130,12 @@ export interface SessionStartMessage {
    * older runners — treat as `false`.
    */
   speakControlAvailable?: boolean;
+  /**
+   * When `true`, the runner accepts session time limit control
+   * (`session_time_limit_control`) and runs the `onSessionTimeLimit` hook before it
+   * closes the session at the limit. Absent on older runners — treat as `false`.
+   */
+  sessionTimeLimitAvailable?: boolean;
 }
 
 /**
@@ -953,6 +963,67 @@ export interface IdleTimeoutMessage {
  */
 export interface IdleTimeoutDoneMessage {
   type: "idle_timeout_done";
+  sessionId: string;
+  /** Set when the customer hook threw or rejected. */
+  error?: string;
+}
+
+/** Session time limit state as the runner reports it. */
+export interface SessionTimeLimitState {
+  enabled: boolean;
+  limitMinutes: number;
+  elapsedMs: number;
+  /** `null` when the limit is disabled or `limitMinutes` is 0; never negative. */
+  remainingMs: number | null;
+  customReason: boolean;
+}
+
+/** Errors the runner can return for a time limit control request. */
+export type SessionTimeLimitError =
+  | "invalid_minutes"
+  | "invalid_reason"
+  | "no_limit_minutes"
+  | "session_closing"
+  | "unknown_session";
+
+/** Read (`get`) or change (`set`) the session time limit. */
+export interface SessionTimeLimitControlMessage {
+  type: "session_time_limit_control";
+  sessionId: string;
+  /** Correlates with {@link SessionTimeLimitControlAckMessage.requestId}. */
+  requestId: string;
+  action: "get" | "set";
+  enabled?: boolean;
+  minutes?: number;
+  /** `null` resets to the project/default reason; absent keeps the current reason. */
+  reason?: string | null;
+}
+
+export interface SessionTimeLimitControlAckMessage {
+  type: "session_time_limit_control_ack";
+  sessionId: string;
+  requestId: string;
+  ok: boolean;
+  error?: SessionTimeLimitError;
+  state?: SessionTimeLimitState;
+}
+
+/**
+ * Time limit reached — run {@link AgentHandlers.onSessionTimeLimit} before the
+ * runner tells the client and closes the session.
+ */
+export interface SessionTimeLimitMessage {
+  type: "session_time_limit";
+  sessionId: string;
+  limitMinutes: number;
+  elapsedMs: number;
+  /** Wall-clock grace for the customer callback. */
+  maxGraceMs: number;
+}
+
+/** Customer callback finished (or failed) after {@link SessionTimeLimitMessage}. */
+export interface SessionTimeLimitDoneMessage {
+  type: "session_time_limit_done";
   sessionId: string;
   /** Set when the customer hook threw or rejected. */
   error?: string;

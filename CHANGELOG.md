@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-28
+
 ### Added
 
 - Session time limit control. `getSessionTimeLimit`, `setSessionTimeLimit`, `enableSessionTimeLimit` and `disableSessionTimeLimit` read, disable or (re-)enable the project's session limit for one session, with minutes (integer 1 to 1440) and a close reason (up to 200 characters) the client sees. Each returns `{ ok: true, state }` or `{ ok: false, error }` (`invalid_minutes`, `invalid_reason`, `no_limit_minutes`, `session_closing`, `unknown_session`, `unsupported`, `timeout`). The new handler `onSessionTimeLimit` runs before the client is told and before the session closes, so the agent can say goodbye; the runner waits up to `ctx.graceMs` (10 s). `ctx.sessionTimeLimitAvailable` is `true` on runners that support it; older runners return `unsupported`. New IPC messages: `session_time_limit_control`, `session_time_limit_control_ack`, `session_time_limit`, `session_time_limit_done`.

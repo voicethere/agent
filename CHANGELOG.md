@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-10-28
+
+### Fixed
+
+- A tool turn could end on "Let me check that for you." without the tool being called. The `llm-agent` and `llm-mcp-service` template prompts and `CALL_AGENT_PROMPT_GUIDANCE` no longer ask the model to say a sentence before a tool call; the tool-call fillers already cover that moment.
+
 ## [0.18.1] - 2026-10-27
 
 ### Fixed

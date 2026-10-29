@@ -23,7 +23,13 @@ cat > "$TMP/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 exit 22
 STUB
-chmod +x "$TMP/bin/npm" "$TMP/bin/curl"
+# sleep stub: records the requested duration.
+cat > "$TMP/bin/sleep" <<'STUB'
+#!/usr/bin/env bash
+echo "$1" >> "$STUB_SLEEPS"
+exit 0
+STUB
+chmod +x "$TMP/bin/npm" "$TMP/bin/curl" "$TMP/bin/sleep"
 
 run() { # name expected_exit expected_stderr_substring -- cmd...
   local name="$1" want="$2" substr="$3"
@@ -43,6 +49,14 @@ export NPM_REGISTRY_VERIFY_SLEEP_SECONDS=0 NPM_REGISTRY_VERIFY_MAX_SLEEP_SECONDS
 
 STUB_VISIBLE_AT=3 run "wait: visible on attempt 3" 0 "attempt 3" -- \
   bash "$HERE/wait-for-npm-package.sh" @x/pkg 1.2.3
+
+# Backoff: sleeps grow 5 10 20 30 30 (first sleep 5, cap 30).
+: > "$TMP/sleeps"
+STUB_VISIBLE_AT=6 NPM_REGISTRY_VERIFY_SLEEP_SECONDS=5 NPM_REGISTRY_VERIFY_MAX_SLEEP_SECONDS=30 STUB_SLEEPS="$TMP/sleeps" \
+  run "wait: backoff 5 10 20 30 30" 0 "attempt 6" -- bash "${WAIT_SCRIPT:-$HERE/wait-for-npm-package.sh}" @x/pkg 1.2.3
+if [[ "$(tr '\n' ' ' < "$TMP/sleeps")" != "5 10 20 30 30 " ]]; then
+  echo "FAIL: backoff sleeps were: $(tr '\n' ' ' < "$TMP/sleeps")"; FAILS=$((FAILS + 1))
+fi
 
 STUB_VISIBLE_AT=0 NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS=1 run "wait: never visible" 1 "Not on npm registry" -- \
   bash "$HERE/wait-for-npm-package.sh" @x/pkg 1.2.3

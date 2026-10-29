@@ -28,8 +28,7 @@ registry_version_url() {
 registry_version_exists() {
   local url
   url="$(registry_version_url "$PKG" "$VERSION")"
-  # cache-busting query: a 404 fetched early can be cached by the CDN
-  if curl -sf -H 'Cache-Control: no-cache' --connect-timeout 10 --max-time 30 "${url}?cb=$(date +%s)-${attempt}" -o /dev/null; then
+  if curl -sf -H 'Cache-Control: no-cache' --connect-timeout 10 --max-time 30 "$url" -o /dev/null; then
     return 0
   fi
   return 1

@@ -13,7 +13,7 @@ fi
 # @scope/name -> @scope%2fname (npm registry convention)
 encoded="${PKG/\//%2f}"
 url="https://registry.npmjs.org/${encoded}/${VERSION}"
-if curl -sf -H 'Cache-Control: no-cache' --connect-timeout 10 --max-time 30 "${url}?cb=$(date +%s)" -o /dev/null; then
+if curl -sf -H 'Cache-Control: no-cache' --connect-timeout 10 --max-time 30 "$url" -o /dev/null; then
   exit 0
 fi
 exit 1

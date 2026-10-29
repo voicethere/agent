@@ -21,6 +21,7 @@ STUB
 # curl stub: always 404.
 cat > "$TMP/bin/curl" <<'STUB'
 #!/usr/bin/env bash
+echo "$@" >> "$TMP_CURL_ARGS"
 exit 22
 STUB
 # sleep stub: records the requested duration.
@@ -45,6 +46,7 @@ run() { # name expected_exit expected_stderr_substring -- cmd...
   fi
 }
 
+export TMP_CURL_ARGS="$TMP/curl-args"
 export NPM_REGISTRY_VERIFY_SLEEP_SECONDS=0 NPM_REGISTRY_VERIFY_MAX_SLEEP_SECONDS=0
 
 STUB_VISIBLE_AT=3 run "wait: visible on attempt 3" 0 "attempt 3" -- \
@@ -63,6 +65,15 @@ STUB_VISIBLE_AT=0 NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS=1 run "wait: never visible
 
 STUB_VISIBLE_AT=1 run "exists: yes" 0 "" -- bash "$HERE/npm-version-exists.sh" @x/pkg 1.2.3
 STUB_VISIBLE_AT=0 run "exists: no" 1 "" -- bash "$HERE/npm-version-exists.sh" @x/pkg 1.2.3
+
+# curl gets the bare registry URL (no query parameter).
+: > "$TMP/curl-args"
+STUB_VISIBLE_AT=0 run "curl gets the bare registry URL" 1 "" -- bash "$HERE/npm-version-exists.sh" @x/pkg 1.2.3
+if grep -q 'https://registry.npmjs.org/@x%2fpkg/1.2.3' "$TMP/curl-args" && ! grep -q '?' "$TMP/curl-args"; then
+  echo "ok: curl args bare URL"
+else
+  echo "FAIL: curl args: $(cat "$TMP/curl-args")"; FAILS=$((FAILS + 1))
+fi
 
 # Guard: default window >= 15 min, and the verify job's timeout-minutes exceeds it.
 default_s="$(sed -n 's/^TIMEOUT="${NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS:-\([0-9]*\)}"$/\1/p' "$HERE/wait-for-npm-package.sh")"

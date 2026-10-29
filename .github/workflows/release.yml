@@ -23,6 +23,8 @@ jobs:
     name: Publish to npm
     needs: quality
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -62,29 +64,55 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Check whether this version is already on npm
+        id: exists
+        run: |
+          if bash scripts/ci/npm-version-exists.sh @voicethere/agent "${{ steps.version.outputs.version }}"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish to npm
+        if: steps.exists.outputs.exists != 'true'
         run: npm publish --access public
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Skip publish
+        if: steps.exists.outputs.exists == 'true'
+        run: echo "already published, skipping"
+
+  verify-and-release:
+    name: Verify on registry and create GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
       - name: Verify package on registry
-        run: bash scripts/ci/wait-for-npm-package.sh @voicethere/agent "${{ steps.version.outputs.version }}"
+        run: bash scripts/ci/wait-for-npm-package.sh @voicethere/agent "${{ needs.publish.outputs.version }}"
         env:
-          NPM_REGISTRY_VERIFY_ATTEMPTS: 24
-          NPM_REGISTRY_VERIFY_SLEEP_SECONDS: 5
+          NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS: 900
 
       - name: Prepare GitHub release notes
         id: release_notes
         run: |
           BODY_FILE="${RUNNER_TEMP}/release-notes.md"
-          bash scripts/changelog-release-body.sh "${{ steps.version.outputs.version }}" > "$BODY_FILE"
+          bash scripts/changelog-release-body.sh "${{ needs.publish.outputs.version }}" > "$BODY_FILE"
           echo "body_file=$BODY_FILE" >> "$GITHUB_OUTPUT"
 
+      # softprops/action-gh-release updates an existing release, so a re-run is safe.
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Release ${{ steps.version.outputs.version }}
+          name: Release ${{ needs.publish.outputs.version }}
           body_path: ${{ steps.release_notes.outputs.body_file }}
           generate_release_notes: false
 
@@ -98,9 +126,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve release version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#release/}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
@@ -111,7 +139,8 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: services/mcp-example
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/voicethere/mcp-example-service:${{ steps.version.outputs.version }}
+            ghcr.io/voicethere/mcp-example-service:${{ needs.publish.outputs.version }}
             ghcr.io/voicethere/mcp-example-service:latest

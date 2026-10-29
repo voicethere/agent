@@ -75,6 +75,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Release script tests
+        run: bash scripts/ci/wait-for-npm-package.test.sh
+
       - name: Typecheck, build, and tests
         run: npm run test:ci
 

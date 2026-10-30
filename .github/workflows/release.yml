@@ -50,6 +50,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Check CHANGELOG entry
+        run: bash scripts/ci/check-changelog-entry.sh "${{ steps.version.outputs.version }}"
+
       - name: Set package version
         run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
 

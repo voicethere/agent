@@ -586,6 +586,71 @@ describe("createLlmAgent", () => {
     ]);
   });
 
+  it("finish policy keeps the queued final's utteranceId", async () => {
+    const gate = deferred();
+    await boot(
+      [
+        [delta("Working. "), { gate: gate.promise }, done("Working.")],
+        [delta("Later."), done("Later.")],
+      ],
+      { config: { interruptPolicy: "finish" } },
+    );
+    const final = (text: string, utteranceId: string) =>
+      capture.emit({
+        type: "speech_event",
+        sessionId: SESSION,
+        event: { type: "user_speech_final", text, utteranceId },
+      });
+    final("first", "utt-1");
+    await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+    final("second", "utt-2");
+    final("third", "utt-3");
+    await new Promise((r) => setTimeout(r, 20));
+    gate.resolve();
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const t1 = summaries[0].turnId;
+    const t2 = summaries[1].turnId;
+    expect(t1).not.toBe(t2);
+    const mine = (turnId: string) => [
+      ...clientPayloads().filter((p) => p.turnId === turnId),
+      ...speaks().filter((m) => m.turnId === turnId),
+    ];
+    const first = mine(t1);
+    const second = mine(t2);
+    expect(first.length).toBeGreaterThanOrEqual(3);
+    expect(second.length).toBeGreaterThanOrEqual(3);
+    for (const m of first) expect(m.inReplyTo).toBe("utt-1");
+    for (const m of second) expect(m.inReplyTo).toBe("utt-3");
+    expect(second.map((m) => m.type)).toEqual(
+      expect.arrayContaining(["assistant_delta", "assistant_done", "speak"]),
+    );
+  });
+
+  it("cancelled voice turn sends done with status cancelled", async () => {
+    const gate = deferred();
+    const { requests } = await boot([
+      [delta("One. Two"), { gate: gate.promise }, done("One. Two")],
+      [delta("Answer."), done("Answer.")],
+    ]);
+    say("first");
+    await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+    const firstTurn = speaks()[0].turnId;
+    say("second");
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const dones = clientPayloads().filter((p) => p.type === "assistant_done");
+    expect(dones.filter((d) => d.turnId === firstTurn)).toEqual([
+      {
+        type: "assistant_done",
+        turnId: firstTurn,
+        text: "One.",
+        spoken: true,
+        status: "cancelled",
+      },
+    ]);
+    expect(new Set(dones.map((d) => d.turnId)).size).toBe(dones.length);
+  });
+
   it("discard mode drops a final during an announcement", async () => {
     const { requests } = await boot([[delta("Hi."), done("Hi.")]], {
       config: {

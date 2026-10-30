@@ -430,10 +430,12 @@ describe("defineAgent", () => {
     fire({ utteranceId: "utt-7" });
     fire({});
     fire({ utteranceId: "  " });
-    await vi.waitFor(() => expect(onUserSpeechFinal).toHaveBeenCalledTimes(3));
+    fire({ utteranceId: 7 });
+    await vi.waitFor(() => expect(onUserSpeechFinal).toHaveBeenCalledTimes(4));
     expect(onUserSpeechFinal.mock.calls[0][0].utteranceId).toBe("utt-7");
     expect(onUserSpeechFinal.mock.calls[1][0].utteranceId).toBeUndefined();
     expect(onUserSpeechFinal.mock.calls[2][0].utteranceId).toBeUndefined();
+    expect(onUserSpeechFinal.mock.calls[3][0].utteranceId).toBeUndefined();
   });
 
   it("trims whitespace for onUserSpeechFinal", async () => {

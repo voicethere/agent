@@ -586,6 +586,71 @@ describe("createLlmAgent", () => {
     ]);
   });
 
+  it("finish policy keeps the queued final's utteranceId", async () => {
+    const gate = deferred();
+    await boot(
+      [
+        [delta("Working. "), { gate: gate.promise }, done("Working.")],
+        [delta("Later."), done("Later.")],
+      ],
+      { config: { interruptPolicy: "finish" } },
+    );
+    const final = (text: string, utteranceId: string) =>
+      capture.emit({
+        type: "speech_event",
+        sessionId: SESSION,
+        event: { type: "user_speech_final", text, utteranceId },
+      });
+    final("first", "utt-1");
+    await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+    final("second", "utt-2");
+    final("third", "utt-3");
+    await new Promise((r) => setTimeout(r, 20));
+    gate.resolve();
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const t1 = summaries[0].turnId;
+    const t2 = summaries[1].turnId;
+    expect(t1).not.toBe(t2);
+    const mine = (turnId: string) => [
+      ...clientPayloads().filter((p) => p.turnId === turnId),
+      ...speaks().filter((m) => m.turnId === turnId),
+    ];
+    const first = mine(t1);
+    const second = mine(t2);
+    expect(first.length).toBeGreaterThanOrEqual(3);
+    expect(second.length).toBeGreaterThanOrEqual(3);
+    for (const m of first) expect(m.inReplyTo).toBe("utt-1");
+    for (const m of second) expect(m.inReplyTo).toBe("utt-3");
+    expect(second.map((m) => m.type)).toEqual(
+      expect.arrayContaining(["assistant_delta", "assistant_done", "speak"]),
+    );
+  });
+
+  it("cancelled voice turn sends done with status cancelled", async () => {
+    const gate = deferred();
+    const { requests } = await boot([
+      [delta("One. Two"), { gate: gate.promise }, done("One. Two")],
+      [delta("Answer."), done("Answer.")],
+    ]);
+    say("first");
+    await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+    const firstTurn = speaks()[0].turnId;
+    say("second");
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const dones = clientPayloads().filter((p) => p.type === "assistant_done");
+    expect(dones.filter((d) => d.turnId === firstTurn)).toEqual([
+      {
+        type: "assistant_done",
+        turnId: firstTurn,
+        text: "One.",
+        spoken: true,
+        status: "cancelled",
+      },
+    ]);
+    expect(new Set(dones.map((d) => d.turnId)).size).toBe(dones.length);
+  });
+
   it("discard mode drops a final during an announcement", async () => {
     const { requests } = await boot([[delta("Hi."), done("Hi.")]], {
       config: {
@@ -674,6 +739,122 @@ describe("createLlmAgent", () => {
       type: "chat_reply",
       text: "Hi. There.",
     });
+  });
+
+  it("voice turn sends spoken assistant_delta per sentence and one assistant_done", async () => {
+    await boot([[delta("Hi. There."), done("Hi. There.")]]);
+    say("hello");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    const payloads = clientPayloads();
+    const turnId = speaks()[0].turnId;
+    expect(payloads.filter((p) => p.type === "assistant_delta")).toEqual([
+      { type: "assistant_delta", turnId, text: "Hi.", spoken: true },
+      { type: "assistant_delta", turnId, text: "There.", spoken: true },
+    ]);
+    expect(payloads.filter((p) => p.type === "assistant_done")).toEqual([
+      {
+        type: "assistant_done",
+        turnId,
+        text: "Hi. There.",
+        spoken: true,
+        status: "completed",
+      },
+    ]);
+    expect(payloads.some((p) => p.type === "chat_reply")).toBe(false);
+  });
+
+  it("voice turn carries inReplyTo", async () => {
+    await boot([
+      [delta("Hi. There."), done("Hi. There.")],
+      [delta("Again."), done("Again.")],
+    ]);
+    capture.emit({
+      type: "speech_event",
+      sessionId: SESSION,
+      event: { type: "user_speech_final", text: "hello", utteranceId: "utt-7" },
+    });
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    const first = clientPayloads().filter((p) =>
+      String(p.type).startsWith("assistant_"),
+    );
+    expect(first).toHaveLength(3);
+    for (const p of first) expect(p.inReplyTo).toBe("utt-7");
+    expect(speaks().every((m) => m.inReplyTo === "utt-7")).toBe(true);
+    capture.send.mockClear();
+    say("again");
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const second = clientPayloads().filter((p) =>
+      String(p.type).startsWith("assistant_"),
+    );
+    expect(second).toHaveLength(2);
+    for (const p of second) expect("inReplyTo" in p).toBe(false);
+  });
+
+  it("interrupted voice turn sends done with status interrupted", async () => {
+    const gate = deferred();
+    await boot([[delta("One. Two"), { gate: gate.promise }, done("One. Two")]]);
+    say("go");
+    await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+    const turnId = speaks()[0].turnId;
+    capture.emit({
+      type: "agent_interrupted",
+      sessionId: SESSION,
+      turnId,
+      replyPlayedMs: 100,
+      playedText: "One.",
+      unplayedText: "",
+      playedTextExact: true,
+      cancelledRequestIds: [],
+    });
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    expect(summaries[0].status).toBe("interrupted");
+    expect(clientPayloads().filter((p) => p.type === "assistant_done")).toEqual(
+      [
+        {
+          type: "assistant_done",
+          turnId,
+          text: "One.",
+          spoken: true,
+          status: "interrupted",
+        },
+      ],
+    );
+  });
+
+  it("chat turn with speakChat on keeps its exact payload keys", async () => {
+    await boot([[delta("Hi."), done("Hi.")]]);
+    chat("hello");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    const payloads = clientPayloads();
+    const turnId = speaks()[0].turnId;
+    expect(payloads).toEqual([
+      { type: "assistant_delta", turnId, text: "Hi." },
+      { type: "assistant_done", turnId, text: "Hi." },
+      { type: "chat_reply", text: "Hi." },
+    ]);
+  });
+
+  it("two voice turns in the same millisecond keep their own turnId", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_000_000);
+    try {
+      await boot([
+        [delta("Alpha."), done("Alpha.")],
+        [delta("Beta."), done("Beta.")],
+      ]);
+      say("one");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      say("two");
+      await vi.waitFor(() => expect(summaries).toHaveLength(2));
+      const dones = clientPayloads().filter((p) => p.type === "assistant_done");
+      expect(dones).toHaveLength(2);
+      expect(dones[0].turnId).not.toBe(dones[1].turnId);
+      expect(dones.map((d) => d.text)).toEqual(["Alpha.", "Beta."]);
+      expect(dones[0].turnId).toBe(summaries[0].turnId);
+      expect(dones[1].turnId).toBe(summaries[1].turnId);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("service tool source uses AGENT_SERVICE_URL and the bearer token", async () => {

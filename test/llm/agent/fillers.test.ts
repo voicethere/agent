@@ -227,6 +227,23 @@ describe("llm fillers", () => {
     });
   const toolStep = (): Step[] => [done("", [call("c", "slow")])];
 
+  it("fillers send no assistant events", async () => {
+    const gate = mk();
+    await boot([[{ gate: gate.promise }, delta("Answer."), done("Answer.")]]);
+    vi.useFakeTimers();
+    say("hi");
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(THINK).toContain(texts()[0]);
+    const filler = String(texts()[0]);
+    const assistant = () =>
+      sent("send_to_client")
+        .map((m) => m.payload as Msg)
+        .filter((p) => String(p.type).startsWith("assistant_"));
+    expect(assistant().some((p) => p.text === filler)).toBe(false);
+    expect(assistant()).toHaveLength(0);
+    gate.resolve();
+  });
+
   it("thinking filler fires after afterMs", async () => {
     const gate = mk();
     await boot([[{ gate: gate.promise }, delta("Answer."), done("Answer.")]]);
@@ -924,7 +941,7 @@ describe("llm-agent template fillers", () => {
     if (r.ok) {
       expect(r.config.fillers).toEqual({
         thinking: {
-          phrases: ["Hmm.", "Okay.", "Mm-hm.", "Right."],
+          phrases: ["Okay.", "Right.", "Sure.", "Let me see."],
           afterMs: 1500,
         },
         toolCall: {

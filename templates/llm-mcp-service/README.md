@@ -50,7 +50,7 @@ The `fillers` block in `voicethere.llm.json` lists short sentences the agent spe
 
 ```json
 "fillers": {
-  "thinking": { "phrases": ["Hmm.", "Okay.", "Mm-hm.", "Right."], "afterMs": 1500 },
+  "thinking": { "phrases": ["Okay.", "Right.", "Sure.", "Let me see."], "afterMs": 1500 },
   "toolCall": { "phrases": ["Let me check that for you.", "One moment, I'll look that up."] },
   "toolWait": { "phrases": ["Still checking, one moment.", "Almost there."], "afterMs": 4000 },
   "interruptible": true

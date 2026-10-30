@@ -99,6 +99,8 @@ interface TurnState {
   controller: AbortController;
   startedAt: number;
   spoken: string[];
+  /** Utterance id of the caller final this voice turn answers. */
+  inReplyTo?: string;
   toolCalls: TurnSummary["toolCalls"];
   llmCalls: number;
   firstTokenMs?: number;
@@ -140,7 +142,7 @@ interface SessionState {
   sessionId: string;
   history: ConversationHistory;
   active?: ActiveTurn;
-  queued?: { text: string; source: Source };
+  queued?: { text: string; source: Source; utteranceId?: string };
   announcing: number;
   lastFillerPhrase?: string;
   chain: Promise<void>;
@@ -284,6 +286,31 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     );
   }
 
+  function replyOpts(t: TurnState): { turnId: string; inReplyTo?: string } {
+    return t.inReplyTo
+      ? { turnId: t.turnId, inReplyTo: t.inReplyTo }
+      : { turnId: t.turnId };
+  }
+
+  /**
+   * The one place where reply text reaches the client as `assistant_delta`.
+   * Chat deltas are unchanged; voice turns add `spoken: true`.
+   */
+  function sendReplyDelta(s: SessionState, t: TurnState, text: string): void {
+    sendToClient(
+      s.sessionId,
+      t.source === "chat"
+        ? { type: "assistant_delta", turnId: t.turnId, text }
+        : {
+            type: "assistant_delta",
+            turnId: t.turnId,
+            text,
+            spoken: true,
+            ...(t.inReplyTo ? { inReplyTo: t.inReplyTo } : {}),
+          },
+    );
+  }
+
   /** The one place where a sentence of a reply leaves the agent. */
   function deliver(
     s: SessionState,
@@ -294,18 +321,12 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     flushSpeech(s, t);
     t.spoken.push(text);
     markReplyStarted(s, t);
-    if (t.source === "chat") {
-      sendToClient(s.sessionId, {
-        type: "assistant_delta",
-        turnId: t.turnId,
-        text,
-      });
-    }
+    sendReplyDelta(s, t, text);
     if (t.source === "voice" || speakChat) {
       if (interruptible) {
-        speak(s.sessionId, text, { turnId: t.turnId });
+        speak(s.sessionId, text, replyOpts(t));
       } else {
-        const h = announce(s.sessionId, text, { turnId: t.turnId });
+        const h = announce(s.sessionId, text, replyOpts(t));
         trackAnnouncement(s, h.done);
       }
     }
@@ -425,7 +446,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     t.pending = [];
     t.pendingChars = 0;
     if (t.controller.signal.aborted || s.ended) return;
-    speak(s.sessionId, text, { turnId: t.turnId });
+    speak(s.sessionId, text, replyOpts(t));
   }
 
   /** A sentence of the model's reply: chat delta now, speech coalesced. */
@@ -436,13 +457,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     }
     markReplyStarted(s, t);
     t.spoken.push(text);
-    if (t.source === "chat") {
-      sendToClient(s.sessionId, {
-        type: "assistant_delta",
-        turnId: t.turnId,
-        text,
-      });
-    }
+    sendReplyDelta(s, t, text);
     if (t.source !== "voice" && !speakChat) return;
     t.pending.push(text);
     t.pendingChars += text.length;
@@ -1098,6 +1113,16 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       });
       sendToClient(s.sessionId, { type: "chat_reply", text });
     }
+    if (t.source === "voice" && t.spoken.length > 0) {
+      sendToClient(s.sessionId, {
+        type: "assistant_done",
+        turnId: t.turnId,
+        text: t.spoken.join(" "),
+        spoken: true,
+        status: summary.status,
+        ...(t.inReplyTo ? { inReplyTo: t.inReplyTo } : {}),
+      });
+    }
     setAgentState(s.sessionId, "listening");
     if (hooks.onTurnEnd) {
       await callHook("onTurnEnd", s.sessionId, () =>
@@ -1121,7 +1146,12 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     );
   }
 
-  function startTurn(s: SessionState, text: string, source: Source): void {
+  function startTurn(
+    s: SessionState,
+    text: string,
+    source: Source,
+    utteranceId?: string,
+  ): void {
     const turnId = randomUUID();
     const controller = new AbortController();
     const t: TurnState = {
@@ -1131,6 +1161,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       controller,
       startedAt: now(),
       spoken: [],
+      ...(source === "voice" && utteranceId ? { inReplyTo: utteranceId } : {}),
       toolCalls: [],
       llmCalls: 0,
       roundOpen: false,
@@ -1178,7 +1209,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         const q = s.queued;
         if (q && !s.ended && !s.active) {
           s.queued = undefined;
-          startTurn(s, q.text, q.source);
+          startTurn(s, q.text, q.source, q.utteranceId);
         }
       }
     })();
@@ -1188,6 +1219,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     s: SessionState,
     text: string,
     source: Source,
+    utteranceId?: string,
   ): Promise<void> {
     if (s.ended) return;
     if (
@@ -1222,7 +1254,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     const active = s.active;
     if (active) {
       if (policy === "finish") {
-        s.queued = { text, source };
+        s.queued = { text, source, utteranceId };
         return;
       }
       cancelSpeech(s.sessionId, { turnId: active.turnId });
@@ -1240,16 +1272,21 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       if (timer) clearTimeout(timer);
       if (s.ended) return;
     }
-    startTurn(s, text, source);
+    startTurn(s, text, source, utteranceId);
   }
 
   /** Never awaits the LLM: the session's serial queue must stay free. */
-  function submit(sessionId: string, text: string, source: Source): void {
+  function submit(
+    sessionId: string,
+    text: string,
+    source: Source,
+    utteranceId?: string,
+  ): void {
     const s = sessions.get(sessionId);
     const trimmed = text.trim();
     if (!s || !trimmed) return;
     s.chain = s.chain
-      .then(() => handleInput(s, trimmed, source))
+      .then(() => handleInput(s, trimmed, source, utteranceId))
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
         agentLog("error", `llm input failed: ${message}`, sessionId);
@@ -1315,7 +1352,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     },
 
     onUserSpeechFinal(ctx) {
-      submit(ctx.sessionId, ctx.text, "voice");
+      submit(ctx.sessionId, ctx.text, "voice", ctx.utteranceId);
     },
 
     onDataChannelMessage(ctx) {

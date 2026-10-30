@@ -93,6 +93,8 @@ export interface SpeechContext {
    * switch (see {@link replayLastUtterance}). Absent on older runners.
    */
   replay?: boolean;
+  /** Utterance id of the caller's final transcript, when the runner sends one. */
+  utteranceId?: string;
 }
 
 /** Spoken-language identification result (`speech.type` is `user_language`). */
@@ -1317,12 +1319,17 @@ async function handleParentMessage(
         typeof message.event.text === "string" &&
         message.event.text.trim()
       ) {
+        const rawUtteranceId = (message.event as { utteranceId?: unknown })
+          .utteranceId;
+        const utteranceId =
+          typeof rawUtteranceId === "string" ? rawUtteranceId.trim() : "";
         await handlers.onUserSpeechFinal?.({
           sessionId: message.sessionId,
           text: message.event.text.trim(),
           ...((message.event as { replay?: unknown }).replay === true
             ? { replay: true }
             : {}),
+          ...(utteranceId ? { utteranceId } : {}),
         });
       }
       if ((message.event.type as string) === "user_language") {

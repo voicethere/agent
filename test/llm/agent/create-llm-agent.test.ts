@@ -651,6 +651,102 @@ describe("createLlmAgent", () => {
     expect(new Set(dones.map((d) => d.turnId)).size).toBe(dones.length);
   });
 
+  it("greeting sends spoken assistant_delta before speaking", async () => {
+    await boot([[delta("Hi."), done("Hi.")]], {
+      config: { greeting: { text: "Welcome to the line." } },
+      skipSessionAck: true,
+    });
+    await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+    const order = sent()
+      .filter((m) => m.type === "speak" || m.type === "send_to_client")
+      .map((m) => m.type);
+    expect(order.indexOf("send_to_client")).toBeLessThan(
+      order.indexOf("speak"),
+    );
+    const d = clientPayloads().find((p) => p.type === "assistant_delta");
+    expect(d).toMatchObject({
+      type: "assistant_delta",
+      spoken: true,
+      text: "Welcome to the line.",
+    });
+    expect(String(d?.turnId)).toMatch(/^greet-/);
+    expect(speaks()[0].turnId).toBe(d?.turnId);
+  });
+
+  it("greeting sends assistant_done after the speak settles", async () => {
+    await boot([[delta("Hi."), done("Hi.")]], {
+      config: { greeting: { text: "Welcome to the line." } },
+      skipSessionAck: true,
+    });
+    await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+    const greet = speaks()[0];
+    await new Promise((r) => setTimeout(r, 10));
+    expect(
+      clientPayloads().filter((p) => p.type === "assistant_done"),
+    ).toHaveLength(0);
+    speakResult(greet.requestId, greet.turnId);
+    await vi.waitFor(() =>
+      expect(
+        clientPayloads().filter((p) => p.type === "assistant_done"),
+      ).toEqual([
+        {
+          type: "assistant_done",
+          turnId: greet.turnId,
+          text: "Welcome to the line.",
+          spoken: true,
+          status: "completed",
+        },
+      ]),
+    );
+  });
+
+  it("interrupted greeting reports interrupted", async () => {
+    await boot([[delta("Hi."), done("Hi.")]], {
+      config: {
+        greeting: { text: "Welcome to the line.", interruptible: true },
+      },
+      skipSessionAck: true,
+    });
+    await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+    const greet = speaks()[0];
+    capture.emit({
+      type: "speak_result",
+      sessionId: SESSION,
+      requestId: greet.requestId,
+      turnId: greet.turnId,
+      status: "interrupted",
+      playedMs: 50,
+    });
+    await vi.waitFor(() =>
+      expect(
+        clientPayloads().find((p) => p.type === "assistant_done"),
+      ).toMatchObject({ turnId: greet.turnId, status: "interrupted" }),
+    );
+  });
+
+  it("no greeting sends nothing", async () => {
+    await boot([[delta("Hi."), done("Hi.")]]);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(
+      clientPayloads().filter((p) => String(p.type).startsWith("assistant_")),
+    ).toHaveLength(0);
+  });
+
+  it("session ended before the greeting finished sends no done", async () => {
+    await boot([[delta("Hi."), done("Hi.")]], {
+      config: { greeting: { text: "Welcome to the line." } },
+      skipSessionAck: true,
+    });
+    await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+    const greet = speaks()[0];
+    capture.emit({ type: "session_end", sessionId: SESSION });
+    speakResult(greet.requestId, greet.turnId);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(
+      clientPayloads().filter((p) => p.type === "assistant_done"),
+    ).toHaveLength(0);
+  });
+
   it("discard mode drops a final during an announcement", async () => {
     const { requests } = await boot([[delta("Hi."), done("Hi.")]], {
       config: {

@@ -698,6 +698,33 @@ describe("createLlmAgent", () => {
     expect(payloads.some((p) => p.type === "chat_reply")).toBe(false);
   });
 
+  it("voice turn carries inReplyTo", async () => {
+    await boot([
+      [delta("Hi. There."), done("Hi. There.")],
+      [delta("Again."), done("Again.")],
+    ]);
+    capture.emit({
+      type: "speech_event",
+      sessionId: SESSION,
+      event: { type: "user_speech_final", text: "hello", utteranceId: "utt-7" },
+    });
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    const first = clientPayloads().filter((p) =>
+      String(p.type).startsWith("assistant_"),
+    );
+    expect(first).toHaveLength(3);
+    for (const p of first) expect(p.inReplyTo).toBe("utt-7");
+    expect(speaks().every((m) => m.inReplyTo === "utt-7")).toBe(true);
+    capture.send.mockClear();
+    say("again");
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const second = clientPayloads().filter((p) =>
+      String(p.type).startsWith("assistant_"),
+    );
+    expect(second).toHaveLength(2);
+    for (const p of second) expect("inReplyTo" in p).toBe(false);
+  });
+
   it("interrupted voice turn sends done with status interrupted", async () => {
     const gate = deferred();
     await boot([[delta("One. Two"), { gate: gate.promise }, done("One. Two")]]);

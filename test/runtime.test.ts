@@ -417,6 +417,25 @@ describe("defineAgent", () => {
     });
   });
 
+  it("speech final passes utteranceId to onUserSpeechFinal", async () => {
+    const onUserSpeechFinal = vi.fn();
+    capture = installProcessMessageCapture();
+    defineAgent({ onUserSpeechFinal });
+    const fire = (extra: Record<string, unknown>) =>
+      capture.emit({
+        type: "speech_event",
+        sessionId: "peer-1",
+        event: { type: "user_speech_final", text: "hello", ...extra },
+      });
+    fire({ utteranceId: "utt-7" });
+    fire({});
+    fire({ utteranceId: "  " });
+    await vi.waitFor(() => expect(onUserSpeechFinal).toHaveBeenCalledTimes(3));
+    expect(onUserSpeechFinal.mock.calls[0][0].utteranceId).toBe("utt-7");
+    expect(onUserSpeechFinal.mock.calls[1][0].utteranceId).toBeUndefined();
+    expect(onUserSpeechFinal.mock.calls[2][0].utteranceId).toBeUndefined();
+  });
+
   it("trims whitespace for onUserSpeechFinal", async () => {
     const onUserSpeechFinal = vi.fn();
     capture = installProcessMessageCapture();

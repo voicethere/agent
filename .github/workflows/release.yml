@@ -48,6 +48,9 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Publishing @voicethere/agent@${VERSION}"
 
+      - name: Check CHANGELOG entry
+        run: bash scripts/ci/check-changelog-entry.sh "${{ steps.version.outputs.version }}"
+
       - run: npm ci
 
       - name: Set package version

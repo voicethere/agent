@@ -284,6 +284,19 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     );
   }
 
+  /**
+   * The one place where reply text reaches the client as `assistant_delta`.
+   * Chat deltas are unchanged; voice turns add `spoken: true`.
+   */
+  function sendReplyDelta(s: SessionState, t: TurnState, text: string): void {
+    sendToClient(
+      s.sessionId,
+      t.source === "chat"
+        ? { type: "assistant_delta", turnId: t.turnId, text }
+        : { type: "assistant_delta", turnId: t.turnId, text, spoken: true },
+    );
+  }
+
   /** The one place where a sentence of a reply leaves the agent. */
   function deliver(
     s: SessionState,
@@ -294,13 +307,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     flushSpeech(s, t);
     t.spoken.push(text);
     markReplyStarted(s, t);
-    if (t.source === "chat") {
-      sendToClient(s.sessionId, {
-        type: "assistant_delta",
-        turnId: t.turnId,
-        text,
-      });
-    }
+    sendReplyDelta(s, t, text);
     if (t.source === "voice" || speakChat) {
       if (interruptible) {
         speak(s.sessionId, text, { turnId: t.turnId });
@@ -436,13 +443,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     }
     markReplyStarted(s, t);
     t.spoken.push(text);
-    if (t.source === "chat") {
-      sendToClient(s.sessionId, {
-        type: "assistant_delta",
-        turnId: t.turnId,
-        text,
-      });
-    }
+    sendReplyDelta(s, t, text);
     if (t.source !== "voice" && !speakChat) return;
     t.pending.push(text);
     t.pendingChars += text.length;
@@ -1097,6 +1098,15 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         text,
       });
       sendToClient(s.sessionId, { type: "chat_reply", text });
+    }
+    if (t.source === "voice" && t.spoken.length > 0) {
+      sendToClient(s.sessionId, {
+        type: "assistant_done",
+        turnId: t.turnId,
+        text: t.spoken.join(" "),
+        spoken: true,
+        status: summary.status,
+      });
     }
     setAgentState(s.sessionId, "listening");
     if (hooks.onTurnEnd) {

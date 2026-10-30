@@ -676,6 +676,95 @@ describe("createLlmAgent", () => {
     });
   });
 
+  it("voice turn sends spoken assistant_delta per sentence and one assistant_done", async () => {
+    await boot([[delta("Hi. There."), done("Hi. There.")]]);
+    say("hello");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    const payloads = clientPayloads();
+    const turnId = speaks()[0].turnId;
+    expect(payloads.filter((p) => p.type === "assistant_delta")).toEqual([
+      { type: "assistant_delta", turnId, text: "Hi.", spoken: true },
+      { type: "assistant_delta", turnId, text: "There.", spoken: true },
+    ]);
+    expect(payloads.filter((p) => p.type === "assistant_done")).toEqual([
+      {
+        type: "assistant_done",
+        turnId,
+        text: "Hi. There.",
+        spoken: true,
+        status: "completed",
+      },
+    ]);
+    expect(payloads.some((p) => p.type === "chat_reply")).toBe(false);
+  });
+
+  it("interrupted voice turn sends done with status interrupted", async () => {
+    const gate = deferred();
+    await boot([[delta("One. Two"), { gate: gate.promise }, done("One. Two")]]);
+    say("go");
+    await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+    const turnId = speaks()[0].turnId;
+    capture.emit({
+      type: "agent_interrupted",
+      sessionId: SESSION,
+      turnId,
+      replyPlayedMs: 100,
+      playedText: "One.",
+      unplayedText: "",
+      playedTextExact: true,
+      cancelledRequestIds: [],
+    });
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    expect(summaries[0].status).toBe("interrupted");
+    expect(clientPayloads().filter((p) => p.type === "assistant_done")).toEqual(
+      [
+        {
+          type: "assistant_done",
+          turnId,
+          text: "One.",
+          spoken: true,
+          status: "interrupted",
+        },
+      ],
+    );
+  });
+
+  it("chat turn with speakChat on keeps its exact payload keys", async () => {
+    await boot([[delta("Hi."), done("Hi.")]]);
+    chat("hello");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    const payloads = clientPayloads();
+    const turnId = speaks()[0].turnId;
+    expect(payloads).toEqual([
+      { type: "assistant_delta", turnId, text: "Hi." },
+      { type: "assistant_done", turnId, text: "Hi." },
+      { type: "chat_reply", text: "Hi." },
+    ]);
+  });
+
+  it("two voice turns in the same millisecond keep their own turnId", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_000_000);
+    try {
+      await boot([
+        [delta("Alpha."), done("Alpha.")],
+        [delta("Beta."), done("Beta.")],
+      ]);
+      say("one");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      say("two");
+      await vi.waitFor(() => expect(summaries).toHaveLength(2));
+      const dones = clientPayloads().filter((p) => p.type === "assistant_done");
+      expect(dones).toHaveLength(2);
+      expect(dones[0].turnId).not.toBe(dones[1].turnId);
+      expect(dones.map((d) => d.text)).toEqual(["Alpha.", "Beta."]);
+      expect(dones[0].turnId).toBe(summaries[0].turnId);
+      expect(dones[1].turnId).toBe(summaries[1].turnId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("service tool source uses AGENT_SERVICE_URL and the bearer token", async () => {
     const sourceFactory = vi.fn((o: { name: string }) => ({
       name: o.name,

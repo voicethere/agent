@@ -22,7 +22,7 @@ The `fillers` block in `voicethere.llm.json` lists short sentences the agent spe
 
 ```json
 "fillers": {
-  "thinking": { "phrases": ["Hmm.", "Okay.", "Mm-hm.", "Right."], "afterMs": 1500 },
+  "thinking": { "phrases": ["Okay.", "Right.", "Sure.", "Let me see."], "afterMs": 1500 },
   "toolCall": { "phrases": ["Let me check that for you.", "One moment, I'll look that up."] },
   "toolWait": { "phrases": ["Still checking, one moment.", "Almost there."], "afterMs": 4000 },
   "interruptible": true
@@ -40,6 +40,10 @@ The `fillers` block in `voicethere.llm.json` lists short sentences the agent spe
 ## Speech coalescing
 
 `speech.coalesceMs` (0 to 1000, default 150) sets how long the agent holds a finished sentence to join it with the next one. Sentences that complete within the window are spoken as one utterance, so a reply the model returns at once has no gap between its sentences. The buffer is also spoken when the stream ends, at 400 characters, or when a tool call starts. Chat `assistant_delta` messages are not delayed. `0` speaks every sentence on its own.
+
+## Client messages for voice replies
+
+A voice reply also reaches the client as text. Each spoken sentence arrives as `{ "type": "assistant_delta", "turnId", "text", "spoken": true }`, and the turn ends with one `{ "type": "assistant_done", "turnId", "text", "spoken": true, "status" }`. `status` is `completed`, `failed`, `interrupted` or `cancelled`, and `text` holds the sentences delivered so far. Render one line per `turnId` and reveal it as the speech plays. Typed (chat) turns keep sending `assistant_delta`, `assistant_done` and `chat_reply` without `spoken`. Fillers are never sent as text.
 
 ## Prompt guidance for phone calls
 

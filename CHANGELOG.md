@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-30
+
+### Changed
+
+- Voice replies of an `llm-agent` project now also reach the client as text. Each spoken sentence is sent as `assistant_delta` and the turn ends with one `assistant_done`, both with `spoken: true` and the same `turnId`. `assistant_done` carries `status` (`completed`, `failed`, `interrupted` or `cancelled`) and the text of the sentences delivered so far. Voice turns send no `chat_reply`. Chat turns are unchanged. Fillers and announcements send no text.
+- The `llm-agent` template's `fillers.thinking.phrases` are now `Okay.`, `Right.`, `Sure.` and `Let me see.`: the old `Hmm.` and `Mm-hm.` were read out letter by letter. Existing projects keep their own phrases; edit `fillers.thinking.phrases` in `voicethere.llm.json` to change them.
+
 ## [0.19.0] - 2026-10-28
 
 ### Added

@@ -13,7 +13,7 @@
   "history": { "turns": 20, "interruptionNote": true },
   "fillers": {
     "thinking": {
-      "phrases": ["Hmm.", "Okay.", "Mm-hm.", "Right."],
+      "phrases": ["Okay.", "Right.", "Sure.", "Let me see."],
       "afterMs": 1500
     },
     "toolCall": {

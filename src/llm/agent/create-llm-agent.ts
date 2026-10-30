@@ -14,6 +14,8 @@ import type {
   AgentHandlers,
   AgentInterruptedContext,
   SessionContext,
+  SpeakHandle,
+  SpeakResultStatus,
 } from "../../runtime.js";
 import { resolveModel } from "../catalog.js";
 import {
@@ -296,19 +298,31 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
    * The one place where reply text reaches the client as `assistant_delta`.
    * Chat deltas are unchanged; voice turns add `spoken: true`.
    */
+  function sendSpokenDelta(
+    sessionId: string,
+    turnId: string,
+    text: string,
+    inReplyTo?: string,
+  ): void {
+    sendToClient(sessionId, {
+      type: "assistant_delta",
+      turnId,
+      text,
+      spoken: true,
+      ...(inReplyTo ? { inReplyTo } : {}),
+    });
+  }
+
   function sendReplyDelta(s: SessionState, t: TurnState, text: string): void {
-    sendToClient(
-      s.sessionId,
-      t.source === "chat"
-        ? { type: "assistant_delta", turnId: t.turnId, text }
-        : {
-            type: "assistant_delta",
-            turnId: t.turnId,
-            text,
-            spoken: true,
-            ...(t.inReplyTo ? { inReplyTo: t.inReplyTo } : {}),
-          },
-    );
+    if (t.source === "chat") {
+      sendToClient(s.sessionId, {
+        type: "assistant_delta",
+        turnId: t.turnId,
+        text,
+      });
+    } else {
+      sendSpokenDelta(s.sessionId, t.turnId, text, t.inReplyTo);
+    }
   }
 
   /** The one place where a sentence of a reply leaves the agent. */
@@ -337,11 +351,28 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     turnId: string,
     text: string,
     interruptible: boolean,
-  ): void {
+  ): SpeakHandle {
     if (interruptible) {
-      speak(s.sessionId, text, { turnId });
-    } else {
-      trackAnnouncement(s, announce(s.sessionId, text, { turnId }).done);
+      return speak(s.sessionId, text, { turnId });
+    }
+    const h = announce(s.sessionId, text, { turnId });
+    trackAnnouncement(s, h.done);
+    return h;
+  }
+
+  function greetingDoneStatus(
+    status: SpeakResultStatus,
+  ): "completed" | "interrupted" | "cancelled" | "failed" {
+    switch (status) {
+      case "played":
+      case "unsupported":
+        return "completed";
+      case "interrupted":
+        return "interrupted";
+      case "cancelled":
+        return "cancelled";
+      case "failed":
+        return "failed";
     }
   }
 
@@ -1342,12 +1373,31 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
           { role: "assistant", text: greeting.text },
           { turnId },
         );
-        speakAnnouncement(
+        sendSpokenDelta(s.sessionId, turnId, greeting.text);
+        const handle = speakAnnouncement(
           s,
           turnId,
           greeting.text,
           greeting.interruptible ?? D.greetingInterruptible,
         );
+        void handle.done.then((result) => {
+          if (s.ended) return;
+          // The runtime cancels pending speaks when the session ends or is
+          // reset; that is teardown, not a greeting outcome.
+          if (
+            result.errorCode === "session_ended" ||
+            result.errorCode === "reset"
+          ) {
+            return;
+          }
+          sendToClient(s.sessionId, {
+            type: "assistant_done",
+            turnId,
+            text: greeting.text,
+            spoken: true,
+            status: greetingDoneStatus(result.status),
+          });
+        });
       }
     },
 

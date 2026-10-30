@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-10-31
+
+### Fixed
+
+- LLM agent: the greeting is sent as spoken assistant text (`assistant_delta`/`assistant_done`, `spoken: true`), so `onAgentText` shows it like any spoken reply.
+
 ## [0.20.0] - 2026-10-30
 
 ### Changed

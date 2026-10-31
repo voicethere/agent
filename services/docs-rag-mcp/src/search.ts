@@ -3,7 +3,9 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 import { MANIFEST, type Manifest, TEXT_DB, VECTORS_DB } from "./build-index.ts";
+import { type SearchConfig, searchConfig } from "./config.ts";
 import type { Embedder } from "./embed.ts";
+import { isStopWord } from "./stopwords.ts";
 
 export const CANDIDATES = 20;
 export const RRF_K0 = 60;
@@ -17,36 +19,82 @@ export interface Hit {
   score: number;
 }
 
-/** Every whitespace-separated token is double-quoted, so input is never FTS5 syntax. */
+/**
+ * Stop words are dropped, then every remaining whitespace-separated token is
+ * double-quoted, so input is never FTS5 syntax. All stop words → "".
+ */
 export function ftsQuery(input: string): string {
   const tokens = input
     .split(/\s+/)
+    .filter((t) => !isStopWord(t))
     .map((t) => t.replaceAll('"', '""'))
     .filter((t) => t.replaceAll('"', "") !== "");
   return tokens.map((t) => `"${t}"`).join(" OR ");
 }
 
-/** Reciprocal rank fusion over ranked id lists (best first); ids are deduped. */
-export function rrf(lists: number[][], k0 = RRF_K0): Array<[number, number]> {
+export interface RankedList {
+  ids: number[];
+  weight: number;
+}
+
+/**
+ * Weighted reciprocal rank fusion: score = sum of weight / (k0 + rank) over
+ * the lists. Ids are deduped within a list; ties break by id.
+ */
+export function rrf(lists: RankedList[], k0 = RRF_K0): Array<[number, number]> {
   const scores = new Map<number, number>();
-  for (const list of lists) {
+  for (const { ids, weight } of lists) {
     const seen = new Set<number>();
     let rank = 0;
-    for (const id of list) {
+    for (const id of ids) {
       if (seen.has(id)) continue;
       seen.add(id);
       rank++;
-      scores.set(id, (scores.get(id) ?? 0) + 1 / (k0 + rank));
+      scores.set(id, (scores.get(id) ?? 0) + weight / (k0 + rank));
     }
   }
   return [...scores.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+}
+
+/**
+ * At most `maxPerDoc` chunks per document in the first `k` results, taken in
+ * fused order; if that leaves fewer than `k`, the skipped chunks fill the rest.
+ */
+export function diversify(
+  ids: number[],
+  docOf: (id: number) => string | undefined,
+  k: number,
+  maxPerDoc: number,
+): number[] {
+  const out: number[] = [];
+  const skipped: number[] = [];
+  const perDoc = new Map<string, number>();
+  for (const id of ids) {
+    if (out.length >= k) break;
+    const doc = docOf(id) ?? `#${id}`;
+    const n = perDoc.get(doc) ?? 0;
+    if (n >= maxPerDoc) {
+      skipped.push(id);
+      continue;
+    }
+    perDoc.set(doc, n + 1);
+    out.push(id);
+  }
+  for (const id of skipped) {
+    if (out.length >= k) break;
+    out.push(id);
+  }
+  return out;
 }
 
 export interface Index {
   manifest: Manifest;
   vectorIds(query: string): Promise<number[]>;
   textIds(query: string): number[];
-  hybridIds(query: string): Promise<Array<[number, number]>>;
+  hybridIds(
+    query: string,
+    cfg?: SearchConfig,
+  ): Promise<Array<[number, number]>>;
   chunk(id: number): Omit<Hit, "score"> | undefined;
   /** Whole page text, chunks in order. */
   doc(docId: string): { title: string; url: string; text: string } | undefined;
@@ -101,8 +149,11 @@ export function openIndex(dir: string, embedder: Embedder): Index {
       const rows = ftsStmt.all(q, CANDIDATES) as Array<{ rowid: number }>;
       return rows.map((r) => Number(r.rowid));
     },
-    async hybridIds(query) {
-      return rrf([await index.vectorIds(query), index.textIds(query)]);
+    async hybridIds(query, cfg = searchConfig()) {
+      return rrf([
+        { ids: await index.vectorIds(query), weight: cfg.vectorWeight },
+        { ids: index.textIds(query), weight: cfg.textWeight },
+      ]);
     },
     chunk(id) {
       const r = chunkStmt.get(id) as
@@ -145,17 +196,25 @@ export function openIndex(dir: string, embedder: Embedder): Index {
   return index;
 }
 
-/** Hybrid search: up to `k` hits, best first, `score` = RRF score. */
+/** Hybrid search: up to `k` hits, best first, `score` = weighted RRF score. */
 export async function searchHybrid(
   index: Index,
   query: string,
   k = 5,
+  cfg: SearchConfig = searchConfig(),
 ): Promise<Hit[]> {
-  const fused = await index.hybridIds(query);
+  const fused = await index.hybridIds(query, cfg);
+  const score = new Map(fused);
+  const ids = diversify(
+    fused.map(([id]) => id),
+    (id) => index.chunk(id)?.docId,
+    k,
+    cfg.maxPerDoc,
+  );
   const hits: Hit[] = [];
-  for (const [id, score] of fused.slice(0, k)) {
+  for (const id of ids) {
     const c = index.chunk(id);
-    if (c) hits.push({ ...c, score });
+    if (c) hits.push({ ...c, score: score.get(id) ?? 0 });
   }
   return hits;
 }

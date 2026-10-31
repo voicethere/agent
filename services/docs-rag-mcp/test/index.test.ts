@@ -88,6 +88,16 @@ describe("end to end with the real model", () => {
     expect(Array.isArray(hits)).toBe(true);
   });
 
+  it("an all-stop-word query: text list empty, hybrid equals vector", async () => {
+    const index = openIndex(out, embedder);
+    const q = "how do I?";
+    expect(index.textIds(q)).toEqual([]);
+    const vector = await index.vectorIds(q);
+    const hybrid = (await index.hybridIds(q)).map(([id]) => id);
+    index.close();
+    expect(hybrid).toEqual(vector);
+  });
+
   it("doc() returns the whole page text", () => {
     const index = openIndex(out, embedder);
     expect(index.doc("pricing.md")!.text).toContain("19 dollars");

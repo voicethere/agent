@@ -2,6 +2,7 @@
 import { parseArgs } from "node:util";
 import { buildIndex } from "./build-index.ts";
 import { readCorpusFile, readMarkdownDir } from "./corpus.ts";
+import { searchConfig } from "./config.ts";
 import { createEmbedder } from "./embed.ts";
 import { evaluate, readQuestions } from "./eval.ts";
 import { openIndex } from "./search.ts";
@@ -9,6 +10,7 @@ import { openIndex } from "./search.ts";
 const USAGE = `usage:
   docs-rag build (--corpus <file.json> | --docs <dir>) [--base-url <url>] --out <dir>
   docs-rag eval --index <dir> --questions <file.json> [--min-recall 0.9]
+       [--vector-weight 1.0] [--text-weight 0.5] [--max-per-doc 2]
 env: DOCS_RAG_MODEL_DIR (model directory, see "download-model")`;
 
 async function main(argv: string[]): Promise<number> {
@@ -23,6 +25,9 @@ async function main(argv: string[]): Promise<number> {
       index: { type: "string" },
       questions: { type: "string" },
       "min-recall": { type: "string" },
+      "vector-weight": { type: "string" },
+      "text-weight": { type: "string" },
+      "max-per-doc": { type: "string" },
     },
   });
   if (cmd === "build") {
@@ -50,12 +55,20 @@ async function main(argv: string[]): Promise<number> {
     }
     const min = Number(values["min-recall"] ?? "0.9");
     const index = openIndex(values.index, await createEmbedder());
-    const r = await evaluate(index, readQuestions(values.questions));
+    const cfg = searchConfig({
+      vectorWeight: values["vector-weight"],
+      textWeight: values["text-weight"],
+      maxPerDoc: values["max-per-doc"],
+    });
+    const r = await evaluate(index, readQuestions(values.questions), cfg);
+    console.log(
+      `weights: vector=${cfg.vectorWeight} text=${cfg.textWeight} maxPerDoc=${cfg.maxPerDoc}`,
+    );
     index.close();
     console.log(`questions: ${r.questions}`);
     for (const name of ["vector", "text", "hybrid"] as const) {
       console.log(
-        `${name.padEnd(7)} recall@4=${r[name].recallAt4.toFixed(3)} mrr=${r[name].mrr.toFixed(3)}`,
+        `${name.padEnd(7)} recall@4=${r[name].recallAt4.toFixed(3)} docRecall@4=${r[name].docRecallAt4.toFixed(3)} mrr=${r[name].mrr.toFixed(3)}`,
       );
     }
     if (r.hybrid.recallAt4 < min) {

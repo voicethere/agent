@@ -5,7 +5,7 @@ Builds a read-only hybrid search index (vector + full-text) from your docs and s
 - Vector store: `vectors.db`, `sqlite-vec` `vec0` table (cosine).
 - Text store: `text.db`, SQLite FTS5 (BM25) plus a `chunks` table.
 - Embeddings: `Xenova/bge-small-en-v1.5` (quantized ONNX, 384 dims) through `@huggingface/transformers`. Queries get the model card's retrieval prefix, passages get none. The model is loaded from `DOCS_RAG_MODEL_DIR` with remote downloads disabled.
-- Search: top 20 from each store, fused with reciprocal rank fusion (k0 = 60).
+- Search: top 20 from each store, fused with weighted reciprocal rank fusion (k0 = 60, vector weight 1.0, text weight 0.5). The full-text query drops English stop words and ORs the rest. At most 2 chunks per document are returned. Overrides: `DOCS_RAG_VECTOR_WEIGHT`, `DOCS_RAG_TEXT_WEIGHT`, `DOCS_RAG_MAX_PER_DOC`, and the `--vector-weight`, `--text-weight`, `--max-per-doc` eval flags.
 
 ## Inputs
 

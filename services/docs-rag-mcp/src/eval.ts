@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import type { Index } from "./search.ts";
+import { type SearchConfig, searchConfig } from "./config.ts";
+import { type Index, diversify } from "./search.ts";
 
 export interface Question {
   q: string;
@@ -8,7 +9,10 @@ export interface Question {
 }
 
 export interface Metrics {
+  /** Over the returned chunk list (hybrid: after per-doc diversity). */
   recallAt4: number;
+  /** Same, but the list is cut to the first 4 distinct documents. */
+  docRecallAt4: number;
   mrr: number;
 }
 
@@ -35,37 +39,52 @@ export function readQuestions(path: string): Question[] {
   });
 }
 
-/** Rank of the first chunk of `docId` among the chunk ids (1-based), or 0. */
-function docRank(index: Index, ids: number[], docId: string): number {
+/** Ranks (1-based, 0 = absent) of the first chunk of `docId`, by chunk and by distinct document. */
+function ranks(index: Index, ids: number[], docId: string): [number, number] {
+  const seen = new Set<string>();
   for (let i = 0; i < ids.length; i++) {
-    if (index.chunk(ids[i]!)?.docId === docId) return i + 1;
+    const d = index.chunk(ids[i]!)?.docId;
+    if (d === undefined) continue;
+    if (d === docId) return [i + 1, seen.size + 1];
+    seen.add(d);
   }
-  return 0;
+  return [0, 0];
 }
 
 export async function evaluate(
   index: Index,
   questions: Question[],
+  cfg: SearchConfig = searchConfig(),
 ): Promise<EvalResult> {
-  const ranks = {
-    vector: [] as number[],
-    text: [] as number[],
-    hybrid: [] as number[],
+  const acc = {
+    vector: [] as Array<[number, number]>,
+    text: [] as Array<[number, number]>,
+    hybrid: [] as Array<[number, number]>,
   };
   for (const q of questions) {
-    ranks.vector.push(docRank(index, await index.vectorIds(q.q), q.docId));
-    ranks.text.push(docRank(index, index.textIds(q.q), q.docId));
-    const hy = (await index.hybridIds(q.q)).map(([id]) => id);
-    ranks.hybrid.push(docRank(index, hy, q.docId));
+    acc.vector.push(ranks(index, await index.vectorIds(q.q), q.docId));
+    acc.text.push(ranks(index, index.textIds(q.q), q.docId));
+    const fused = (await index.hybridIds(q.q, cfg)).map(([id]) => id);
+    const shown = diversify(
+      fused,
+      (id) => index.chunk(id)?.docId,
+      fused.length,
+      cfg.maxPerDoc,
+    );
+    acc.hybrid.push(ranks(index, shown, q.docId));
   }
-  const m = (r: number[]): Metrics => ({
-    recallAt4: r.filter((x) => x >= 1 && x <= 4).length / Math.max(1, r.length),
-    mrr: r.reduce((s, x) => s + (x > 0 ? 1 / x : 0), 0) / Math.max(1, r.length),
-  });
+  const m = (r: Array<[number, number]>): Metrics => {
+    const n = Math.max(1, r.length);
+    return {
+      recallAt4: r.filter(([c]) => c >= 1 && c <= 4).length / n,
+      docRecallAt4: r.filter(([, d]) => d >= 1 && d <= 4).length / n,
+      mrr: r.reduce((s, [c]) => s + (c > 0 ? 1 / c : 0), 0) / n,
+    };
+  };
   return {
-    vector: m(ranks.vector),
-    text: m(ranks.text),
-    hybrid: m(ranks.hybrid),
+    vector: m(acc.vector),
+    text: m(acc.text),
+    hybrid: m(acc.hybrid),
     questions: questions.length,
   };
 }

@@ -1,0 +1,115 @@
+// Copy of the agent's `src/llm/knowledge/chunk-markdown.ts` (the service ships
+// as its own package). Lockstep test: test/chunk.test.ts runs both on one
+// fixture. Change both files together.
+
+export interface DocInput {
+  id: string;
+  text: string;
+  /** First element of every chunk title in this document. */
+  title?: string;
+}
+
+export interface MarkdownChunk {
+  /** `${doc.id}#${n}` */
+  id: string;
+  source: string;
+  title: string;
+  text: string;
+}
+
+export interface ChunkOptions {
+  maxWords?: number;
+  overlapWords?: number;
+}
+
+export const DEFAULT_CHUNK_WORDS = 300;
+export const DEFAULT_CHUNK_OVERLAP_WORDS = 50;
+
+// Headings and fences are parsed by scanning, not by regex: the text comes
+// from customer documents and a backtracking regex is polynomial on it.
+const isSpace = (c: string | undefined) =>
+  c === " " || c === "\t" || c === "\v" || c === "\f";
+
+/** `#`..`###` ATX heading → level and text (closing `#`s removed), or null. */
+function parseHeading(line: string): { level: number; text: string } | null {
+  let level = 0;
+  while (level < line.length && line[level] === "#") level++;
+  if (level < 1 || level > 3 || !isSpace(line[level])) return null;
+  let text = line.slice(level).trim();
+  let end = text.length;
+  while (end > 0 && text[end - 1] === "#") end--;
+  if (end === 0 || isSpace(text[end - 1])) text = text.slice(0, end).trimEnd();
+  return text === "" ? null : { level, text };
+}
+
+function isFence(line: string): boolean {
+  const t = line.trimStart();
+  return t.startsWith("```") || t.startsWith("~~~");
+}
+
+/**
+ * Splits Markdown on `#`..`###` headings, then into windows of `maxWords`
+ * words that overlap by `overlapWords`. Headings inside code fences are text.
+ */
+export function chunkMarkdown(
+  doc: DocInput,
+  opts: ChunkOptions = {},
+): MarkdownChunk[] {
+  const maxWords = opts.maxWords ?? DEFAULT_CHUNK_WORDS;
+  const overlap = opts.overlapWords ?? DEFAULT_CHUNK_OVERLAP_WORDS;
+  if (!Number.isInteger(maxWords) || maxWords < 1) {
+    throw new RangeError("maxWords must be a positive integer");
+  }
+  if (!Number.isInteger(overlap) || overlap < 0 || overlap >= maxWords) {
+    throw new RangeError("overlapWords must be >= 0 and < maxWords");
+  }
+
+  const stack: string[] = ["", "", ""];
+  const titleOf = (): string => {
+    const parts = [doc.title ?? "", ...stack].filter((p) => p !== "");
+    return parts.length > 0 ? parts.join(" › ") : doc.id;
+  };
+
+  const sections: Array<{ title: string; lines: string[] }> = [];
+  let current = { title: titleOf(), lines: [] as string[] };
+  let fenced = false;
+  for (const line of doc.text.split(/\r?\n/)) {
+    if (isFence(line)) fenced = !fenced;
+    const h = fenced ? null : parseHeading(line);
+    if (h) {
+      sections.push(current);
+      const level = h.level;
+      stack[level - 1] = h.text;
+      for (let i = level; i < stack.length; i++) stack[i] = "";
+      current = { title: titleOf(), lines: [] };
+    } else {
+      current.lines.push(line);
+    }
+  }
+  sections.push(current);
+
+  const chunks: MarkdownChunk[] = [];
+  const push = (title: string, text: string) => {
+    chunks.push({
+      id: `${doc.id}#${chunks.length}`,
+      source: doc.id,
+      title,
+      text,
+    });
+  };
+  for (const section of sections) {
+    const body = section.lines.join("\n").trim();
+    if (body === "") continue;
+    const words = body.split(/\s+/);
+    if (words.length <= maxWords) {
+      push(section.title, body);
+      continue;
+    }
+    const step = maxWords - overlap;
+    for (let start = 0; ; start += step) {
+      push(section.title, words.slice(start, start + maxWords).join(" "));
+      if (start + maxWords >= words.length) break;
+    }
+  }
+  return chunks;
+}

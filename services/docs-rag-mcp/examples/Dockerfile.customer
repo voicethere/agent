@@ -1,0 +1,19 @@
+# Your docs image: the docs-rag-mcp base plus an index built from your Markdown.
+#
+#   docker build -f Dockerfile.customer \
+#     --build-arg BASE=ghcr.io/voicethere/docs-rag-mcp:latest \
+#     --build-arg BASE_URL=https://docs.example.com/ -t my-docs-mcp .
+#
+# The build context has a docs/ folder with your .md files.
+ARG BASE=ghcr.io/voicethere/docs-rag-mcp:latest
+FROM ${BASE}
+ARG BASE_URL=
+COPY docs/ /docs/
+# Optional: add `docs-rag eval --index /index --questions /docs-questions.json`
+# after the build to fail the image when retrieval gets worse.
+RUN if [ -n "$BASE_URL" ]; then \
+      docs-rag build --docs /docs --base-url "$BASE_URL" --out /index; \
+    else \
+      docs-rag build --docs /docs --out /index; \
+    fi
+RUN test -f /index/manifest.json && test -f /index/vectors.db && test -f /index/text.db

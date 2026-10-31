@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-31
+
+### Added
+
+- Docs RAG MCP service. The image `ghcr.io/voicethere/docs-rag-mcp` (source in `services/docs-rag-mcp`) searches your docs with a read-only index of two stores: vectors (`sqlite-vec`) and full text (SQLite FTS5), fused by weighted reciprocal rank fusion. Embeddings come from the local model `bge-small-en-v1.5`, so there is no API key and no outside call. It is an MCP server (streamable HTTP, `/mcp`, `GET /healthz`, port 8080) with the tools `search_docs` and `get_doc`. Build your docs into it with `docs-rag build --docs <dir> --out /index` in an image `FROM` the base image (`examples/Dockerfile.customer`), or from a corpus JSON file; `docs-rag eval` reports recall@4 and MRR and can fail the build. `DOCS_RAG_TOOL_PREFIX` and `DOCS_RAG_DESCRIPTION` rename the tools and describe them for your docs.
+- Template `llm-docs-rag`: an LLM agent that takes its docs tools from a project service running that image. The prompt searches before it states a fact and names the page URL; `knowledge` stays off.
+
 ## [0.20.1] - 2026-10-31
 
 ### Fixed

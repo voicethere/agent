@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { CALL_AGENT_PROMPT_GUIDANCE } from "../../../src/llm/agent/prompt-guidance.js";
 
-const templatePrompts = ["llm-agent", "llm-mcp-service"].map((name) => ({
+const templatePrompts = ["llm-agent", "llm-mcp-service", "llm-docs-rag"].map((name) => ({
   name,
   text: readFileSync(
     new URL(`../../../templates/${name}/prompt.md`, import.meta.url),

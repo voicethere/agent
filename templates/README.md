@@ -76,6 +76,7 @@ Each folder has its own README. Summary:
 | `webhooks-redis`    | `webhooks-redis/`    | Webhooks plus Redis counter                                       |
 | `llm-agent`         | `llm-agent/`         | LLM voice and chat agent, tools, MCP, optional knowledge (RAG)    |
 | `llm-mcp-service`   | `llm-mcp-service/`   | `llm-agent` plus a project service that serves MCP tools          |
+| `llm-docs-rag`      | `llm-docs-rag/`      | `llm-agent` answering from your docs via the `docs-rag-mcp` image |
 
 ## E2e templates
 

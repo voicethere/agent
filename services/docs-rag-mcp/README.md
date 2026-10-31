@@ -50,12 +50,57 @@ DOCS_RAG_MODEL_DIR=.models node src/cli.ts eval --index .index --questions fixtu
 
 `eval` reads `[{ "q": "...", "docId": "...", "fact": "..." }]`, prints recall@4 and MRR for vector, text and hybrid, and exits 1 when hybrid recall@4 is below `--min-recall`.
 
+## Server
+
+`src/server.ts` serves the index over MCP (streamable HTTP, stateless) on `PORT` (default 8080): `POST /mcp` and `GET /healthz`. `/healthz` answers 503 until the model and both databases are loaded, then 200. Without `INDEX_DIR/manifest.json` the process prints `DOCS_RAG_INDEX_MISSING` and exits 1.
+
+| Tool          | Input                                                   | Result                                                                                              |
+| ------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `search_docs` | `query` (1 to 500 characters), `k` (1 to 10, default 5) | Numbered hits `N. title — url (id: page)` followed by the passage, at most 4000 characters in total |
+| `get_doc`     | `id` (the page id from a hit)                           | The page text, at most 12000 characters, or `not found`                                             |
+
+Each call is bounded to 5 s. Log lines carry the tool, `k`, hit count and duration, never the query or passage text.
+
+| Env                    | Default               | Meaning                                                                                                                                       |
+| ---------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                 | `8080`                | Listen port                                                                                                                                   |
+| `INDEX_DIR`            | `/index`              | Directory with `manifest.json`, `vectors.db`, `text.db`                                                                                       |
+| `DOCS_RAG_MODEL_DIR`   | `/model` in the image | Embedding model directory                                                                                                                     |
+| `MCP_TOKEN`            | unset                 | When set, `/mcp` needs `Authorization: Bearer <token>`. Leave it unset behind a project service: the platform checks the service token first. |
+| `DOCS_RAG_TOOL_PREFIX` | empty                 | Prefix for both tool names, up to 32 letters, digits or underscores: `acme_` gives `acme_search_docs`                                         |
+| `DOCS_RAG_DESCRIPTION` | generic text          | Description of the search tool, for example `Search the Acme docs`                                                                            |
+
+## Image
+
+The base image is `node:26-slim` (glibc), not alpine: `onnxruntime-node` ships glibc binaries only, and `sqlite-vec` and `better-sqlite3` have glibc prebuilds. It holds the dependencies, the model under `/model`, the `docs-rag` command on `PATH`, and runs the server as the non-root `node` user with `INDEX_DIR=/index`. The build fails when a native binary or a model file is missing. The base image alone has no index and refuses to start.
+
+Extend it with your docs (`examples/Dockerfile.customer`):
+
+```dockerfile
+FROM ghcr.io/voicethere/docs-rag-mcp:latest
+COPY docs/ /docs/
+RUN docs-rag build --docs /docs --out /index
+# optional gate: RUN docs-rag eval --index /index --questions /questions.json --min-recall 0.9
+```
+
+Run it as a project service: port `8080`, HTTP health check `/healthz`, and see the `llm-docs-rag` template.
+
+Smoke test against a running server (lists the tools, calls both, prints p50 and p95 of N searches):
+
+```bash
+node scripts/smoke-mcp.ts --url http://127.0.0.1:8080/mcp --query "your question" --expect-doc pricing.md --searches 50
+```
+
+Measured on an image with a 66-page, 774-chunk corpus (linux/arm64): healthz after 0.4 s from `docker run`, memory about 260 MiB after 50 searches, search p50 7 ms and p95 11 ms.
+
 ## Test
 
 ```bash
 DOCS_RAG_MODEL_DIR=.models npm run download-model
 npm test
 ```
+
+With Docker, build the base image and set `DOCS_RAG_BASE_IMAGE=<tag>` to also build the customer example from the sample docs, start it and query it.
 
 ## Licences
 

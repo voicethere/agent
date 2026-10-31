@@ -1,0 +1,51 @@
+{
+  "$schema": "./node_modules/@voicethere/agent/schema/voicethere.llm.schema.json",
+  "version": 1,
+  "provider": "openrouter",
+  "model": "amazon/nova-micro-v1",
+  "apiKeySecret": "AGENT_OPENROUTER_API_KEY",
+  "maxOutputTokens": 300,
+  "greeting": {
+    "text": "Hi! Ask me anything about our documentation.",
+    "interruptible": true
+  },
+  "bargeIn": {
+    "mode": "project"
+  },
+  "history": {
+    "turns": 20,
+    "interruptionNote": true
+  },
+  "fillers": {
+    "thinking": {
+      "phrases": ["Okay.", "Right.", "Sure.", "Let me see."],
+      "afterMs": 1500
+    },
+    "toolCall": {
+      "phrases": [
+        "Let me check that for you.",
+        "One moment, I'll look that up."
+      ]
+    },
+    "toolWait": {
+      "phrases": ["Still checking, one moment.", "Almost there."],
+      "afterMs": 4000
+    },
+    "interruptible": true
+  },
+  "tools": {
+    "maxRounds": 5,
+    "timeoutMs": 15000
+  },
+  "toolSources": [
+    {
+      "kind": "service",
+      "path": "/mcp",
+      "allow": ["search_docs", "get_doc"]
+    }
+  ],
+  "knowledge": {
+    "store": "off"
+  },
+  "interruptPolicy": "cancel"
+}

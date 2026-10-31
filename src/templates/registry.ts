@@ -270,6 +270,33 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     },
   },
   {
+    id: "llm-docs-rag",
+    entry: "llm-docs-rag/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    title: "LLM agent + docs search",
+    summary:
+      "LLM agent that answers from your docs through a project service with hybrid vector and full-text search.",
+    category: "voice-data",
+    description:
+      "Same LLM agent as llm-agent, wired to a docs search service as its tool source (toolSources kind service, path /mcp, tools search_docs and get_doc). The README shows how to build your docs into the public docs-rag-mcp base image and set it as the project service. The prompt searches before it states a fact and cites the page URL.",
+    sourceFiles: [
+      "llm-docs-rag/agent.ts",
+      "llm-docs-rag/voicethere.llm.json",
+      "llm-docs-rag/prompt.md",
+      "llm-docs-rag/tools.ts",
+      "llm-docs-rag/hooks.ts",
+      "llm-docs-rag/md.d.ts",
+    ],
+    npmDependencies: {
+      openai: "^7.43.0",
+      "@anthropic-ai/sdk": "^1.3.0",
+      "@google/genai": "^2.31.0",
+      "@modelcontextprotocol/sdk": "^1.32.2",
+      ioredis: "^5.11.1",
+    },
+  },
+  {
     id: "echo-smoke",
     entry: "echo-smoke/agent.ts",
     kind: "e2e",

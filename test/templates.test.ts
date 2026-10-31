@@ -58,6 +58,7 @@ describe("agent template registry", () => {
         "game-sync-smoke",
         "language-switch",
         "llm-agent",
+        "llm-docs-rag",
         "llm-mcp-service",
         "mix-smoke",
         "positional-tts",
@@ -77,7 +78,7 @@ describe("agent template registry", () => {
   it("filters templates by kind", () => {
     const product = listTemplates({ kind: "product" });
     expect(product.every((template) => template.kind === "product")).toBe(true);
-    expect(product).toHaveLength(15);
+    expect(product).toHaveLength(16);
 
     const e2e = listTemplates({ kind: "e2e" });
     expect(e2e.every((template) => template.kind === "e2e")).toBe(true);
@@ -190,6 +191,7 @@ describe("seed template bundles", () => {
         "game-sync",
         "language-switch",
         "llm-agent",
+        "llm-docs-rag",
         "llm-mcp-service",
         "positional-tts",
         "spatial-showcase",

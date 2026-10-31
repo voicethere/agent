@@ -67,6 +67,10 @@ Remove `--dry-run` only when you intend a manual publish.
 
 The first push of `ghcr.io/voicethere/mcp-example-service` creates a private package. Set its visibility to **public** once (GitHub → the organization's Packages → `mcp-example-service` → Package settings → Change visibility), so project services can pull it without credentials.
 
+### Docs RAG MCP image (one-time owner step)
+
+The first push of `ghcr.io/voicethere/docs-rag-mcp` also creates a private package. Set its visibility to **public** once (Packages → `docs-rag-mcp` → Package settings → Change visibility), so customers can build `FROM` it and project services can pull it without credentials.
+
 ### Publish errors
 
 | Error | Cause | Fix |
@@ -119,6 +123,7 @@ git push origin refs/tags/release/0.1.0
 2. **publish** — set version from tag, `npm publish --access public`, verify registry
 3. **GitHub Release** — notes from `CHANGELOG.md`
 4. **mcp-example-image** — builds `services/mcp-example` and pushes `ghcr.io/voicethere/mcp-example-service:<version>` and `:latest` with the workflow `GITHUB_TOKEN` (`packages: write`)
+5. **docs-rag-mcp-image** — builds `services/docs-rag-mcp` and pushes `ghcr.io/voicethere/docs-rag-mcp:<version>` and `:latest` (`linux/amd64`, `linux/arm64`)
 
 If the GitHub Release step fails after a successful publish, use [**Manual GitHub Release**](../.github/workflows/manual-github-release.yml) (`workflow_dispatch`).
 
@@ -127,6 +132,7 @@ If the GitHub Release step fails after a successful publish, use [**Manual GitHu
 - [ ] Workflow green (including **Publish** and **GitHub Release**)
 - [ ] `npm view @voicethere/agent version` shows new version
 - [ ] **mcp-example-image** job green; `docker pull ghcr.io/voicethere/mcp-example-service:<version>` works without login
+- [ ] **docs-rag-mcp-image** job green; `docker pull ghcr.io/voicethere/docs-rag-mcp:<version>` works without login
 
 ## Changelog
 

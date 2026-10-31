@@ -524,7 +524,7 @@ An LLM agent turns retrieval on with a `knowledge` block in `voicethere.llm.json
 
 `store` is `redis`, `supabase` or `off`. `embeddings.provider` is `openai`, `gemini` or `openrouter` (Anthropic has no embeddings API); `apiKeySecret` defaults to the top-level one when the provider is the same, and must be an `AGENT_*` secret name. Register the embeddings provider module in `providers`. With `store: "redis"` pass the documents to `createLlmAgent({ knowledge: { documents: [{ id: "pricing.md", text: pricing }] } })`; the agent needs `AGENT_REDIS_URL` (Project Redis) and indexes in the background on start. The model gets one tool, `search_knowledge({ query, k })`, which returns numbered chunks with title and score.
 
-The `llm-agent` template ships this block with `"store": "off"` and a sample `knowledge/about.md`, so turning retrieval on is one edit. The `llm-mcp-service` template adds a project service as an MCP tool source; its example server is the public image `ghcr.io/voicethere/mcp-example-service`.
+The `llm-agent` template ships this block with `"store": "off"` and a sample `knowledge/about.md`, so turning retrieval on is one edit. The `llm-mcp-service` template adds a project service as an MCP tool source; its example server is the public image `ghcr.io/voicethere/mcp-example-service`. The `llm-docs-rag` template answers from your own docs: build them into the public base image `ghcr.io/voicethere/docs-rag-mcp` (vector and full-text search, no API key) and run it as the project service; see `services/docs-rag-mcp`.
 
 ### Your own Supabase pgvector table
 

@@ -1,0 +1,83 @@
+name: Docs RAG MCP service
+
+# Tests the docs-rag-mcp service and builds its image on pull requests that touch it.
+
+on:
+  pull_request:
+    paths:
+      - "services/docs-rag-mcp/**"
+      - ".github/workflows/docs-rag-mcp.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    name: Tests, image and smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: services/docs-rag-mcp
+    env:
+      DOCS_RAG_MODEL_DIR: ${{ github.workspace }}/services/docs-rag-mcp/.models
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: services/docs-rag-mcp/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: services/docs-rag-mcp/.models
+          key: docs-rag-model-${{ hashFiles('services/docs-rag-mcp/src/embed.ts') }}
+
+      - name: Download embedding model
+        run: npm run download-model
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build base image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/docs-rag-mcp
+          load: true
+          push: false
+          tags: docs-rag-mcp-base:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Unit tests and customer image test
+        run: npm test
+        env:
+          DOCS_RAG_BASE_IMAGE: docs-rag-mcp-base:ci
+
+      - name: Build customer image and smoke it
+        run: |
+          set -eu
+          ctx="$(mktemp -d)"
+          cp -r fixtures/docs "$ctx/docs"
+          docker build -f examples/Dockerfile.customer \
+            --build-arg BASE=docs-rag-mcp-base:ci -t docs-rag-customer:ci "$ctx"
+          docker run -d --name docs-rag-smoke -p 127.0.0.1:8080:8080 docs-rag-customer:ci
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break
+            sleep 1
+          done
+          node scripts/smoke-mcp.ts --url http://127.0.0.1:8080/mcp \
+            --query "How much is the Starter plan per month?" --expect-doc pricing.md --searches 20
+          docker rm -f docs-rag-smoke

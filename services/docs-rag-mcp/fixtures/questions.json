@@ -1,0 +1,47 @@
+[
+  {
+    "q": "How much does the Starter plan cost per month?",
+    "docId": "pricing.md",
+    "fact": "19"
+  },
+  { "q": "What is included in the Team plan?", "docId": "pricing.md" },
+  {
+    "q": "What do I pay for storage over the limit?",
+    "docId": "pricing.md",
+    "fact": "0.10"
+  },
+  {
+    "q": "Which Node.js version do I need for the command line tool?",
+    "docId": "installation.md",
+    "fact": "20"
+  },
+  { "q": "How do I authenticate the CLI?", "docId": "installation.md" },
+  {
+    "q": "How do I verify that a webhook request is genuine?",
+    "docId": "webhooks.md"
+  },
+  {
+    "q": "When does Acme retry a failed webhook delivery?",
+    "docId": "webhooks.md"
+  },
+  {
+    "q": "How long are nightly snapshots kept on the Team plan?",
+    "docId": "backups.md",
+    "fact": "90 days"
+  },
+  {
+    "q": "How do I restore a database from a snapshot?",
+    "docId": "backups.md"
+  },
+  {
+    "q": "What happens when I exceed 600 requests per minute?",
+    "docId": "limits.md",
+    "fact": "429"
+  },
+  {
+    "q": "How many items does a list endpoint return per page?",
+    "docId": "limits.md",
+    "fact": "100"
+  },
+  { "q": "Is SAML sign-on available?", "docId": "security.md" }
+]

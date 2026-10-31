@@ -12,5 +12,5 @@
     "test/**/*.ts",
     "services/**/*.ts"
   ],
-  "exclude": ["test/fixtures/ioredis-bundle-agent.ts"]
+  "exclude": ["test/fixtures/ioredis-bundle-agent.ts", "services/docs-rag-mcp"]
 }

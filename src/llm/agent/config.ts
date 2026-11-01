@@ -96,6 +96,13 @@ export interface LlmAgentConfig {
   baseUrl?: string;
   temperature?: number;
   maxOutputTokens?: number;
+  /**
+   * `auto` (default): the model decides whether to call a tool.
+   * `required-first-round`: the first LLM call of every turn must call a tool
+   * (sent as the provider's documented "must call a tool" choice). Later
+   * rounds of the turn are `auto`. Ignored when the agent has no tools.
+   */
+  toolChoice?: "auto" | "required-first-round";
   greeting?: LlmAgentGreeting;
   bargeIn?: { mode: "project" | "on" | "off" };
   speechDuringNonInterruptible?: "answer_after" | "discard";
@@ -112,6 +119,21 @@ export interface LlmAgentConfig {
   toolCallLogs?: "full" | "redacted" | "off";
   /** Retrieval (RAG) behind a `search_knowledge` tool. */
   knowledge?: LlmAgentKnowledgeConfig;
+  /** Links in the reply: kept out of speech and sent as `assistant_content`. */
+  links?: LlmAgentLinksConfig;
+}
+
+export interface LlmAgentLinksConfig {
+  /**
+   * `extract` (default): URLs are removed from the spoken and chat text and each
+   * https URL is sent once as an `assistant_content` link message. `off`: the
+   * reply text is left as the model wrote it.
+   */
+  mode?: "extract" | "off";
+  /** Send only URLs that appear in a tool result of the same turn (default false). */
+  requireToolSource?: boolean;
+  /** Links sent per turn, 1..10 (default 3). */
+  maxPerTurn?: number;
 }
 
 export const LLM_AGENT_CONFIG_DEFAULTS = {
@@ -136,6 +158,9 @@ export const LLM_AGENT_CONFIG_DEFAULTS = {
   fallbackText: "Sorry, something went wrong. Please try again.",
   speakChatReplies: true,
   toolCallLogs: "redacted",
+  linksMode: "extract",
+  linksRequireToolSource: false,
+  linksMaxPerTurn: 3,
 } as const;
 
 export interface LlmAgentConfigError {
@@ -435,6 +460,7 @@ const TOP_KEYS = [
   "baseUrl",
   "temperature",
   "maxOutputTokens",
+  "toolChoice",
   "greeting",
   "bargeIn",
   "speechDuringNonInterruptible",
@@ -449,6 +475,7 @@ const TOP_KEYS = [
   "speakChatReplies",
   "toolCallLogs",
   "knowledge",
+  "links",
 ] as const;
 
 function validateKnowledge(
@@ -670,6 +697,16 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
   if (root.maxOutputTokens !== undefined) {
     const t = c.number(root.maxOutputTokens, "maxOutputTokens", 1, 8192, true);
     if (t !== undefined) config.maxOutputTokens = t;
+  }
+  if (root.toolChoice !== undefined) {
+    if (
+      root.toolChoice === "auto" ||
+      root.toolChoice === "required-first-round"
+    ) {
+      config.toolChoice = root.toolChoice;
+    } else {
+      c.err("toolChoice", 'must be one of "auto", "required-first-round"');
+    }
   }
 
   if (root.greeting !== undefined) {
@@ -905,6 +942,37 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
     if (b !== undefined) config.speakChatReplies = b;
   }
 
+  if (
+    config.toolChoice === "required-first-round" &&
+    config.tools?.maxRounds === 1
+  ) {
+    c.err(
+      "toolChoice",
+      '"required-first-round" needs tools.maxRounds >= 2 (the forced tool round leaves no round to answer)',
+    );
+  }
+
+  if (root.links !== undefined) {
+    const l = c.object(root.links, "links");
+    if (l) {
+      c.unknownKeys(l, ["mode", "requireToolSource", "maxPerTurn"], "links");
+      const links: LlmAgentLinksConfig = {};
+      if (l.mode !== undefined) {
+        if (l.mode === "extract" || l.mode === "off") links.mode = l.mode;
+        else c.err("links.mode", 'must be one of "extract", "off"');
+      }
+      if (l.requireToolSource !== undefined) {
+        const b = c.boolean(l.requireToolSource, "links.requireToolSource");
+        if (b !== undefined) links.requireToolSource = b;
+      }
+      if (l.maxPerTurn !== undefined) {
+        const n = c.number(l.maxPerTurn, "links.maxPerTurn", 1, 10, true);
+        if (n !== undefined) links.maxPerTurn = n;
+      }
+      config.links = links;
+    }
+  }
+
   if (root.toolCallLogs !== undefined) {
     if (
       root.toolCallLogs === "full" ||
@@ -967,6 +1035,12 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
       minimum: 1,
       maximum: 8192,
       default: 512,
+    },
+    toolChoice: {
+      enum: ["auto", "required-first-round"],
+      default: "auto",
+      description:
+        "required-first-round: the first LLM call of every turn must call a tool (for example a docs search before any answer). Later calls in the turn are auto. Ignored when the agent has no tools. Needs tools.maxRounds >= 2.",
     },
     greeting: {
       type: "object",
@@ -1205,6 +1279,22 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
       default: "Sorry, something went wrong. Please try again.",
     },
     speakChatReplies: { type: "boolean", default: true },
+    links: {
+      type: "object",
+      additionalProperties: false,
+      description:
+        "Links in the reply. extract (default) keeps URLs out of speech and chat text and sends each https URL once as an assistant_content link message; off leaves the text as written.",
+      properties: {
+        mode: { enum: ["extract", "off"], default: "extract" },
+        requireToolSource: {
+          type: "boolean",
+          default: false,
+          description:
+            "Send only URLs that appear in a tool result of the same turn, so the model cannot invent a link. Other URLs are still removed from speech.",
+        },
+        maxPerTurn: { type: "integer", minimum: 1, maximum: 10, default: 3 },
+      },
+    },
     knowledge: {
       type: "object",
       additionalProperties: false,

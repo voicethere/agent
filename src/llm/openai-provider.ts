@@ -115,6 +115,9 @@ export function createOpenAiCompatibleProvider(
         stream: true,
         stream_options: { include_usage: true },
         ...(tools.length > 0 ? { tools } : {}),
+        ...(tools.length > 0 && req.toolChoice === "required"
+          ? { tool_choice: "required" as const }
+          : {}),
         ...(req.temperature !== undefined
           ? { temperature: req.temperature }
           : {}),

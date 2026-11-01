@@ -94,6 +94,9 @@ export function createAnthropicProvider(config: AnthropicConfig): LlmProvider {
           system: req.system,
           messages: toMessages(req.messages),
           ...(tools.length > 0 ? { tools } : {}),
+          ...(tools.length > 0 && req.toolChoice === "required"
+            ? { tool_choice: { type: "any" as const } }
+            : {}),
           ...(req.temperature !== undefined
             ? { temperature: req.temperature }
             : {}),

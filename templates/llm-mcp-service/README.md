@@ -42,7 +42,7 @@ The rest of this file is the `llm-agent` README, which applies here too.
 
 ## Set the API key
 
-The template starts on OpenRouter with the model `amazon/nova-micro-v1`. Create a key at openrouter.ai, add it as a project secret named `AGENT_OPENROUTER_API_KEY`, then deploy. For production, pick the model from OpenRouter's list yourself, checking cost, latency and tool support. The key is read by name from `apiKeySecret` in `voicethere.llm.json`; it is never stored in the file. Only project secrets whose names start with `AGENT_` reach the agent.
+The template starts on OpenRouter with the model `anthropic/claude-haiku-5.5`. Create a key at openrouter.ai, add it as a project secret named `AGENT_OPENROUTER_API_KEY`, then deploy. For production, pick the model from OpenRouter's list yourself, checking cost, latency and tool support. The key is read by name from `apiKeySecret` in `voicethere.llm.json`; it is never stored in the file. Only project secrets whose names start with `AGENT_` reach the agent.
 
 ## Filler phrases
 
@@ -68,6 +68,32 @@ The `fillers` block in `voicethere.llm.json` lists short sentences the agent spe
 ## Speech coalescing
 
 `speech.coalesceMs` (0 to 1000, default 150) sets how long the agent holds a finished sentence to join it with the next one. Sentences that complete within the window are spoken as one utterance, so a reply the model returns at once has no gap between its sentences. The buffer is also spoken when the stream ends, at 400 characters, or when a tool call starts. Chat `assistant_delta` messages are not delayed. `0` speaks every sentence on its own.
+
+## Always search first
+
+Small models often answer from memory instead of calling a tool, even when the prompt says to call it. Set `"toolChoice": "required-first-round"` in `voicethere.llm.json` and the first LLM call of every turn must call a tool. The model sees the result before it says anything about the question. The calls after the tool result are free again, so the model can answer or call another tool. Small talk ("thanks") also triggers a tool call, so use this for assistants whose answers should always come from a tool, like a docs search.
+
+## Links in replies
+
+A URL in the model's reply is never spoken. The agent takes it out of the text before TTS, so `speak`, `assistant_delta` and `assistant_done` carry the sentence without it, and sends each https URL once as its own message:
+
+```json
+{
+  "type": "assistant_content",
+  "turnId": "…",
+  "content": { "kind": "link", "url": "https://…", "label": "pricing page" }
+}
+```
+
+It arrives before that turn's `assistant_done`, with the same `turnId`. Voice turns add `"spoken": true` and `inReplyTo`, like the text messages. A markdown link `[pricing page](https://…)` keeps its label in the spoken sentence and sends it as `label`. A short lead-in such as "Docs:" before the link is dropped with it. `http://` links are removed from speech and never sent. Clients should ignore `content.kind` values they do not know.
+
+Config `links`:
+
+- `mode`: `extract` (default) or `off` (the text stays as the model wrote it, URL included).
+- `requireToolSource` (default `false`): send only URLs that appear in a tool result of the same turn. Use it with a docs search tool so the model cannot link to a page it made up. Other URLs are still removed from speech.
+- `maxPerTurn` (1 to 10, default 3).
+
+Hooks and tools can send their own link with `ctx.sendContent({ kind: "link", url, label })`. It takes https only, skips a URL already sent in the turn, and returns whether it sent. The turn summary reports `linksSent` and `linksDropped`.
 
 ## Prompt guidance for phone calls
 

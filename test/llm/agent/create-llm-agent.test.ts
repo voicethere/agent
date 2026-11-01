@@ -1138,4 +1138,228 @@ describe("createLlmAgent", () => {
     });
     await vi.waitFor(() => expect(sent("session_start_ack")).toHaveLength(1));
   });
+
+  describe("toolChoice", () => {
+    const timeTool = defineTool({
+      name: "get_time",
+      description: "time",
+      inputSchema: { type: "object" },
+      handler: async () => "12:00",
+    });
+
+    it("required-first-round forces a tool on each turn's first call only", async () => {
+      const { requests } = await boot(
+        [
+          [done("", [call("c1", "get_time")])],
+          [delta("It is noon."), done("It is noon.")],
+          [done("", [call("c2", "get_time")])],
+          [delta("Still noon."), done("Still noon.")],
+        ],
+        {
+          config: { toolChoice: "required-first-round" },
+          options: { tools: [timeTool] },
+        },
+      );
+      say("what time is it?");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      say("and now?");
+      await vi.waitFor(() => expect(summaries).toHaveLength(2));
+      expect(requests.map((r) => r.toolChoice)).toEqual([
+        "required",
+        undefined,
+        "required",
+        undefined,
+      ]);
+    });
+
+    it("auto (default) never forces a tool", async () => {
+      const { requests } = await boot(
+        [
+          [done("", [call("c1", "get_time")])],
+          [delta("It is noon."), done("It is noon.")],
+        ],
+        { options: { tools: [timeTool] } },
+      );
+      say("what time is it?");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(requests).toHaveLength(2);
+      expect(requests.every((r) => r.toolChoice === undefined)).toBe(true);
+    });
+  });
+
+  describe("links", () => {
+    const URL_A = "https://app.voicethere.dev/docs/pricing";
+    const URL_B = "https://app.voicethere.dev/docs/llm-agents";
+    const docsTool = (result: string) =>
+      defineTool({
+        name: "search_docs",
+        description: "search",
+        inputSchema: { type: "object" },
+        handler: async () => result,
+      });
+    const allText = () =>
+      JSON.stringify([
+        ...speaks().map((m) => m.text),
+        ...clientPayloads()
+          .filter(
+            (p) => p.type === "assistant_delta" || p.type === "assistant_done",
+          )
+          .map((p) => p.text),
+      ]);
+
+    it("keeps a URL out of speech, deltas and done, and sends it once before done", async () => {
+      await boot([
+        [
+          delta("It costs 45 dollars. Details: https://app.voice"),
+          delta("there.dev/docs/pricing"),
+          done(`It costs 45 dollars. Details: ${URL_A}`),
+        ],
+      ]);
+      capture.emit({
+        type: "speech_event",
+        sessionId: SESSION,
+        event: {
+          type: "user_speech_final",
+          text: "cost?",
+          utteranceId: "utt-1",
+        },
+      });
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(allText()).not.toContain("http");
+      expect(speaks().map((m) => m.text)).toEqual(["It costs 45 dollars."]);
+      const payloads = clientPayloads();
+      const content = payloads.filter((p) => p.type === "assistant_content");
+      const turnId = speaks()[0].turnId;
+      expect(content).toEqual([
+        {
+          type: "assistant_content",
+          turnId,
+          content: { kind: "link", url: URL_A },
+          spoken: true,
+          inReplyTo: "utt-1",
+        },
+      ]);
+      const doneIdx = payloads.findIndex((p) => p.type === "assistant_done");
+      expect(payloads.indexOf(content[0])).toBeLessThan(doneIdx);
+      expect(summaries[0].linksSent).toBe(1);
+      expect(summaries[0].assistantText).toBe("It costs 45 dollars.");
+    });
+
+    it("sends the same URL once per turn and keeps a markdown label", async () => {
+      await boot([
+        [delta(`See the [pricing page](${URL_A}). Again ${URL_A}.`), done("")],
+      ]);
+      chat("cost?");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      const content = clientPayloads().filter(
+        (p) => p.type === "assistant_content",
+      );
+      expect(content).toHaveLength(1);
+      expect(content[0].content).toEqual({
+        kind: "link",
+        url: URL_A,
+        label: "pricing page",
+      });
+      expect("spoken" in content[0]).toBe(false);
+      expect(allText()).not.toContain("http");
+    });
+
+    it("requireToolSource drops a URL that no tool returned and keeps one that a tool did", async () => {
+      await boot(
+        [
+          [done("", [call("c1", "search_docs", { query: "price" })])],
+          [delta(`Price: ${URL_A} and also ${URL_B}.`), done("")],
+        ],
+        {
+          config: { links: { requireToolSource: true } },
+          options: { tools: [docsTool(`1. Pricing — ${URL_A} (id: pricing)`)] },
+        },
+      );
+      say("price?");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      const urls = clientPayloads()
+        .filter((p) => p.type === "assistant_content")
+        .map((p) => (p.content as Msg).url);
+      expect(urls).toEqual([URL_A]);
+      expect(allText()).not.toContain("http");
+      expect(summaries[0]).toMatchObject({ linksSent: 1, linksDropped: 1 });
+    });
+
+    it("never sends an http URL", async () => {
+      await boot([[delta("Old page: http://example.com/x. Bye."), done("")]]);
+      say("hi");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(
+        clientPayloads().filter((p) => p.type === "assistant_content"),
+      ).toEqual([]);
+      expect(allText()).not.toContain("http");
+      expect(summaries[0].linksDropped).toBe(1);
+    });
+
+    it("caps links per turn", async () => {
+      const urls = [1, 2, 3].map(
+        (n) => `https://app.voicethere.dev/docs/p${n}`,
+      );
+      await boot([[delta(`Pages ${urls.join(" , ")} .`), done("")]], {
+        config: { links: { maxPerTurn: 2 } },
+      });
+      say("pages?");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(
+        clientPayloads().filter((p) => p.type === "assistant_content"),
+      ).toHaveLength(2);
+      expect(summaries[0]).toMatchObject({ linksSent: 2, linksDropped: 1 });
+    });
+
+    it("mode off leaves the reply text as written", async () => {
+      await boot([[delta(`See ${URL_A} now.`), done("")]], {
+        config: { links: { mode: "off" } },
+      });
+      say("hi");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(
+        speaks()
+          .map((m) => m.text)
+          .join(" "),
+      ).toContain(URL_A);
+      expect(
+        clientPayloads().filter((p) => p.type === "assistant_content"),
+      ).toEqual([]);
+    });
+
+    it("ctx.sendContent sends an https link and rejects http", async () => {
+      const errors: unknown[] = [];
+      await boot([[delta("Here you go."), done("Here you go.")]], {
+        options: {
+          hooks: {
+            onAssistantText: (text, ctx) => {
+              expect(
+                ctx.sendContent({
+                  kind: "link",
+                  url: URL_B,
+                  label: " Agents ",
+                }),
+              ).toBe(true);
+              expect(ctx.sendContent({ kind: "link", url: URL_B })).toBe(false);
+              try {
+                ctx.sendContent({ kind: "link", url: "http://example.com" });
+              } catch (err) {
+                errors.push((err as { code?: string }).code);
+              }
+              return text;
+            },
+          },
+        },
+      });
+      chat("links?");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      const content = clientPayloads().filter(
+        (p) => p.type === "assistant_content",
+      );
+      expect(content.map((p) => p.content)).toEqual([
+        { kind: "link", url: URL_B, label: "Agents" },
+      ]);
+      expect(errors).toEqual(["INVALID_CONTENT"]);
+    });
+  });
 });

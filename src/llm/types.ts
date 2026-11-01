@@ -56,6 +56,8 @@ export interface LlmRequest {
   tools: LlmToolSpec[];
   temperature?: number;
   maxOutputTokens?: number;
+  /** `required`: the model must call one of `tools`. Default `auto`. */
+  toolChoice?: "auto" | "required";
   signal?: AbortSignal;
 }
 

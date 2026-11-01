@@ -85,6 +85,30 @@ describe("gemini adapter", () => {
     ).toEqual({ type: "object" });
   });
 
+  it("sends function calling mode ANY only when asked and tools exist", async () => {
+    mock = await startMock([
+      { sse: TOOL_SSE },
+      { sse: TOOL_SSE },
+      { sse: TOOL_SSE },
+    ]);
+    const p = createGeminiProvider({ apiKey: "k", baseUrl: mock.baseUrl });
+    const tools = [
+      {
+        name: "get_time",
+        description: "time",
+        inputSchema: { type: "object" },
+      },
+    ];
+    await collect(p.stream({ ...base, tools, toolChoice: "required" }));
+    await collect(p.stream({ ...base, tools }));
+    await collect(p.stream({ ...base, toolChoice: "required" }));
+    expect(mock.requests[0].body.toolConfig).toEqual({
+      functionCallingConfig: { mode: "ANY" },
+    });
+    expect(mock.requests[1].body).not.toHaveProperty("toolConfig");
+    expect(mock.requests[2].body).not.toHaveProperty("toolConfig");
+  });
+
   it("replays an assistant tool turn and tool results in the provider's format", async () => {
     mock = await startMock([{ sse: TEXT_SSE }]);
     const p = createGeminiProvider({ apiKey: "k", baseUrl: mock.baseUrl });

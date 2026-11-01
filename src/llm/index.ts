@@ -64,6 +64,7 @@ export type {
   LlmAgentGreeting,
   LlmAgentKnowledgeConfig,
   LlmAgentKnowledgeEmbeddings,
+  LlmAgentLinksConfig,
   LlmAgentMcpAuth,
   LlmAgentMcpSource,
   LlmAgentServiceSource,
@@ -79,7 +80,19 @@ export {
   THINKING_TAGS,
 } from "./agent/thinking-stripper.js";
 export { ConversationHistory } from "./agent/history.js";
-export type { LlmAgentHooks, TurnContext, TurnSummary } from "./agent/hooks.js";
+export type {
+  AgentContent,
+  LlmAgentHooks,
+  TurnContext,
+  TurnSummary,
+} from "./agent/hooks.js";
+export {
+  LINK_MARK,
+  LinkExtractor,
+  cleanLinkSentence,
+  countLinkMarks,
+} from "./agent/link-extractor.js";
+export type { ExtractedLink } from "./agent/link-extractor.js";
 export {
   chunkMarkdown,
   createRedisKnowledgeBase,

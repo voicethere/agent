@@ -2,7 +2,7 @@
   "$schema": "./node_modules/@voicethere/agent/schema/voicethere.llm.schema.json",
   "version": 1,
   "provider": "openrouter",
-  "model": "amazon/nova-micro-v1",
+  "model": "anthropic/claude-haiku-5.5",
   "apiKeySecret": "AGENT_OPENROUTER_API_KEY",
   "maxOutputTokens": 300,
   "greeting": {
@@ -33,6 +33,7 @@
     },
     "interruptible": true
   },
+  "toolChoice": "required-first-round",
   "tools": {
     "maxRounds": 5,
     "timeoutMs": 15000

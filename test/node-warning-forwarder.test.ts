@@ -1,4 +1,5 @@
-import { fork } from "node:child_process";
+import { fork, spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -10,6 +11,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SANDBOX_DIR = join(__dirname, "../src/sandbox");
 const LOADER = join(SANDBOX_DIR, "loader-entry.js");
 const WARNING_FORWARDER = join(SANDBOX_DIR, "warning-forwarder.cjs");
+const DISCONNECT_PROBE = join(
+  __dirname,
+  "fixtures/disconnect-warning-probe.cjs",
+);
 const PROBE = join(__dirname, "fixtures/node-warning-probe.mjs");
 
 interface ProbeResult {
@@ -106,5 +111,68 @@ describe("node warning forwarder (real sandboxed child)", () => {
     const result = await runProbe(true);
     expect(result.warnings).toHaveLength(0);
     expect(result.stderr).toMatch(/Warning/);
+  }, 15_000);
+
+  it("truncates message to 2048 and stack to 4096, keeps full messageLength", async () => {
+    const result = await runProbe(false);
+    const cap = result.warnings.find((w) => w.name === "CapWarning");
+    expect(cap).toBeDefined();
+    expect(cap!.message.length).toBe(2048);
+    expect(cap!.messageLength).toBe(5000);
+    expect(cap!.stack).toBeDefined();
+    expect(cap!.stack!.length).toBeLessThanOrEqual(4096);
+  }, 15_000);
+
+  it("drops warnings silently when IPC is missing or disconnected", async () => {
+    const forwarder = realpathSync(WARNING_FORWARDER);
+    const execArgv = ["--no-warnings", `--require=${forwarder}`];
+
+    // (a) no IPC channel at all
+    const a = await new Promise<{ code: number | null; stderr: string }>(
+      (resolve, reject) => {
+        const chunks: Buffer[] = [];
+        const child = spawn(
+          process.execPath,
+          [...execArgv, "-e", "process.emitWarning('x')"],
+          { stdio: ["ignore", "ignore", "pipe"] },
+        );
+        child.stderr?.on("data", (c) => chunks.push(Buffer.from(c)));
+        child.on("error", reject);
+        child.on("exit", (code) =>
+          resolve({ code, stderr: Buffer.concat(chunks).toString("utf8") }),
+        );
+      },
+    );
+    expect(a.code).toBe(0);
+    expect(a.stderr).toBe("");
+
+    // (b) IPC channel disconnected before the warning
+    const b = await new Promise<{
+      code: number | null;
+      stderr: string;
+      warnings: number;
+    }>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let warnings = 0;
+      const child = fork(DISCONNECT_PROBE, [], {
+        execArgv,
+        stdio: ["ignore", "ignore", "pipe", "ipc"],
+      });
+      child.stderr?.on("data", (c) => chunks.push(Buffer.from(c)));
+      child.on("message", (m: unknown) => {
+        if ((m as { type?: string })?.type === "node_warning") warnings += 1;
+      });
+      child.on("error", reject);
+      child.on("exit", (code) =>
+        resolve({
+          code,
+          stderr: Buffer.concat(chunks).toString("utf8"),
+          warnings,
+        }),
+      );
+    });
+    expect(b.code).toBe(0);
+    expect(b.stderr).toBe("");
+    expect(b.warnings).toBe(0);
   }, 15_000);
 });

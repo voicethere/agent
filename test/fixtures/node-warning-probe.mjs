@@ -13,6 +13,7 @@ process.on("warning", () => {
 
 process.emitWarning("cust", "ExperimentalWarning");
 process.emitWarning("dep", { type: "DeprecationWarning", code: "DEP9999" });
+process.emitWarning("x".repeat(5000), "CapWarning");
 const emitter = new EventEmitter();
 for (let i = 0; i < 11; i += 1) emitter.on("x", () => {});
 // DEP0005

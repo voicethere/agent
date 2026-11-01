@@ -45,6 +45,10 @@ The `fillers` block in `voicethere.llm.json` lists short sentences the agent spe
 
 A voice reply also reaches the client as text. Each spoken sentence arrives as `{ "type": "assistant_delta", "turnId", "text", "spoken": true }`, and the turn ends with one `{ "type": "assistant_done", "turnId", "text", "spoken": true, "status" }`. `status` is `completed`, `failed`, `interrupted` or `cancelled`, and `text` holds the sentences delivered so far. When the runner sends an utterance id for the caller's final (`SpeechContext.utteranceId` in `onUserSpeechFinal`), both messages also carry `inReplyTo`, the caller utterance the reply answers. Render one line per `turnId` and reveal it as the speech plays. Typed (chat) turns keep sending `assistant_delta`, `assistant_done` and `chat_reply` without `spoken`. Fillers are never sent as text.
 
+## Always search first
+
+Small models often answer from memory instead of calling a tool, even when the prompt says to call it. Set `"toolChoice": "required-first-round"` in `voicethere.llm.json` and the first LLM call of every turn must call a tool. The model sees the result before it says anything about the question. The calls after the tool result are free again, so the model can answer or call another tool. Small talk ("thanks") also triggers a tool call, so use this for assistants whose answers should always come from a tool, like a docs search.
+
 ## Links in replies
 
 A URL in the model's reply is never spoken. The agent takes it out of the text before TTS, so `speak`, `assistant_delta` and `assistant_done` carry the sentence without it, and sends each https URL once as its own message:

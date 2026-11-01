@@ -96,6 +96,13 @@ export interface LlmAgentConfig {
   baseUrl?: string;
   temperature?: number;
   maxOutputTokens?: number;
+  /**
+   * `auto` (default): the model decides whether to call a tool.
+   * `required-first-round`: the first LLM call of every turn must call a tool
+   * (sent as the provider's documented "must call a tool" choice). Later
+   * rounds of the turn are `auto`. Ignored when the agent has no tools.
+   */
+  toolChoice?: "auto" | "required-first-round";
   greeting?: LlmAgentGreeting;
   bargeIn?: { mode: "project" | "on" | "off" };
   speechDuringNonInterruptible?: "answer_after" | "discard";
@@ -453,6 +460,7 @@ const TOP_KEYS = [
   "baseUrl",
   "temperature",
   "maxOutputTokens",
+  "toolChoice",
   "greeting",
   "bargeIn",
   "speechDuringNonInterruptible",
@@ -689,6 +697,16 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
   if (root.maxOutputTokens !== undefined) {
     const t = c.number(root.maxOutputTokens, "maxOutputTokens", 1, 8192, true);
     if (t !== undefined) config.maxOutputTokens = t;
+  }
+  if (root.toolChoice !== undefined) {
+    if (
+      root.toolChoice === "auto" ||
+      root.toolChoice === "required-first-round"
+    ) {
+      config.toolChoice = root.toolChoice;
+    } else {
+      c.err("toolChoice", 'must be one of "auto", "required-first-round"');
+    }
   }
 
   if (root.greeting !== undefined) {
@@ -1007,6 +1025,12 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
       minimum: 1,
       maximum: 8192,
       default: 512,
+    },
+    toolChoice: {
+      enum: ["auto", "required-first-round"],
+      default: "auto",
+      description:
+        "required-first-round: the first LLM call of every turn must call a tool (for example a docs search before any answer). Later calls in the turn are auto. Ignored when the agent has no tools.",
     },
     greeting: {
       type: "object",

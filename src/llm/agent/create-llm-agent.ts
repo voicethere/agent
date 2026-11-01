@@ -999,6 +999,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       system: opts.systemPrompt,
       messages,
       tools: registry ? registry.list().map((e) => e.spec) : [],
+      ...(config.toolChoice === "required-first-round" && t.llmCalls === 1
+        ? { toolChoice: "required" as const }
+        : {}),
       temperature: config.temperature,
       maxOutputTokens: config.maxOutputTokens ?? D.maxOutputTokens,
       signal,

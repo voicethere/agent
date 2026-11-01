@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { FunctionCallingConfigMode, GoogleGenAI } from "@google/genai";
 import type { Content, Part } from "@google/genai";
 import type {
   EmbeddingsRequest,
@@ -92,6 +92,15 @@ export function createGeminiProvider(config: GeminiConfig): LlmProvider {
                 },
               ]
             : undefined,
+          ...(req.tools.length && req.toolChoice === "required"
+            ? {
+                toolConfig: {
+                  functionCallingConfig: {
+                    mode: FunctionCallingConfigMode.ANY,
+                  },
+                },
+              }
+            : {}),
           temperature: req.temperature,
           maxOutputTokens: req.maxOutputTokens,
           abortSignal: req.signal,

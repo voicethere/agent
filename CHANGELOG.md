@@ -12,6 +12,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 - Config `links`: `mode` (`extract` default, `off`), `requireToolSource` (send only URLs a tool returned in the same turn) and `maxPerTurn` (default 3).
 - `ctx.sendContent({ kind: "link", url, label? })` for hooks and tools (https only). Turn summaries report `linksSent` and `linksDropped`.
 - `LinkExtractor` and `cleanLinkSentence` are exported for custom loops.
+- Config `toolChoice`: `"required-first-round"` makes the first LLM call of every turn call a tool (OpenAI and OpenRouter `tool_choice: "required"`, Anthropic `tool_choice: { type: "any" }`, Gemini function calling mode `ANY`). Use it when every answer must come from a tool, such as a docs search. Later calls in the turn stay `auto`; the default `"auto"` never forces a tool.
 
 ## [0.21.0] - 2026-10-31
 

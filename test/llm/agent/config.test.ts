@@ -21,6 +21,16 @@ function errorsOf(input: unknown) {
 }
 
 describe("validateLlmAgentConfig", () => {
+  it("accepts toolChoice values and rejects others", () => {
+    for (const toolChoice of ["auto", "required-first-round"]) {
+      const r = validateLlmAgentConfig({ ...base, toolChoice });
+      expect(r.ok && r.config.toolChoice).toBe(toolChoice);
+    }
+    expect(errorsOf({ ...base, toolChoice: "required" })).toEqual([
+      expect.objectContaining({ path: "toolChoice" }),
+    ]);
+  });
+
   it("accepts links settings and rejects bad ones", () => {
     const r = validateLlmAgentConfig({
       ...base,

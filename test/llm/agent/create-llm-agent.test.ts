@@ -1139,6 +1139,54 @@ describe("createLlmAgent", () => {
     await vi.waitFor(() => expect(sent("session_start_ack")).toHaveLength(1));
   });
 
+  describe("toolChoice", () => {
+    const timeTool = defineTool({
+      name: "get_time",
+      description: "time",
+      inputSchema: { type: "object" },
+      handler: async () => "12:00",
+    });
+
+    it("required-first-round forces a tool on each turn's first call only", async () => {
+      const { requests } = await boot(
+        [
+          [done("", [call("c1", "get_time")])],
+          [delta("It is noon."), done("It is noon.")],
+          [done("", [call("c2", "get_time")])],
+          [delta("Still noon."), done("Still noon.")],
+        ],
+        {
+          config: { toolChoice: "required-first-round" },
+          options: { tools: [timeTool] },
+        },
+      );
+      say("what time is it?");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      say("and now?");
+      await vi.waitFor(() => expect(summaries).toHaveLength(2));
+      expect(requests.map((r) => r.toolChoice)).toEqual([
+        "required",
+        undefined,
+        "required",
+        undefined,
+      ]);
+    });
+
+    it("auto (default) never forces a tool", async () => {
+      const { requests } = await boot(
+        [
+          [done("", [call("c1", "get_time")])],
+          [delta("It is noon."), done("It is noon.")],
+        ],
+        { options: { tools: [timeTool] } },
+      );
+      say("what time is it?");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(requests).toHaveLength(2);
+      expect(requests.every((r) => r.toolChoice === undefined)).toBe(true);
+    });
+  });
+
   describe("links", () => {
     const URL_A = "https://app.voicethere.dev/docs/pricing";
     const URL_B = "https://app.voicethere.dev/docs/llm-agents";

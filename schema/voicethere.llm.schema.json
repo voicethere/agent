@@ -42,6 +42,11 @@
       "maximum": 8192,
       "default": 512
     },
+    "toolChoice": {
+      "enum": ["auto", "required-first-round"],
+      "default": "auto",
+      "description": "required-first-round: the first LLM call of every turn must call a tool (for example a docs search before any answer). Later calls in the turn are auto. Ignored when the agent has no tools."
+    },
     "greeting": {
       "type": "object",
       "additionalProperties": false,

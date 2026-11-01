@@ -69,6 +69,10 @@ The `fillers` block in `voicethere.llm.json` lists short sentences the agent spe
 
 `speech.coalesceMs` (0 to 1000, default 150) sets how long the agent holds a finished sentence to join it with the next one. Sentences that complete within the window are spoken as one utterance, so a reply the model returns at once has no gap between its sentences. The buffer is also spoken when the stream ends, at 400 characters, or when a tool call starts. Chat `assistant_delta` messages are not delayed. `0` speaks every sentence on its own.
 
+## Always search first
+
+Small models often answer from memory instead of calling a tool, even when the prompt says to call it. Set `"toolChoice": "required-first-round"` in `voicethere.llm.json` and the first LLM call of every turn must call a tool. The model sees the result before it says anything about the question. The calls after the tool result are free again, so the model can answer or call another tool. Small talk ("thanks") also triggers a tool call, so use this for assistants whose answers should always come from a tool, like a docs search.
+
 ## Links in replies
 
 A URL in the model's reply is never spoken. The agent takes it out of the text before TTS, so `speak`, `assistant_delta` and `assistant_done` carry the sentence without it, and sends each https URL once as its own message:

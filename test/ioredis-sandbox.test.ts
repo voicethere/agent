@@ -11,6 +11,7 @@ const AGENT_ROOT = join(__dirname, "..");
 const FIXTURES = join(__dirname, "fixtures");
 const SANDBOX_DIR = join(__dirname, "../src/sandbox");
 const LOADER = join(SANDBOX_DIR, "loader-entry.js");
+const WARNING_FORWARDER = join(SANDBOX_DIR, "warning-forwarder.cjs");
 const IOREDIS_PROBE = join(FIXTURES, "ioredis-probe.mjs");
 const NODE_MODULES = join(AGENT_ROOT, "node_modules");
 const PROBE_TIMEOUT_MS = 8_000;
@@ -45,6 +46,7 @@ function runIoredisProbe(options: {
     const execArgv = [
       ...buildChildExecArgv({
         loaderDir: SANDBOX_DIR,
+        warningForwarderPath: WARNING_FORWARDER,
         bundlePath: IOREDIS_PROBE,
         allowInternet: options.allowInternet,
         allowNetHosts: options.allowNetHosts,

@@ -68,6 +68,7 @@ export type ChildToParentMessage =
   | VoiceReplayLastMessage
   | AgentLogMessage
   | AgentErrorMessage
+  | NodeWarningMessage
   | SendToClientMessage
   | SendBinaryToClientMessage
   | IdleTimeoutDoneMessage
@@ -892,6 +893,28 @@ export interface AgentErrorMessage {
   /** Human-readable error summary (no stack traces required). */
   message: string;
   /** Optional stack trace from handler throw. */
+  stack?: string;
+}
+
+/**
+ * A Node process warning raised in the customer child (deprecations, experimental
+ * flags, listener leaks, `process.emitWarning`).
+ *
+ * Sent by the `--require` preload `warning-forwarder.cjs`. The child runs with
+ * `--no-warnings`, so warnings never reach stderr or customer agent logs; the parent
+ * decides where they go.
+ */
+export interface NodeWarningMessage {
+  type: "node_warning";
+  /** Warning class name, e.g. `DeprecationWarning`. */
+  name: string;
+  /** Node warning code, e.g. `DEP0005`, when set. */
+  code?: string;
+  /** Warning text, truncated to 2048 characters. */
+  message: string;
+  /** Length of the full, untruncated message. */
+  messageLength: number;
+  /** Stack, truncated to 4096 characters. */
   stack?: string;
 }
 

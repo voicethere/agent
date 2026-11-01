@@ -9,6 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(__dirname, "fixtures");
 const SANDBOX_DIR = join(__dirname, "../src/sandbox");
 const LOADER = join(SANDBOX_DIR, "loader-entry.js");
+const WARNING_FORWARDER = join(SANDBOX_DIR, "warning-forwarder.cjs");
 const FETCH_PROBE = join(FIXTURES, "fetch-probe.mjs");
 
 function runFetchProbe(): Promise<{
@@ -21,6 +22,7 @@ function runFetchProbe(): Promise<{
     const stderrChunks: Buffer[] = [];
     const execArgv = buildChildExecArgv({
       loaderDir: SANDBOX_DIR,
+      warningForwarderPath: WARNING_FORWARDER,
       bundlePath: FETCH_PROBE,
     });
     const child = fork(LOADER, [], {

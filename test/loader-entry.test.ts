@@ -10,6 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(__dirname, "fixtures");
 const SANDBOX_DIR = join(__dirname, "../src/sandbox");
 const LOADER = join(SANDBOX_DIR, "loader-entry.js");
+const WARNING_FORWARDER = join(SANDBOX_DIR, "warning-forwarder.cjs");
 
 function runConsoleLogProbe(): Promise<{
   exitCode: number | null;
@@ -27,6 +28,7 @@ function runConsoleLogProbe(): Promise<{
       stdio: ["ignore", "ignore", "ignore", "ipc"],
       execArgv: buildChildExecArgv({
         loaderDir: SANDBOX_DIR,
+        warningForwarderPath: WARNING_FORWARDER,
         bundlePath,
       }),
     });

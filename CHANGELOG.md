@@ -4,6 +4,12 @@ All notable changes to `@voicethere/agent` are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- The sandboxed child runs with `--no-warnings` and a `--require` preload (`dist/sandbox/warning-forwarder.cjs`) that sends every Node process warning to the parent as `{ type: "node_warning", name, code?, message, messageLength, stack? }` (new `NodeWarningMessage` type). Warnings no longer reach stderr, so they cannot appear in agent logs. `buildChildExecArgv` takes a new required `warningForwarderPath` option. Local `voicethere` runs print forwarded warnings to the terminal in Node's format.
+
 ## [0.22.0] - 2026-11-01
 
 ### Added

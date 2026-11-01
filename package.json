@@ -92,7 +92,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build:lib": "tsc -p tsconfig.json && mkdir -p dist/sandbox && cp src/sandbox/loader-entry.js dist/sandbox/",
+    "build:lib": "tsc -p tsconfig.json && mkdir -p dist/sandbox && cp src/sandbox/loader-entry.js src/sandbox/warning-forwarder.cjs dist/sandbox/",
     "build:schema": "node scripts/build-llm-schema.mjs",
     "build:eject": "node scripts/build-llm-eject.mjs",
     "build:templates": "node dist/templates/build-seed-bundles-cli.js",

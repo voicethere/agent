@@ -9,6 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(__dirname, "fixtures");
 const SANDBOX_DIR = join(__dirname, "../src/sandbox");
 const LOADER = join(SANDBOX_DIR, "loader-entry.js");
+const WARNING_FORWARDER = join(SANDBOX_DIR, "warning-forwarder.cjs");
 
 function runSandboxedChild(
   bundlePath: string,
@@ -23,6 +24,7 @@ function runSandboxedChild(
       stdio: ["ignore", "ignore", "pipe", "ipc"],
       execArgv: buildChildExecArgv({
         loaderDir: SANDBOX_DIR,
+        warningForwarderPath: WARNING_FORWARDER,
         bundlePath,
       }),
     });
@@ -43,6 +45,7 @@ describe("buildChildExecArgv", () => {
   it("matches runner permission flags (no child_process, scoped fs read)", () => {
     const argv = buildChildExecArgv({
       loaderDir: "/app/src/sandbox",
+      warningForwarderPath: "/app/src/sandbox/warning-forwarder.cjs",
       bundlePath: "/app/dist/agent.js",
     });
     expect(argv).toContain("--permission");
@@ -57,9 +60,27 @@ describe("buildChildExecArgv", () => {
     expect(argv.some((flag) => flag.includes("allow-addons"))).toBe(false);
   });
 
+  it("adds --no-warnings and --require=<forwarder> after the net flags", () => {
+    const argv = buildChildExecArgv({
+      loaderDir: "/app/src/sandbox",
+      warningForwarderPath: "/app/src/sandbox/warning-forwarder.cjs",
+      bundlePath: "/app/dist/agent.js",
+      allowNetHosts: ["project-redis"],
+    });
+    const lastNet = argv.lastIndexOf("--allow-net=project-redis");
+    expect(argv.indexOf("--no-warnings")).toBeGreaterThan(lastNet);
+    expect(argv.at(-1)).toBe(
+      "--require=/app/src/sandbox/warning-forwarder.cjs",
+    );
+    expect(argv).toContain(
+      "--allow-fs-read=/app/src/sandbox/warning-forwarder.cjs",
+    );
+  });
+
   it("resolves relative loader and bundle paths", () => {
     const argv = buildChildExecArgv({
       loaderDir: "./src/sandbox",
+      warningForwarderPath: "./src/sandbox/warning-forwarder.cjs",
       bundlePath: "./dist/agent.js",
     });
     expect(argv[0]).toBe("--permission");
@@ -71,6 +92,7 @@ describe("buildChildExecArgv", () => {
   it("includes bundle file path when loader and bundle share a parent", () => {
     const argv = buildChildExecArgv({
       loaderDir: "/app/dist",
+      warningForwarderPath: "/app/dist/warning-forwarder.cjs",
       bundlePath: "/app/dist/agent.js",
     });
     const readFlags = argv.filter((flag) =>
@@ -82,6 +104,7 @@ describe("buildChildExecArgv", () => {
   it("includes scoped allow-net hosts when allowNetHosts is set", () => {
     const argv = buildChildExecArgv({
       loaderDir: "/app/src/sandbox",
+      warningForwarderPath: "/app/src/sandbox/warning-forwarder.cjs",
       bundlePath: "/app/dist/agent.js",
       allowNetHosts: ["project-redis", "127.0.0.1:6379"],
     });
@@ -98,6 +121,7 @@ describe("buildChildExecArgv", () => {
   it("omits allow-net when allowInternet is false and no hosts are set", () => {
     const argv = buildChildExecArgv({
       loaderDir: "/app/src/sandbox",
+      warningForwarderPath: "/app/src/sandbox/warning-forwarder.cjs",
       bundlePath: "/app/dist/agent.js",
       allowInternet: false,
       allowNetHosts: ["", "  "],

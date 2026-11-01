@@ -154,6 +154,19 @@ describe("server with the real model", () => {
     expect((await fetch(`${base}/nope`)).status).toBe(404);
   });
 
+  it("the ready log line reports the embedder thread count (default 1)", async () => {
+    gate = Promise.resolve();
+    logs.length = 0;
+    await (
+      await start()
+    ).ready;
+    await (
+      await start({ threads: 3 })
+    ).ready;
+    const ready = logs.filter((l) => l.event === "ready");
+    expect(ready.map((l) => l.threads)).toEqual([1, 3]);
+  });
+
   it("refuses to start without an index manifest, with a named error", async () => {
     const empty = mkdtempSync(join(tmpdir(), "rag-empty-"));
     const err = await startDocsRagServer({ indexDir: empty, embedder }).catch(

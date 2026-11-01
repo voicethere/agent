@@ -45,6 +45,28 @@ The `fillers` block in `voicethere.llm.json` lists short sentences the agent spe
 
 A voice reply also reaches the client as text. Each spoken sentence arrives as `{ "type": "assistant_delta", "turnId", "text", "spoken": true }`, and the turn ends with one `{ "type": "assistant_done", "turnId", "text", "spoken": true, "status" }`. `status` is `completed`, `failed`, `interrupted` or `cancelled`, and `text` holds the sentences delivered so far. When the runner sends an utterance id for the caller's final (`SpeechContext.utteranceId` in `onUserSpeechFinal`), both messages also carry `inReplyTo`, the caller utterance the reply answers. Render one line per `turnId` and reveal it as the speech plays. Typed (chat) turns keep sending `assistant_delta`, `assistant_done` and `chat_reply` without `spoken`. Fillers are never sent as text.
 
+## Links in replies
+
+A URL in the model's reply is never spoken. The agent takes it out of the text before TTS, so `speak`, `assistant_delta` and `assistant_done` carry the sentence without it, and sends each https URL once as its own message:
+
+```json
+{
+  "type": "assistant_content",
+  "turnId": "…",
+  "content": { "kind": "link", "url": "https://…", "label": "pricing page" }
+}
+```
+
+It arrives before that turn's `assistant_done`, with the same `turnId`. Voice turns add `"spoken": true` and `inReplyTo`, like the text messages. A markdown link `[pricing page](https://…)` keeps its label in the spoken sentence and sends it as `label`. A short lead-in such as "Docs:" before the link is dropped with it. `http://` links are removed from speech and never sent. Clients should ignore `content.kind` values they do not know.
+
+Config `links`:
+
+- `mode`: `extract` (default) or `off` (the text stays as the model wrote it, URL included).
+- `requireToolSource` (default `false`): send only URLs that appear in a tool result of the same turn. Use it with a docs search tool so the model cannot link to a page it made up. Other URLs are still removed from speech.
+- `maxPerTurn` (1 to 10, default 3).
+
+Hooks and tools can send their own link with `ctx.sendContent({ kind: "link", url, label })`. It takes https only, skips a URL already sent in the turn, and returns whether it sent. The turn summary reports `linksSent` and `linksDropped`.
+
 ## Prompt guidance for phone calls
 
 The template prompt ends with a "Voice call" section. In your own agent you can append the same text with `CALL_AGENT_PROMPT_GUIDANCE` from `@voicethere/agent/llm`:

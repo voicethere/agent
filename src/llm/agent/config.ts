@@ -112,6 +112,21 @@ export interface LlmAgentConfig {
   toolCallLogs?: "full" | "redacted" | "off";
   /** Retrieval (RAG) behind a `search_knowledge` tool. */
   knowledge?: LlmAgentKnowledgeConfig;
+  /** Links in the reply: kept out of speech and sent as `assistant_content`. */
+  links?: LlmAgentLinksConfig;
+}
+
+export interface LlmAgentLinksConfig {
+  /**
+   * `extract` (default): URLs are removed from the spoken and chat text and each
+   * https URL is sent once as an `assistant_content` link message. `off`: the
+   * reply text is left as the model wrote it.
+   */
+  mode?: "extract" | "off";
+  /** Send only URLs that appear in a tool result of the same turn (default false). */
+  requireToolSource?: boolean;
+  /** Links sent per turn, 1..10 (default 3). */
+  maxPerTurn?: number;
 }
 
 export const LLM_AGENT_CONFIG_DEFAULTS = {
@@ -136,6 +151,9 @@ export const LLM_AGENT_CONFIG_DEFAULTS = {
   fallbackText: "Sorry, something went wrong. Please try again.",
   speakChatReplies: true,
   toolCallLogs: "redacted",
+  linksMode: "extract",
+  linksRequireToolSource: false,
+  linksMaxPerTurn: 3,
 } as const;
 
 export interface LlmAgentConfigError {
@@ -449,6 +467,7 @@ const TOP_KEYS = [
   "speakChatReplies",
   "toolCallLogs",
   "knowledge",
+  "links",
 ] as const;
 
 function validateKnowledge(
@@ -905,6 +924,27 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
     if (b !== undefined) config.speakChatReplies = b;
   }
 
+  if (root.links !== undefined) {
+    const l = c.object(root.links, "links");
+    if (l) {
+      c.unknownKeys(l, ["mode", "requireToolSource", "maxPerTurn"], "links");
+      const links: LlmAgentLinksConfig = {};
+      if (l.mode !== undefined) {
+        if (l.mode === "extract" || l.mode === "off") links.mode = l.mode;
+        else c.err("links.mode", 'must be one of "extract", "off"');
+      }
+      if (l.requireToolSource !== undefined) {
+        const b = c.boolean(l.requireToolSource, "links.requireToolSource");
+        if (b !== undefined) links.requireToolSource = b;
+      }
+      if (l.maxPerTurn !== undefined) {
+        const n = c.number(l.maxPerTurn, "links.maxPerTurn", 1, 10, true);
+        if (n !== undefined) links.maxPerTurn = n;
+      }
+      config.links = links;
+    }
+  }
+
   if (root.toolCallLogs !== undefined) {
     if (
       root.toolCallLogs === "full" ||
@@ -1205,6 +1245,22 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
       default: "Sorry, something went wrong. Please try again.",
     },
     speakChatReplies: { type: "boolean", default: true },
+    links: {
+      type: "object",
+      additionalProperties: false,
+      description:
+        "Links in the reply. extract (default) keeps URLs out of speech and chat text and sends each https URL once as an assistant_content link message; off leaves the text as written.",
+      properties: {
+        mode: { enum: ["extract", "off"], default: "extract" },
+        requireToolSource: {
+          type: "boolean",
+          default: false,
+          description:
+            "Send only URLs that appear in a tool result of the same turn, so the model cannot invent a link. Other URLs are still removed from speech.",
+        },
+        maxPerTurn: { type: "integer", minimum: 1, maximum: 10, default: 3 },
+      },
+    },
     knowledge: {
       type: "object",
       additionalProperties: false,

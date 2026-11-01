@@ -21,6 +21,35 @@ function errorsOf(input: unknown) {
 }
 
 describe("validateLlmAgentConfig", () => {
+  it("accepts links settings and rejects bad ones", () => {
+    const r = validateLlmAgentConfig({
+      ...base,
+      links: { mode: "off", requireToolSource: true, maxPerTurn: 5 },
+    });
+    expect(r.ok && r.config.links).toEqual({
+      mode: "off",
+      requireToolSource: true,
+      maxPerTurn: 5,
+    });
+    const paths = errorsOf({
+      ...base,
+      links: {
+        mode: "always",
+        requireToolSource: "yes",
+        maxPerTurn: 0,
+        extra: 1,
+      },
+    }).map((e) => e.path);
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "links.mode",
+        "links.requireToolSource",
+        "links.maxPerTurn",
+      ]),
+    );
+    expect(paths.length).toBeGreaterThanOrEqual(4);
+  });
+
   it("accepts a minimal config", () => {
     const r = validateLlmAgentConfig(base);
     expect(r.ok).toBe(true);

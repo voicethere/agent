@@ -375,6 +375,28 @@
       "type": "boolean",
       "default": true
     },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Links in the reply. extract (default) keeps URLs out of speech and chat text and sends each https URL once as an assistant_content link message; off leaves the text as written.",
+      "properties": {
+        "mode": {
+          "enum": ["extract", "off"],
+          "default": "extract"
+        },
+        "requireToolSource": {
+          "type": "boolean",
+          "default": false,
+          "description": "Send only URLs that appear in a tool result of the same turn, so the model cannot invent a link. Other URLs are still removed from speech."
+        },
+        "maxPerTurn": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 3
+        }
+      }
+    },
     "knowledge": {
       "type": "object",
       "additionalProperties": false,

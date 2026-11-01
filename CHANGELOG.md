@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- LLM agent: links in a reply are no longer read aloud. The agent removes each URL from the text before TTS (so `speak`, `assistant_delta` and `assistant_done` never contain it) and sends every https URL of the turn once as `{ "type": "assistant_content", "turnId", "content": { "kind": "link", "url", "label"? } }` before `assistant_done`. Voice turns add `spoken: true` and `inReplyTo`. Markdown links keep their label in the spoken text. `http://` links are removed and not sent.
+- Config `links`: `mode` (`extract` default, `off`), `requireToolSource` (send only URLs a tool returned in the same turn) and `maxPerTurn` (default 3).
+- `ctx.sendContent({ kind: "link", url, label? })` for hooks and tools (https only). Turn summaries report `linksSent` and `linksDropped`.
+- `LinkExtractor` and `cleanLinkSentence` are exported for custom loops.
+
 ## [0.21.0] - 2026-10-31
 
 ### Added

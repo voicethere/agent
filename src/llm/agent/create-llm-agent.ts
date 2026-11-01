@@ -49,7 +49,18 @@ import type {
 import { LLM_AGENT_CONFIG_DEFAULTS, validateLlmAgentConfig } from "./config.js";
 import type { LlmAgentConfig } from "./config.js";
 import { ConversationHistory } from "./history.js";
-import type { LlmAgentHooks, TurnContext, TurnSummary } from "./hooks.js";
+import type {
+  AgentContent,
+  LlmAgentHooks,
+  TurnContext,
+  TurnSummary,
+} from "./hooks.js";
+import {
+  LinkExtractor,
+  cleanLinkSentence,
+  countLinkMarks,
+} from "./link-extractor.js";
+import type { ExtractedLink } from "./link-extractor.js";
 import { SentenceSplitter } from "./sentence-splitter.js";
 import { ThinkingStripper, stripThinking } from "./thinking-stripper.js";
 
@@ -131,6 +142,11 @@ interface TurnState {
   fallbackSpoken: boolean;
   /** Characters of `<thinking>` blocks removed from the reply this turn. */
   thinkingCharsStripped: number;
+  /** URLs sent as `assistant_content` in this turn. */
+  linkUrls: Set<string>;
+  linksDropped: number;
+  /** Tool result texts of this turn (links.requireToolSource). */
+  toolResults: string[];
   status: TurnSummary["status"];
 }
 
@@ -168,6 +184,40 @@ function truncateBytes(text: string, max: number): string {
   let end = max;
   while (end > 0 && (buf[end] & 0xc0) === 0x80) end -= 1;
   return `${buf.subarray(0, end).toString("utf8")}\n[truncated]`;
+}
+
+/** Validates customer content for `ctx.sendContent`; https links only. */
+function checkContent(content: AgentContent): AgentContent {
+  const c = content as Partial<AgentContent> | null | undefined;
+  if (!c || c.kind !== "link") {
+    throw configError(
+      'sendContent: content.kind must be "link"',
+      "INVALID_CONTENT",
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(String(c.url));
+  } catch {
+    throw configError(
+      "sendContent: content.url is not a URL",
+      "INVALID_CONTENT",
+    );
+  }
+  if (url.protocol !== "https:") {
+    throw configError(
+      "sendContent: content.url must be https",
+      "INVALID_CONTENT",
+    );
+  }
+  if (c.label !== undefined && typeof c.label !== "string") {
+    throw configError(
+      "sendContent: content.label must be a string",
+      "INVALID_CONTENT",
+    );
+  }
+  const label = c.label?.trim();
+  return { kind: "link", url: String(c.url), ...(label ? { label } : {}) };
 }
 
 function interruptionNote(played: string, unplayed: string): string {
@@ -246,6 +296,10 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
   const fillersInterruptible =
     fillerCfg?.interruptible ?? D.fillersInterruptible;
   const coalesceMs = config.speech?.coalesceMs ?? D.speechCoalesceMs;
+  const linksMode = config.links?.mode ?? D.linksMode;
+  const linksRequireToolSource =
+    config.links?.requireToolSource ?? D.linksRequireToolSource;
+  const linksMaxPerTurn = config.links?.maxPerTurn ?? D.linksMaxPerTurn;
   const legacyToolFiller =
     toolCallPhrases.length === 0 && toolWaitPhrases.length === 0
       ? config.tools?.filler
@@ -323,6 +377,54 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     } else {
       sendSpokenDelta(s.sessionId, t.turnId, text, t.inReplyTo);
     }
+  }
+
+  /**
+   * The one place where `assistant_content` leaves the agent. Dedupes by URL
+   * per turn and applies `links.maxPerTurn`. Voice turns add `spoken: true`
+   * and `inReplyTo`, like `sendSpokenDelta`.
+   */
+  function sendContent(
+    s: SessionState,
+    t: TurnState,
+    content: AgentContent,
+  ): boolean {
+    if (t.controller.signal.aborted || s.ended) return false;
+    if (t.linkUrls.has(content.url)) return false;
+    if (t.linkUrls.size >= linksMaxPerTurn) {
+      t.linksDropped += 1;
+      return false;
+    }
+    t.linkUrls.add(content.url);
+    sendToClient(s.sessionId, {
+      type: "assistant_content",
+      turnId: t.turnId,
+      content,
+      ...(t.source === "voice"
+        ? { spoken: true, ...(t.inReplyTo ? { inReplyTo: t.inReplyTo } : {}) }
+        : {}),
+    });
+    return true;
+  }
+
+  /** A link the extractor took out of the model's reply. */
+  function offerLink(s: SessionState, t: TurnState, link: ExtractedLink): void {
+    if (!link.secure) {
+      t.linksDropped += 1;
+      return;
+    }
+    if (
+      linksRequireToolSource &&
+      !t.toolResults.some((r) => r.includes(link.url))
+    ) {
+      t.linksDropped += 1;
+      return;
+    }
+    sendContent(s, t, {
+      kind: "link",
+      url: link.url,
+      ...(link.label ? { label: link.label } : {}),
+    });
   }
 
   /** The one place where a sentence of a reply leaves the agent. */
@@ -819,6 +921,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         }
       }
       content = truncateBytes(content, toolMaxBytes);
+      if (!isError) t.toolResults.push(content);
       t.toolCalls.push({ name: call.name, isError, ms: now() - started });
       return { callId: call.id, name: call.name, content, isError };
     };
@@ -876,6 +979,20 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     t.roundText = "";
     const splitter = new SentenceSplitter();
     const stripper = new ThinkingStripper();
+    const links = linksMode === "extract" ? new LinkExtractor() : undefined;
+    const emitModelSentence = async (sentence: string): Promise<void> => {
+      if (!links) {
+        await emitSentence(s, t, ctx, sentence);
+        return;
+      }
+      const marks = countLinkMarks(sentence);
+      const clean = cleanLinkSentence(sentence);
+      if (clean) await emitSentence(s, t, ctx, clean);
+      for (let i = 0; i < marks; i += 1) {
+        const link = links.takeLink();
+        if (link) offerLink(s, t, link);
+      }
+    };
     let done: Extract<LlmStreamEvent, { type: "done" }> | undefined;
     const stream = provider!.stream({
       model: resolveModel(config.provider, config.model),
@@ -890,8 +1007,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       if (signal.aborted) break;
       if (ev.type === "text_delta") {
         if (t.firstTokenMs === undefined) t.firstTokenMs = now() - t.startedAt;
-        for (const sentence of splitter.push(stripper.push(ev.text))) {
-          await emitSentence(s, t, ctx, sentence);
+        const text = stripper.push(ev.text);
+        for (const sentence of splitter.push(links ? links.push(text) : text)) {
+          await emitModelSentence(sentence);
         }
       } else {
         done = ev;
@@ -904,13 +1022,15 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         "stream ended without done",
       );
     }
-    const tail = stripper.end();
+    const stripped = stripper.end();
+    const tail = links ? links.push(stripped) + links.end() : stripped;
     const sentences = tail
       ? [...splitter.push(tail), ...splitter.end()]
       : splitter.end();
     for (const sentence of sentences) {
-      await emitSentence(s, t, ctx, sentence);
+      await emitModelSentence(sentence);
     }
+    for (const link of links?.takeAll() ?? []) offerLink(s, t, link);
     t.thinkingCharsStripped += stripper.strippedChars;
     // History keeps what was spoken, not the model's private reasoning.
     const cleaned = stripThinking(done.text);
@@ -948,6 +1068,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       ...(t.inputTokens !== undefined ? { inputTokens: t.inputTokens } : {}),
       ...(t.outputTokens !== undefined ? { outputTokens: t.outputTokens } : {}),
       ...(t.errorCode ? { errorCode: t.errorCode } : {}),
+      ...(t.linkUrls.size > 0 ? { linksSent: t.linkUrls.size } : {}),
+      ...(t.linksDropped > 0 ? { linksDropped: t.linksDropped } : {}),
     };
   }
 
@@ -1172,6 +1294,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         inputTokens: summary.inputTokens,
         outputTokens: summary.outputTokens,
         thinkingCharsStripped: t.thinkingCharsStripped,
+        linksSent: t.linkUrls.size,
+        linksDropped: t.linksDropped,
       },
       s.sessionId,
     );
@@ -1209,6 +1333,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       pendingChars: 0,
       fallbackSpoken: false,
       thinkingCharsStripped: 0,
+      linkUrls: new Set(),
+      linksDropped: 0,
+      toolResults: [],
       status: "completed",
     };
     const ctx: TurnContext = {
@@ -1222,6 +1349,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         const parts = [...splitter.push(`${speech}\n`), ...splitter.end()];
         for (const part of parts) deliver(s, t, part, o?.interruptible);
       },
+      sendContent: (content) => sendContent(s, t, checkContent(content)),
     };
     const active: ActiveTurn = {
       turnId,
@@ -1275,6 +1403,10 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
           source,
           signal: new AbortController().signal,
           speak: () => {},
+          sendContent: (content) => {
+            checkContent(content);
+            return false;
+          },
         };
         await callHook("onTurnEnd", s.sessionId, () =>
           hooks.onTurnEnd!(summary, ctx),

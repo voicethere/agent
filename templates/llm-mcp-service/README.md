@@ -69,6 +69,28 @@ The `fillers` block in `voicethere.llm.json` lists short sentences the agent spe
 
 `speech.coalesceMs` (0 to 1000, default 150) sets how long the agent holds a finished sentence to join it with the next one. Sentences that complete within the window are spoken as one utterance, so a reply the model returns at once has no gap between its sentences. The buffer is also spoken when the stream ends, at 400 characters, or when a tool call starts. Chat `assistant_delta` messages are not delayed. `0` speaks every sentence on its own.
 
+## Links in replies
+
+A URL in the model's reply is never spoken. The agent takes it out of the text before TTS, so `speak`, `assistant_delta` and `assistant_done` carry the sentence without it, and sends each https URL once as its own message:
+
+```json
+{
+  "type": "assistant_content",
+  "turnId": "…",
+  "content": { "kind": "link", "url": "https://…", "label": "pricing page" }
+}
+```
+
+It arrives before that turn's `assistant_done`, with the same `turnId`. Voice turns add `"spoken": true` and `inReplyTo`, like the text messages. A markdown link `[pricing page](https://…)` keeps its label in the spoken sentence and sends it as `label`. A short lead-in such as "Docs:" before the link is dropped with it. `http://` links are removed from speech and never sent. Clients should ignore `content.kind` values they do not know.
+
+Config `links`:
+
+- `mode`: `extract` (default) or `off` (the text stays as the model wrote it, URL included).
+- `requireToolSource` (default `false`): send only URLs that appear in a tool result of the same turn. Use it with a docs search tool so the model cannot link to a page it made up. Other URLs are still removed from speech.
+- `maxPerTurn` (1 to 10, default 3).
+
+Hooks and tools can send their own link with `ctx.sendContent({ kind: "link", url, label })`. It takes https only, skips a URL already sent in the turn, and returns whether it sent. The turn summary reports `linksSent` and `linksDropped`.
+
 ## Prompt guidance for phone calls
 
 The template prompt ends with a "Voice call" section. In your own agent you can append the same text with `CALL_AGENT_PROMPT_GUIDANCE` from `@voicethere/agent/llm`:

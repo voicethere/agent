@@ -6,9 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-01
+
 ### Added
 
-- The sandboxed child runs with `--no-warnings` and a `--require` preload (`dist/sandbox/warning-forwarder.cjs`) that sends every Node process warning to the parent as `{ type: "node_warning", name, code?, message, messageLength, stack? }` (new `NodeWarningMessage` type). Warnings no longer reach stderr, so they cannot appear in agent logs. `buildChildExecArgv` takes a new required `warningForwarderPath` option. Local `voicethere` runs print forwarded warnings to the terminal in Node's format.
+- The sandboxed child runs with `--no-warnings` and a `--require` preload (`dist/sandbox/warning-forwarder.cjs`) that sends every Node process warning to the parent as `{ type: "node_warning", name, code?, message, messageLength, stack? }` (new `NodeWarningMessage` type). Warnings no longer reach stderr, so they cannot appear in agent logs. Local `voicethere` runs print forwarded warnings to the terminal in Node's format.
+
+### Changed
+
+- `buildChildExecArgv` takes a new required `warningForwarderPath` option (the path of `dist/sandbox/warning-forwarder.cjs`). Callers outside this package must pass it.
 
 ## [0.22.0] - 2026-11-01
 

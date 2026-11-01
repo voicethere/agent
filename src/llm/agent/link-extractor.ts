@@ -183,14 +183,18 @@ export function countLinkMarks(sentence: string): number {
 
 /**
  * Removes the link marks from a complete sentence and the words that only
- * pointed at the link: a short label ending in a colon ("Docs: …") and a
+ * pointed at the link: a label of one to three words ending in a colon
+ * ("Docs: …", "Pricing page: …") and a
  * dangling "at" / "via" before a link at the end. Returns "" when nothing
  * speakable is left.
  */
 export function cleanLinkSentence(sentence: string): string {
   if (!sentence.includes(LINK_MARK)) return sentence;
   let t = sentence
-    .replace(/(^|[.!?]\s+)[^.!?:\n]{0,40}:\s*(?=)/g, "$1")
+    .replace(
+      /(^|[.!?]\s+)(?:[\p{L}\p{N}'’-]+\s+){0,2}[\p{L}\p{N}'’-]+:\s*(?=)/gu,
+      "$1",
+    )
     .replace(/\s+(?:at|via)\s*(?=[\s.!?]*$)/gi, "")
     .replace(/\s*/g, "")
     .replace(/\(\s*\)/g, "")

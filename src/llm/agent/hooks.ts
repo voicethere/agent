@@ -19,7 +19,9 @@ export interface TurnContext {
    * Send structured content in this turn (same turnId) as an
    * `assistant_content` message. Links must be https; a URL already sent in
    * this turn is not sent again, and `links.maxPerTurn` applies. Returns
-   * whether the message was sent. Throws on invalid content.
+   * whether the message was sent. Throws on invalid content. In `onTurnEnd`
+   * the turn is over: content is still validated, but nothing is sent and the
+   * call returns false.
    */
   sendContent(content: AgentContent): boolean;
 }

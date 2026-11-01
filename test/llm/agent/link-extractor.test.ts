@@ -171,6 +171,19 @@ describe("cleanLinkSentence", () => {
     ).toBe("The full price list for every plan and pack is on this page.");
   });
 
+  it("drops a label of up to three words before a link", () => {
+    expect(cleanLinkSentence(`Pricing page: ${LINK_MARK}`)).toBe("");
+    expect(cleanLinkSentence(`Done. Full price list: ${LINK_MARK}`)).toBe(
+      "Done.",
+    );
+  });
+
+  it("keeps a four-word lead-in and turns its colon into a full stop", () => {
+    expect(cleanLinkSentence(`See the price list: ${LINK_MARK}`)).toBe(
+      "See the price list.",
+    );
+  });
+
   it("removes empty parentheses left by a link", () => {
     expect(cleanLinkSentence(`Pricing (${LINK_MARK}) is simple.`)).toBe(
       "Pricing is simple.",

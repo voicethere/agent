@@ -38,6 +38,10 @@ Redeploy the project. The agent connects to `/mcp` on the service with the proje
 - `"toolChoice": "required-first-round"` makes every turn start with a docs search, so the answer comes from your docs and not from the model's memory. Remove it if the assistant should also handle small talk without searching.
 - Set the provider, model and API key as in the `llm-agent` template: the template starts on OpenRouter with `anthropic/claude-haiku-5.5`, key `AGENT_OPENROUTER_API_KEY` (a project secret).
 
+## Output token cap
+
+`maxOutputTokens` is 1024 in `voicethere.llm.json`. Thinking models count hidden reasoning against `maxOutputTokens`, so keep spoken replies short in the prompt, not with a small cap. A reply cut off by the cap before anything was spoken ends the turn with `LLM_OUTPUT_TRUNCATED` and the fallback text.
+
 ## Files
 
 - `agent.ts` wires the pieces together. You rarely need to change it.

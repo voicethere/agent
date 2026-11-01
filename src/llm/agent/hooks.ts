@@ -1,4 +1,4 @@
-import type { LlmMessage } from "../types.js";
+import type { LlmMessage, LlmStopReason } from "../types.js";
 
 /**
  * Structured content sent to the client next to the reply text, as an
@@ -35,6 +35,10 @@ export interface TurnSummary {
   firstTokenMs?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /** Hidden thinking tokens (part of `outputTokens`), when the provider reports them. */
+  reasoningTokens?: number;
+  /** Stop reason of the last LLM round (`max_tokens`: the output cap cut the reply). */
+  stopReason?: LlmStopReason;
   errorCode?: string;
   /** `assistant_content` link messages sent in this turn. */
   linksSent?: number;

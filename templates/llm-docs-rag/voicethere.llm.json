@@ -4,7 +4,7 @@
   "provider": "openrouter",
   "model": "anthropic/claude-haiku-5.5",
   "apiKeySecret": "AGENT_OPENROUTER_API_KEY",
-  "maxOutputTokens": 300,
+  "maxOutputTokens": 1024,
   "greeting": {
     "text": "Hi! Ask me anything about our documentation.",
     "interruptible": true

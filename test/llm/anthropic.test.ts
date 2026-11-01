@@ -108,6 +108,40 @@ describe("anthropic adapter", () => {
     expect(body.output_config).toEqual({ effort: "low" });
   });
 
+  it("maps stop_reason max_tokens and reads output_tokens_details.thinking_tokens", async () => {
+    const sse =
+      start() +
+      sseEvent("content_block_start", {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text", text: "" },
+      }) +
+      sseEvent("content_block_delta", {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Part" },
+      }) +
+      sseEvent("content_block_stop", { type: "content_block_stop", index: 0 }) +
+      sseEvent("message_delta", {
+        type: "message_delta",
+        delta: { stop_reason: "max_tokens", stop_sequence: null },
+        usage: {
+          output_tokens: 300,
+          output_tokens_details: { thinking_tokens: 210 },
+        },
+      }) +
+      sseEvent("message_stop", { type: "message_stop" });
+    mock = await startMock([{ sse }]);
+    const p = createAnthropicProvider({ apiKey: "k", baseUrl: mock.baseUrl });
+    const events = await collect(p.stream(base));
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      stopReason: "max_tokens",
+      text: "Part",
+      usage: { inputTokens: 11, outputTokens: 300, reasoningTokens: 210 },
+    });
+  });
+
   it("assembles a tool call with parsed input", async () => {
     mock = await startMock([{ sse: TOOL_SSE }]);
     const p = createAnthropicProvider({ apiKey: "k", baseUrl: mock.baseUrl });

@@ -109,6 +109,10 @@ createLlmAgent({
 
 It is never added automatically.
 
+## Output token cap
+
+`maxOutputTokens` is 1024 in `voicethere.llm.json`. Thinking models count hidden reasoning against `maxOutputTokens`, so keep spoken replies short in the prompt, not with a small cap. A reply cut off by the cap before anything was spoken ends the turn with `LLM_OUTPUT_TRUNCATED` and the fallback text.
+
 ## Switch providers
 
 Change `provider`, `model` and `apiKeySecret` in `voicethere.llm.json`. To go back to OpenAI, use `provider: "openai"`, `model: "gpt-4o-mini"` and `AGENT_OPENAI_API_KEY`; no import changes. Other options are `anthropic` with `AGENT_ANTHROPIC_API_KEY` and `gemini` with `AGENT_GEMINI_API_KEY`. Create the matching project secret before you deploy.

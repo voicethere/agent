@@ -31,6 +31,22 @@ describe("validateLlmAgentConfig", () => {
     ]);
   });
 
+  it("rejects required-first-round with tools.maxRounds 1", () => {
+    expect(
+      errorsOf({
+        ...base,
+        toolChoice: "required-first-round",
+        tools: { maxRounds: 1 },
+      }),
+    ).toEqual([expect.objectContaining({ path: "toolChoice" })]);
+    const r = validateLlmAgentConfig({
+      ...base,
+      toolChoice: "required-first-round",
+      tools: { maxRounds: 2 },
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it("accepts links settings and rejects bad ones", () => {
     const r = validateLlmAgentConfig({
       ...base,

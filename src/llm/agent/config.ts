@@ -942,6 +942,16 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
     if (b !== undefined) config.speakChatReplies = b;
   }
 
+  if (
+    config.toolChoice === "required-first-round" &&
+    config.tools?.maxRounds === 1
+  ) {
+    c.err(
+      "toolChoice",
+      '"required-first-round" needs tools.maxRounds >= 2 (the forced tool round leaves no round to answer)',
+    );
+  }
+
   if (root.links !== undefined) {
     const l = c.object(root.links, "links");
     if (l) {
@@ -1030,7 +1040,7 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
       enum: ["auto", "required-first-round"],
       default: "auto",
       description:
-        "required-first-round: the first LLM call of every turn must call a tool (for example a docs search before any answer). Later calls in the turn are auto. Ignored when the agent has no tools.",
+        "required-first-round: the first LLM call of every turn must call a tool (for example a docs search before any answer). Later calls in the turn are auto. Ignored when the agent has no tools. Needs tools.maxRounds >= 2.",
     },
     greeting: {
       type: "object",

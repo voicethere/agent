@@ -8,11 +8,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Fixed
 
-- `createLlmAgent`: a final LLM round that stops at the output cap (`stopReason: "max_tokens"`) before any reply text was spoken now fails the turn with `errorCode: "LLM_OUTPUT_TRUNCATED"`, speaks the fallback text and logs a warn line with metadata only (round, output tokens, `maxOutputTokens`, `partial: false`). Before, the turn ended `completed` with an empty reply and nothing was logged. When reply text was already spoken, the turn keeps it (it is not sent again), ends `completed` and logs the same warn code with `partial: true`.
+- `createLlmAgent`: a final LLM round that stops at the output cap (`stopReason: "max_tokens"`) before any reply text was spoken now fails the turn with `errorCode: "LLM_OUTPUT_TRUNCATED"`, speaks the fallback text and logs a warn line with metadata only (round, output tokens, `maxOutputTokens`, `partial: false`). Before, the turn ended `completed` with an empty reply and nothing was logged. An answer round that is cut off before any text fails the turn even when a preamble was spoken before a tool call. When the answer round already spoke reply text, the turn keeps it (it is not sent again), ends `completed` and logs the same warn code with `partial: true`.
 
 ### Changed
 
-- `TurnSummary` and the `llm turn` log line carry `stopReason` (of the last LLM round) and `reasoningTokens` (hidden thinking tokens, when the provider reports them: OpenAI/OpenRouter `usage.completion_tokens_details.reasoning_tokens`, Anthropic `usage.output_tokens_details.thinking_tokens`, Gemini `usageMetadata.thoughtsTokenCount`). The `done` stream event's `usage` has the new optional `reasoningTokens` field (new `LlmUsage` type).
+- `TurnSummary` and the `llm turn` log line carry `stopReason` (of the last LLM round) and `reasoningTokens` (hidden thinking tokens, when the provider reports them; included in `outputTokens` except on Gemini, where they are counted separately: OpenAI/OpenRouter `usage.completion_tokens_details.reasoning_tokens`, Anthropic `usage.output_tokens_details.thinking_tokens`, Gemini `usageMetadata.thoughtsTokenCount`). The `done` stream event's `usage` has the new optional `reasoningTokens` field (new `LlmUsage` type).
 - The `llm-agent`, `llm-docs-rag` and `llm-mcp-service` templates set `maxOutputTokens` to 1024 (was 300). Thinking models count hidden reasoning against `maxOutputTokens`; keep spoken replies short in the prompt, not with a small cap. The template READMEs and the `maxOutputTokens` schema description say so.
 
 ## [0.23.0] - 2026-11-01

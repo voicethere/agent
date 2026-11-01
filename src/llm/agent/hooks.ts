@@ -35,7 +35,7 @@ export interface TurnSummary {
   firstTokenMs?: number;
   inputTokens?: number;
   outputTokens?: number;
-  /** Hidden thinking tokens (part of `outputTokens`), when the provider reports them. */
+  /** Hidden thinking tokens, when the provider reports them (included in `outputTokens` except on Gemini, where they are counted separately). */
   reasoningTokens?: number;
   /** Stop reason of the last LLM round (`max_tokens`: the output cap cut the reply). */
   stopReason?: LlmStopReason;

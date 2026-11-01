@@ -1128,7 +1128,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         if (calls.length === 0 && done.stopReason === "max_tokens") {
           // The output cap cut the answer (thinking models spend hidden
           // reasoning tokens against it). Metadata only in the log.
-          const partial = t.spoken.length > 0;
+          // Partial only when THIS answer round delivered text; a preamble
+          // spoken before a tool call does not answer the caller.
+          const partial = t.roundText.trim().length > 0;
           agentLog(
             "warn",
             "llm turn truncated: LLM_OUTPUT_TRUNCATED",

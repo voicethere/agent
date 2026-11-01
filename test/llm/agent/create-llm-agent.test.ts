@@ -486,6 +486,37 @@ describe("createLlmAgent", () => {
       });
     });
 
+    it("preamble before a tool call, then empty truncated answer: fails with the fallback", async () => {
+      await boot(
+        [
+          [
+            delta("Let me check."),
+            done("Let me check.", [call("c", "lookup")]),
+          ],
+          [truncated("")],
+        ],
+        { options: { tools: [lookup] } },
+      );
+      say("question");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      const texts = speaks().map((m) => m.text);
+      expect(texts.filter((t) => t === "Let me check.")).toHaveLength(1);
+      expect(
+        texts.filter(
+          (t) => t === "Sorry, something went wrong. Please try again.",
+        ),
+      ).toHaveLength(1);
+      expect(summaries[0]).toMatchObject({
+        status: "failed",
+        errorCode: "LLM_OUTPUT_TRUNCATED",
+        stopReason: "max_tokens",
+      });
+      expect(truncLog()).toMatchObject({
+        level: "warn",
+        fields: { code: "LLM_OUTPUT_TRUNCATED", round: 2, partial: false },
+      });
+    });
+
     it("text already spoken: keeps it, sends it once, warns partial, ends completed", async () => {
       const { requests } = await boot([
         [

@@ -65,8 +65,28 @@ function isStructuredLogArg(value) {
   return "message" in value || "fields" in value;
 }
 
+// Cross-version contract: the agent runtime sets
+// `globalThis[Symbol.for("voicethere.agent.currentSessionId")]` to a function that
+// returns the orchestrator session id of the handler currently running, or undefined.
+// The loader (shipped with the runner) calls it for each `console.*` line. Do not
+// rename the symbol: the loader and the bundled runtime can be different versions.
+const CURRENT_SESSION_ID_GETTER_KEY = Symbol.for(
+  "voicethere.agent.currentSessionId",
+);
+
+function currentSessionId() {
+  const getter = globalThis[CURRENT_SESSION_ID_GETTER_KEY];
+  if (typeof getter !== "function") return undefined;
+  try {
+    const id = getter();
+    return typeof id === "string" && id.trim() ? id.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function consoleLogPayload(level, args) {
-  const sessionId = process.env.SESSION_ID?.trim();
+  const sessionId = currentSessionId();
   let message = "";
   let fields;
 

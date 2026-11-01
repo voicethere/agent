@@ -4,7 +4,7 @@ All notable changes to `@voicethere/agent` are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.22.0] - 2026-11-01
 
 ### Added
 

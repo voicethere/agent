@@ -1033,6 +1033,52 @@ const sessionExecutionContext = new AsyncLocalStorage<SessionExecutionStore>();
 /** @deprecated Prefer {@link sessionExecutionContext}; kept for log session id. */
 const agentLogSessionContext = new AsyncLocalStorage<string>();
 
+/**
+ * Cross-version contract: the agent runtime sets
+ * `globalThis[Symbol.for("voicethere.agent.currentSessionId")]` to a function that
+ * returns the orchestrator session id of the handler currently running, or undefined.
+ * The loader (shipped with the runner) calls it for each `console.*` line. Do not
+ * rename the symbol: the loader and the bundled runtime can be different versions.
+ */
+export const CURRENT_SESSION_ID_GETTER_KEY = Symbol.for(
+  "voicethere.agent.currentSessionId",
+);
+
+function currentHandlerSessionId(): string | undefined {
+  const id =
+    sessionExecutionContext.getStore()?.sessionId ??
+    agentLogSessionContext.getStore();
+  return id ? id : undefined;
+}
+
+let previousSessionIdGetter: (() => unknown) | undefined;
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+/** Chains to a getter installed by another runtime copy; a throwing one yields undefined. */
+function currentSessionIdGetter(): string | undefined {
+  const own = currentHandlerSessionId();
+  if (own) return own;
+  try {
+    return stringOrUndefined(previousSessionIdGetter?.());
+  } catch {
+    return undefined;
+  }
+}
+
+function installCurrentSessionIdGetter(): void {
+  const g = globalThis as unknown as Record<symbol, unknown>;
+  const previous = g[CURRENT_SESSION_ID_GETTER_KEY];
+  if (previous === currentSessionIdGetter) return;
+  g[CURRENT_SESSION_ID_GETTER_KEY] = currentSessionIdGetter;
+  previousSessionIdGetter =
+    typeof previous === "function" ? (previous as () => unknown) : undefined;
+}
+
+installCurrentSessionIdGetter();
+
 /** Live inbound queue for the child process (set by {@link defineAgent}). */
 let inboundQueueAuthority: SessionSerialQueue | null = null;
 
@@ -3100,10 +3146,7 @@ function buildAgentLogPayload(
   fields?: Record<string, unknown>,
   sessionId?: string,
 ): AgentLogMessage {
-  const resolvedSessionId =
-    sessionId ??
-    sessionExecutionContext.getStore()?.sessionId ??
-    agentLogSessionContext.getStore();
+  const resolvedSessionId = sessionId ?? currentHandlerSessionId();
   const sanitizedFields = fields ? sanitizeAgentLogFields(fields) : undefined;
   return {
     type: "log",

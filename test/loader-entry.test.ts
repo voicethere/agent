@@ -60,9 +60,10 @@ describe("loader-entry console overrides", () => {
     expect(byMessage.get("plain-info")).toMatchObject({
       type: "log",
       level: "info",
-      sessionId: "probe-session",
       ts: expect.any(Number),
     });
+    // Module-level probe: no runtime getter, so no session even with SESSION_ID set.
+    expect(logs.every((entry) => entry.sessionId === undefined)).toBe(true);
     expect(byMessage.get("plain-debug")).toMatchObject({
       level: "debug",
     });

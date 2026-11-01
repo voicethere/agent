@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-11-01
+
 ### Fixed
 
 - `createLlmAgent`: a final LLM round that stops at the output cap (`stopReason: "max_tokens"`) before any reply text was spoken now fails the turn with `errorCode: "LLM_OUTPUT_TRUNCATED"`, speaks the fallback text and logs a warn line with metadata only (round, output tokens, `maxOutputTokens`, `partial: false`). Before, the turn ended `completed` with an empty reply and nothing was logged. An answer round that is cut off before any text fails the turn even when a preamble was spoken before a tool call. When the answer round already spoke reply text, the turn keeps it (it is not sent again), ends `completed` and logs the same warn code with `partial: true`.

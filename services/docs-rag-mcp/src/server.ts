@@ -13,6 +13,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { MANIFEST } from "./build-index.ts";
+import { DEFAULT_THREADS, embedThreads } from "./config.ts";
 import { type Embedder, createEmbedder } from "./embed.ts";
 import { type Index, openIndex, searchHybrid } from "./search.ts";
 
@@ -33,6 +34,8 @@ export interface DocsRagOptions {
   indexDir: string;
   /** Directory with the embedding model (see `download-model`). */
   modelDir?: string;
+  /** ONNX Runtime intra-op threads for the embedder (default 1). */
+  threads?: number;
   /** Test hook: use this embedder instead of loading the model. */
   embedder?: Embedder;
   /** When set, requests to /mcp need `Authorization: Bearer <token>`. */
@@ -280,15 +283,18 @@ export async function startDocsRagServer(
       `no ${MANIFEST} in ${opts.indexDir}: build the index first (docs-rag build --docs <dir> --out ${opts.indexDir})`,
     );
   }
+  const threads = opts.threads ?? DEFAULT_THREADS;
   const loadStarted = Date.now();
   const runtime: Promise<Runtime> = (async () => {
-    const embedder = opts.embedder ?? (await createEmbedder(opts.modelDir));
+    const embedder =
+      opts.embedder ?? (await createEmbedder(opts.modelDir, { threads }));
     const index = openIndex(opts.indexDir, embedder);
     // Warm the model so the first real query does not pay for it.
     await embedder.embedQuery("warm up");
     log({
       event: "ready",
       chunks: index.manifest.chunks,
+      threads,
       ms: Date.now() - loadStarted,
     });
     return { index };
@@ -381,11 +387,21 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(JSON.stringify(line));
   try {
     const token = process.env.MCP_TOKEN?.trim() || undefined;
+    let threads: number;
+    try {
+      threads = embedThreads();
+    } catch (err) {
+      throw new DocsRagStartError(
+        "DOCS_RAG_THREADS_INVALID",
+        (err as Error).message,
+      );
+    }
     const handle = await startDocsRagServer({
       port: Number(process.env.PORT ?? "8080"),
       host: "0.0.0.0",
       indexDir: process.env.INDEX_DIR ?? "/index",
       modelDir: process.env.DOCS_RAG_MODEL_DIR,
+      threads,
       token,
       toolPrefix: process.env.DOCS_RAG_TOOL_PREFIX,
       description: process.env.DOCS_RAG_DESCRIPTION,

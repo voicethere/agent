@@ -18,12 +18,21 @@ type Extractor = (
   opts: { pooling: "mean"; normalize: boolean },
 ) => Promise<{ data: Float32Array | number[]; dims: number[] }>;
 
+export interface EmbedderOptions {
+  /**
+   * ONNX Runtime intra-op threads (inter-op is pinned to 1). Unset keeps the
+   * ONNX Runtime default of one thread per host core.
+   */
+  threads?: number;
+}
+
 /**
  * Local embedder: quantized ONNX model read from `modelDir` (layout
  * `<modelDir>/Xenova/bge-small-en-v1.5/...`). Remote downloads are disabled.
  */
 export async function createEmbedder(
   modelDir = process.env.DOCS_RAG_MODEL_DIR,
+  opts: EmbedderOptions = {},
 ): Promise<Embedder> {
   if (!modelDir) throw new Error("DOCS_RAG_MODEL_DIR is not set");
   env.localModelPath = modelDir;
@@ -31,6 +40,14 @@ export async function createEmbedder(
   env.allowLocalModels = true;
   const extractor = (await pipeline("feature-extraction", MODEL_ID, {
     dtype: "q8",
+    ...(opts.threads === undefined
+      ? {}
+      : {
+          session_options: {
+            intraOpNumThreads: opts.threads,
+            interOpNumThreads: 1,
+          },
+        }),
   })) as unknown as Extractor;
 
   const run = async (texts: string[]): Promise<Float32Array[]> => {

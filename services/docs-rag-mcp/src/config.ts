@@ -60,3 +60,16 @@ export function searchConfig(
     ),
   };
 }
+
+export const DEFAULT_THREADS = 1;
+
+/**
+ * ONNX Runtime intra-op threads for the embedder (`DOCS_RAG_THREADS`, a
+ * positive integer, default 1). Without it ONNX Runtime starts one thread per
+ * host core, which throttles a CPU-limited container.
+ */
+export function embedThreads(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  return num("DOCS_RAG_THREADS", env.DOCS_RAG_THREADS, DEFAULT_THREADS, true);
+}

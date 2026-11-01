@@ -2,7 +2,7 @@
 import { parseArgs } from "node:util";
 import { buildIndex } from "./build-index.ts";
 import { readCorpusFile, readMarkdownDir } from "./corpus.ts";
-import { searchConfig } from "./config.ts";
+import { embedThreads, searchConfig } from "./config.ts";
 import { createEmbedder } from "./embed.ts";
 import { evaluate, readQuestions } from "./eval.ts";
 import { openIndex } from "./search.ts";
@@ -12,6 +12,14 @@ const USAGE = `usage:
   docs-rag eval --index <dir> --questions <file.json> [--min-recall 0.9]
        [--vector-weight 1.0] [--text-weight 0.5] [--max-per-doc 2]
 env: DOCS_RAG_MODEL_DIR (model directory, see "download-model")`;
+
+/**
+ * Build and eval keep the ONNX Runtime default (all cores) unless
+ * `DOCS_RAG_THREADS` is set; the server always caps it (default 1).
+ */
+function cliEmbedderOptions(): { threads?: number } {
+  return process.env.DOCS_RAG_THREADS ? { threads: embedThreads() } : {};
+}
 
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
@@ -40,7 +48,7 @@ async function main(argv: string[]): Promise<number> {
       : readMarkdownDir(values.docs!, values["base-url"]);
     const m = await buildIndex({
       docs,
-      embedder: await createEmbedder(),
+      embedder: await createEmbedder(undefined, cliEmbedderOptions()),
       outDir: values.out,
     });
     console.log(
@@ -54,7 +62,10 @@ async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const min = Number(values["min-recall"] ?? "0.9");
-    const index = openIndex(values.index, await createEmbedder());
+    const index = openIndex(
+      values.index,
+      await createEmbedder(undefined, cliEmbedderOptions()),
+    );
     const cfg = searchConfig({
       vectorWeight: values["vector-weight"],
       textWeight: values["text-weight"],

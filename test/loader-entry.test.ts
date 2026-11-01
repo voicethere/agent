@@ -12,12 +12,12 @@ const SANDBOX_DIR = join(__dirname, "../src/sandbox");
 const LOADER = join(SANDBOX_DIR, "loader-entry.js");
 const WARNING_FORWARDER = join(SANDBOX_DIR, "warning-forwarder.cjs");
 
-function runConsoleLogProbe(): Promise<{
+function runConsoleLogProbe(fixture = "console-log-probe.mjs"): Promise<{
   exitCode: number | null;
   logs: AgentLogMessage[];
 }> {
   return new Promise((resolve, reject) => {
-    const bundlePath = join(FIXTURES, "console-log-probe.mjs");
+    const bundlePath = join(FIXTURES, fixture);
     const logs: AgentLogMessage[] = [];
     const child = fork(LOADER, [], {
       env: {
@@ -77,5 +77,17 @@ describe("loader-entry console overrides", () => {
       level: "info",
       fields: { key: "value" },
     });
+  }, 10_000);
+
+  it("a throwing or non-string getter sends no session", async () => {
+    const { exitCode, logs } = await runConsoleLogProbe(
+      "console-bad-getter.mjs",
+    );
+    expect(exitCode).toBe(0);
+    const byMessage = new Map(logs.map((entry) => [entry.message, entry]));
+    expect(byMessage.has("throwing-getter")).toBe(true);
+    expect(byMessage.has("non-string-getter")).toBe(true);
+    expect(byMessage.get("throwing-getter")?.sessionId).toBeUndefined();
+    expect(byMessage.get("non-string-getter")?.sessionId).toBeUndefined();
   }, 10_000);
 });

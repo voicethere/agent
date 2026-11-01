@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.23.2] - 2026-11-01
+
 ### Fixed
 
 - `console.*` lines are now attributed to the session whose handler produced them (including timers and promises started there), so two sessions sharing one agent process no longer share one session id. Lines from module load, webhooks or code outside a handler carry no session. The runtime publishes the current session id through a global getter that the sandbox loader reads; a loader from an older runner keeps sending the process-level id until the runner is updated.

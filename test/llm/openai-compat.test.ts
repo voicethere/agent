@@ -86,6 +86,54 @@ for (const id of ["openai", "openrouter"] as const) {
       ).toBe(50);
     });
 
+    it("maps finish_reason length to max_tokens and reads reasoning_tokens", async () => {
+      const sse =
+        chunk({ role: "assistant", content: "Part" }) +
+        chunk({}, "length") +
+        sseData({
+          id: "c1",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: "m",
+          choices: [],
+          usage: {
+            prompt_tokens: 7,
+            completion_tokens: 300,
+            total_tokens: 307,
+            completion_tokens_details: { reasoning_tokens: 228 },
+          },
+        }) +
+        "data: [DONE]\n\n";
+      mock = await startMock([{ sse }]);
+      const p = createOpenAiCompatibleProvider({
+        id,
+        apiKey: "k",
+        baseUrl: mock.baseUrl,
+      });
+      const events = await collect(p.stream({ ...base, maxOutputTokens: 300 }));
+      expect(events.at(-1)).toMatchObject({
+        type: "done",
+        stopReason: "max_tokens",
+        text: "Part",
+        usage: { inputTokens: 7, outputTokens: 300, reasoningTokens: 228 },
+      });
+    });
+
+    it("leaves reasoningTokens unset when usage has no completion_tokens_details", async () => {
+      mock = await startMock([{ sse: TEXT_SSE }]);
+      const p = createOpenAiCompatibleProvider({
+        id,
+        apiKey: "k",
+        baseUrl: mock.baseUrl,
+      });
+      const events = await collect(p.stream(base));
+      const done = events.at(-1);
+      expect(done?.type === "done" ? done.usage : undefined).toEqual({
+        inputTokens: 7,
+        outputTokens: 2,
+      });
+    });
+
     it("assembles a tool call with parsed input", async () => {
       mock = await startMock([{ sse: TOOL_SSE }]);
       const p = createOpenAiCompatibleProvider({

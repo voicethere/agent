@@ -13,6 +13,7 @@ import type {
   LlmProvider,
   LlmRequest,
   LlmStopReason,
+  LlmUsage,
   LlmStreamEvent,
   LlmToolCall,
 } from "./types.js";
@@ -132,13 +133,18 @@ export function createOpenAiCompatibleProvider(
       });
       let text = "";
       let finish: string | null | undefined;
-      let usage: { inputTokens?: number; outputTokens?: number } | undefined;
+      let usage: LlmUsage | undefined;
       const acc = new Map<number, { id: string; name: string; args: string }>();
       for await (const chunk of stream as AsyncIterable<ChatCompletionChunk>) {
         if (chunk.usage) {
+          const reasoning =
+            chunk.usage.completion_tokens_details?.reasoning_tokens;
           usage = {
             inputTokens: chunk.usage.prompt_tokens,
             outputTokens: chunk.usage.completion_tokens,
+            ...(typeof reasoning === "number"
+              ? { reasoningTokens: reasoning }
+              : {}),
           };
         }
         const choice = chunk.choices?.[0];

@@ -46,8 +46,22 @@ export type LlmStreamEvent =
       text: string;
       toolCalls: LlmToolCall[];
       providerState?: unknown;
-      usage?: { inputTokens?: number; outputTokens?: number };
+      usage?: LlmUsage;
     };
+
+/**
+ * Token usage for one provider call. `reasoningTokens` is the hidden thinking
+ * token count, set only when the provider reports it. OpenAI/OpenRouter
+ * (`usage.completion_tokens_details.reasoning_tokens`) and Anthropic
+ * (`usage.output_tokens_details.thinking_tokens`) include it in
+ * `outputTokens`; Gemini (`usageMetadata.thoughtsTokenCount`) reports it
+ * separately from `outputTokens` (`candidatesTokenCount`).
+ */
+export interface LlmUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+}
 
 export interface LlmRequest {
   model: string;

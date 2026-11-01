@@ -10,6 +10,7 @@ import type {
   LlmProvider,
   LlmRequest,
   LlmStopReason,
+  LlmUsage,
   LlmStreamEvent,
   LlmToolCall,
 } from "./types.js";
@@ -56,6 +57,15 @@ function toMessages(messages: LlmMessage[]): MessageParam[] {
     }
   }
   return out;
+}
+
+function anthropicUsage(u: Anthropic.Messages.Usage): LlmUsage {
+  const thinking = u.output_tokens_details?.thinking_tokens;
+  return {
+    inputTokens: u.input_tokens,
+    outputTokens: u.output_tokens,
+    ...(typeof thinking === "number" ? { reasoningTokens: thinking } : {}),
+  };
 }
 
 function mapStop(reason: string | null | undefined): LlmStopReason {
@@ -129,10 +139,7 @@ export function createAnthropicProvider(config: AnthropicConfig): LlmProvider {
         text,
         toolCalls,
         providerState: message.content,
-        usage: {
-          inputTokens: message.usage.input_tokens,
-          outputTokens: message.usage.output_tokens,
-        },
+        usage: anthropicUsage(message.usage),
       };
     },
   };

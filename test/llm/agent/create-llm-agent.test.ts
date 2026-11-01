@@ -426,6 +426,146 @@ describe("createLlmAgent", () => {
     expect(logs).toContain("llm turn failed: LLM_RATE_LIMITED");
   });
 
+  describe("output cap (max_tokens)", () => {
+    const truncated = (
+      text: string,
+      usage = { inputTokens: 3, outputTokens: 300, reasoningTokens: 290 },
+    ): Step => ({
+      type: "done",
+      stopReason: "max_tokens",
+      text,
+      toolCalls: [],
+      usage,
+    });
+    const lookup = defineTool({
+      name: "lookup",
+      description: "d",
+      inputSchema: { type: "object" },
+      handler: () => "r",
+    });
+    const truncLog = () =>
+      sent("log").find(
+        (m) => m.message === "llm turn truncated: LLM_OUTPUT_TRUNCATED",
+      );
+
+    it("empty final round: speaks the fallback, ends failed with LLM_OUTPUT_TRUNCATED", async () => {
+      await boot([[done("", [call("c", "lookup")])], [truncated("")]], {
+        options: { tools: [lookup] },
+      });
+      say("question");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(speaks().map((m) => m.text)).toEqual([
+        "Sorry, something went wrong. Please try again.",
+      ]);
+      expect(summaries[0]).toMatchObject({
+        status: "failed",
+        errorCode: "LLM_OUTPUT_TRUNCATED",
+        stopReason: "max_tokens",
+        reasoningTokens: 290,
+        outputTokens: 304,
+      });
+      const warn = truncLog();
+      expect(warn).toMatchObject({
+        level: "warn",
+        fields: {
+          code: "LLM_OUTPUT_TRUNCATED",
+          round: 2,
+          outputTokens: 300,
+          reasoningTokens: 290,
+          maxOutputTokens: 512,
+          partial: false,
+        },
+      });
+      const turnLog = sent("log").find((m) => m.message === "llm turn");
+      expect(turnLog).toMatchObject({
+        fields: {
+          status: "failed",
+          stopReason: "max_tokens",
+          reasoningTokens: 290,
+        },
+      });
+    });
+
+    it("preamble before a tool call, then empty truncated answer: fails with the fallback", async () => {
+      await boot(
+        [
+          [
+            delta("Let me check."),
+            done("Let me check.", [call("c", "lookup")]),
+          ],
+          [truncated("")],
+        ],
+        { options: { tools: [lookup] } },
+      );
+      say("question");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      const texts = speaks().map((m) => m.text);
+      expect(texts.filter((t) => t === "Let me check.")).toHaveLength(1);
+      expect(
+        texts.filter(
+          (t) => t === "Sorry, something went wrong. Please try again.",
+        ),
+      ).toHaveLength(1);
+      expect(summaries[0]).toMatchObject({
+        status: "failed",
+        errorCode: "LLM_OUTPUT_TRUNCATED",
+        stopReason: "max_tokens",
+      });
+      expect(truncLog()).toMatchObject({
+        level: "warn",
+        fields: { code: "LLM_OUTPUT_TRUNCATED", round: 2, partial: false },
+      });
+    });
+
+    it("text already spoken: keeps it, sends it once, warns partial, ends completed", async () => {
+      const { requests } = await boot([
+        [
+          delta("Partial answer. "),
+          delta("Cut of"),
+          truncated("Partial answer. Cut of"),
+        ],
+        [delta("Next."), done("Next.")],
+      ]);
+      say("question");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      const texts = speaks().map((m) => m.text);
+      expect(texts.filter((t) => t === "Partial answer.")).toHaveLength(1);
+      expect(texts).not.toContain(
+        "Sorry, something went wrong. Please try again.",
+      );
+      expect(summaries[0]).toMatchObject({
+        status: "completed",
+        stopReason: "max_tokens",
+      });
+      expect(summaries[0].errorCode).toBeUndefined();
+      expect(truncLog()).toMatchObject({
+        level: "warn",
+        fields: { code: "LLM_OUTPUT_TRUNCATED", round: 1, partial: true },
+      });
+      expect(JSON.stringify(truncLog())).not.toContain("Partial answer");
+      say("again");
+      await vi.waitFor(() => expect(summaries).toHaveLength(2));
+      const prior = requests[1].messages.find((m) => m.role === "assistant");
+      expect(prior && "text" in prior ? prior.text : "").toContain(
+        "Partial answer.",
+      );
+    });
+
+    it("normal stop: no truncation warn, summary stopReason end", async () => {
+      await boot([[delta("All good."), done("All good.")]]);
+      say("question");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(speaks().map((m) => m.text)).toEqual(["All good."]);
+      expect(summaries[0]).toMatchObject({
+        status: "completed",
+        stopReason: "end",
+      });
+      expect(summaries[0].errorCode).toBeUndefined();
+      expect(summaries[0].reasoningTokens).toBeUndefined();
+      expect(truncLog()).toBeUndefined();
+    });
+  });
+
   it("missing API key fails onAgentStart with LLM_API_KEY_MISSING", async () => {
     const handlers = createLlmAgent({
       config: BASE_CONFIG,

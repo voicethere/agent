@@ -43,6 +43,7 @@ import type {
   LlmMessage,
   LlmProvider,
   LlmProviderModule,
+  LlmStopReason,
   LlmStreamEvent,
   LlmToolResult,
 } from "../types.js";
@@ -119,6 +120,10 @@ interface TurnState {
   firstTokenMs?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /** Hidden thinking share of `outputTokens`, when the provider reports it. */
+  reasoningTokens?: number;
+  /** Stop reason of the last LLM round of this turn. */
+  stopReason?: LlmStopReason;
   errorCode?: string;
   abortStatus?: "interrupted" | "cancelled";
   roundOpen: boolean;
@@ -1053,7 +1058,12 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       if (done.usage.outputTokens !== undefined) {
         t.outputTokens = (t.outputTokens ?? 0) + done.usage.outputTokens;
       }
+      if (done.usage.reasoningTokens !== undefined) {
+        t.reasoningTokens =
+          (t.reasoningTokens ?? 0) + done.usage.reasoningTokens;
+      }
     }
+    t.stopReason = done.stopReason;
     t.roundOpen = false;
     return done;
   }
@@ -1070,6 +1080,10 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       ...(t.firstTokenMs !== undefined ? { firstTokenMs: t.firstTokenMs } : {}),
       ...(t.inputTokens !== undefined ? { inputTokens: t.inputTokens } : {}),
       ...(t.outputTokens !== undefined ? { outputTokens: t.outputTokens } : {}),
+      ...(t.reasoningTokens !== undefined
+        ? { reasoningTokens: t.reasoningTokens }
+        : {}),
+      ...(t.stopReason !== undefined ? { stopReason: t.stopReason } : {}),
       ...(t.errorCode ? { errorCode: t.errorCode } : {}),
       ...(t.linkUrls.size > 0 ? { linksSent: t.linkUrls.size } : {}),
       ...(t.linksDropped > 0 ? { linksDropped: t.linksDropped } : {}),
@@ -1111,6 +1125,37 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       for (let round = 0; round < maxRounds; round += 1) {
         const done = await runRound(s, t, ctx);
         const calls = done.toolCalls;
+        if (calls.length === 0 && done.stopReason === "max_tokens") {
+          // The output cap cut the answer (thinking models spend hidden
+          // reasoning tokens against it). Metadata only in the log.
+          // Partial only when THIS answer round delivered text; a preamble
+          // spoken before a tool call does not answer the caller.
+          const partial = t.roundText.trim().length > 0;
+          agentLog(
+            "warn",
+            "llm turn truncated: LLM_OUTPUT_TRUNCATED",
+            {
+              code: "LLM_OUTPUT_TRUNCATED",
+              round: round + 1,
+              outputTokens: done.usage?.outputTokens,
+              ...(done.usage?.reasoningTokens !== undefined
+                ? { reasoningTokens: done.usage.reasoningTokens }
+                : {}),
+              maxOutputTokens: config.maxOutputTokens ?? D.maxOutputTokens,
+              partial,
+            },
+            s.sessionId,
+          );
+          if (!partial) {
+            // Nothing reached the caller: same as any other failed turn.
+            t.errorCode = "LLM_OUTPUT_TRUNCATED";
+            speakFallback(s, t);
+            t.status = "failed";
+            return summarize(t);
+          }
+          // Text already reached the caller: keep it (never re-send) and
+          // finish the turn as completed; the summary carries stopReason.
+        }
         if (calls.length === 0) {
           s.history.addAssistant(
             {
@@ -1296,6 +1341,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         firstTokenMs: summary.firstTokenMs,
         inputTokens: summary.inputTokens,
         outputTokens: summary.outputTokens,
+        reasoningTokens: summary.reasoningTokens,
+        stopReason: summary.stopReason,
         thinkingCharsStripped: t.thinkingCharsStripped,
         linksSent: t.linkUrls.size,
         linksDropped: t.linksDropped,

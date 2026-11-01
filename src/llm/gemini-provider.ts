@@ -8,6 +8,7 @@ import type {
   LlmProvider,
   LlmRequest,
   LlmStopReason,
+  LlmUsage,
   LlmStreamEvent,
   LlmToolCall,
 } from "./types.js";
@@ -110,7 +111,7 @@ export function createGeminiProvider(config: GeminiConfig): LlmProvider {
       const parts: Part[] = [];
       const toolCalls: LlmToolCall[] = [];
       let finish: string | undefined;
-      let usage: { inputTokens?: number; outputTokens?: number } | undefined;
+      let usage: LlmUsage | undefined;
       for await (const chunk of stream) {
         const cand = chunk.candidates?.[0];
         for (const p of cand?.content?.parts ?? []) {
@@ -128,9 +129,13 @@ export function createGeminiProvider(config: GeminiConfig): LlmProvider {
         }
         if (cand?.finishReason) finish = cand.finishReason;
         if (chunk.usageMetadata) {
+          const thoughts = chunk.usageMetadata.thoughtsTokenCount;
           usage = {
             inputTokens: chunk.usageMetadata.promptTokenCount,
             outputTokens: chunk.usageMetadata.candidatesTokenCount,
+            ...(typeof thoughts === "number"
+              ? { reasoningTokens: thoughts }
+              : {}),
           };
         }
       }

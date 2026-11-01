@@ -59,6 +59,26 @@ describe("gemini adapter", () => {
     expect(mock.requests[0].body.systemInstruction).toBeDefined();
   });
 
+  it("maps finishReason MAX_TOKENS and reads thoughtsTokenCount", async () => {
+    const sse = sseData({
+      ...cand([{ text: "Part" }], "MAX_TOKENS"),
+      usageMetadata: {
+        promptTokenCount: 4,
+        candidatesTokenCount: 80,
+        thoughtsTokenCount: 220,
+      },
+    });
+    mock = await startMock([{ sse }]);
+    const p = createGeminiProvider({ apiKey: "k", baseUrl: mock.baseUrl });
+    const events = await collect(p.stream(base));
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      stopReason: "max_tokens",
+      text: "Part",
+      usage: { inputTokens: 4, outputTokens: 80, reasoningTokens: 220 },
+    });
+  });
+
   it("assembles a tool call with parsed input", async () => {
     mock = await startMock([{ sse: TOOL_SSE }]);
     const p = createGeminiProvider({ apiKey: "k", baseUrl: mock.baseUrl });

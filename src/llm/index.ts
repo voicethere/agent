@@ -25,6 +25,7 @@ export type {
   LlmToolCall,
   LlmToolResult,
   LlmToolSpec,
+  LlmUsage,
 } from "./types.js";
 export {
   MAX_RESULT_BYTES,

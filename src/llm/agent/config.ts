@@ -95,6 +95,10 @@ export interface LlmAgentConfig {
   apiKeySecret: string;
   baseUrl?: string;
   temperature?: number;
+  /**
+   * Output token cap per LLM call. Thinking models count hidden reasoning
+   * against it; keep spoken replies short in the prompt, not with a small cap.
+   */
   maxOutputTokens?: number;
   /**
    * `auto` (default): the model decides whether to call a tool.
@@ -1035,6 +1039,8 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
       minimum: 1,
       maximum: 8192,
       default: 512,
+      description:
+        "Output token cap per LLM call. Thinking models count hidden reasoning against maxOutputTokens; keep spoken replies short in the prompt, not with a small cap. A reply cut off before anything was spoken fails the turn with LLM_OUTPUT_TRUNCATED.",
     },
     toolChoice: {
       enum: ["auto", "required-first-round"],

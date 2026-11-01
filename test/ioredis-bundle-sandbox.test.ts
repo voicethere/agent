@@ -14,6 +14,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const AGENT_ROOT = join(__dirname, "..");
 const SANDBOX_DIR = join(AGENT_ROOT, "src/sandbox");
 const LOADER = join(SANDBOX_DIR, "loader-entry.js");
+const WARNING_FORWARDER = join(SANDBOX_DIR, "warning-forwarder.cjs");
 const TEST_TMP_DIR = join(AGENT_ROOT, "test", ".tmp");
 
 function runBundledIoredisAgent(options: {
@@ -31,6 +32,7 @@ function runBundledIoredisAgent(options: {
     const timeoutMs = options.timeoutMs ?? 10_000;
     const execArgv = buildChildExecArgv({
       loaderDir: SANDBOX_DIR,
+      warningForwarderPath: WARNING_FORWARDER,
       bundlePath: options.bundlePath,
       allowNetHosts: [`127.0.0.1:${options.port}`],
     });

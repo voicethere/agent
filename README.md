@@ -673,6 +673,8 @@ This is **not** an import allowlist — Node gates **capability classes**, not p
 
 **Network under `--permission` (Node 26+).** Outbound network is blocked unless boolean `--allow-net` is passed. VoiceThere runners always grant `--allow-net` so sandboxed agents can `fetch` LLM and tool APIs. When `AGENT_REDIS_URL` is set, the runner also emits `--allow-net=<redis-host>` entries (forward-compatible with future host-scoped ACLs). **Private cluster addresses** remain unreachable from the child via platform network isolation — use IPC for voice, not in-cluster HTTP.
 
+**Node warnings.** The child runs with `--no-warnings`, and a preload forwards each Node process warning (deprecations, experimental flags, `MaxListenersExceededWarning`, `process.emitWarning`) to the runner over IPC. Warnings are not written to your agent logs. To see them in your own logs, add `process.on("warning", (w) => console.warn(w.name, w.message))`. `voicethere` local runs print them to your terminal.
+
 ### Bundle directory vs single file
 
 `--allow-fs-read` is applied to **`dirname(bundlePath)`**, not only the `.js` file:

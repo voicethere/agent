@@ -30,10 +30,13 @@ export function collectAllowFsReadDirs(paths: string[]): string[] {
  * Node 26+ gates outbound network under `--permission`; boolean `--allow-net` restores
  * fetch/HTTPS for customer LLM calls. Optional `allowNetHosts` emits forward-compatible
  * `--allow-net=<host>` entries for project Redis when Node adds host-scoped net ACLs.
+ * `--no-warnings` plus the `--require` preload forward Node warnings over IPC.
  */
 export function buildChildExecArgv(options: {
   loaderDir: string;
   bundlePath: string;
+  /** Absolute path to `warning-forwarder.cjs` (preloaded with `--require`). */
+  warningForwarderPath: string;
   /** When true (default), emit boolean `--allow-net` for HTTPS / LLM egress (Node 26+). */
   allowInternet?: boolean;
   /** Hostnames (optionally `host:port`) for future scoped `--allow-net` (e.g. project Redis). */
@@ -43,6 +46,7 @@ export function buildChildExecArgv(options: {
     options.loaderDir,
     dirname(options.bundlePath),
     options.bundlePath,
+    options.warningForwarderPath,
   ]);
 
   const allowNetFlags: string[] = [];
@@ -56,9 +60,21 @@ export function buildChildExecArgv(options: {
     }
   }
 
+  // `--require` needs a realpath that is also under `--allow-fs-read`.
+  const forwarder = resolve(options.warningForwarderPath);
+  let forwarderRealPath = forwarder;
+  try {
+    if (existsSync(forwarder)) forwarderRealPath = realpathSync(forwarder);
+  } catch {
+    // keep the resolved path
+  }
+
   return [
     "--permission",
     ...readDirs.map((dir) => `--allow-fs-read=${dir}`),
     ...allowNetFlags,
+    // Warnings go to the parent over IPC (warning-forwarder.cjs), never to stderr.
+    "--no-warnings",
+    `--require=${forwarderRealPath}`,
   ];
 }

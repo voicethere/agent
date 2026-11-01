@@ -12,6 +12,7 @@ export {
   type AgentErrorMessage,
   type AgentLogLevel,
   type AgentLogMessage,
+  type NodeWarningMessage,
   type AllowedChildEnvKey,
   type ChildToParentMessage,
   type ParentToChildMessage,

@@ -10,7 +10,7 @@ import {
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   resolveBundlePath,
@@ -148,4 +148,42 @@ describe("startSandboxedChild IPC", () => {
       }),
     ).toBe(false);
   }, 10_000);
+});
+
+describe("startSandboxedChild node_warning local print", () => {
+  it("prints forwarded warnings to the parent's stderr in Node's format", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-warn-"));
+    const bundle = join(dir, "warn-agent.mjs");
+    writeFileSync(
+      bundle,
+      'import { createRequire } from "node:module";\n' +
+        'new (createRequire(import.meta.url)("node:buffer").Buffer)(1);\n' +
+        "setInterval(() => {}, 1000);\n",
+    );
+    const spy = vi.spyOn(process.stderr, "write");
+    const child = startSandboxedChild({
+      sessionId: "warn-peer",
+      bundlePath: bundle,
+    });
+    const received: string[] = [];
+    child.onMessage((m) => {
+      if (m.type === "node_warning" && m.code) received.push(m.code);
+    });
+    const exitPromise = new Promise<void>((resolve) => {
+      child.onExit(() => resolve());
+    });
+    try {
+      await waitForAssertion(() => {
+        expect(received).toContain("DEP0005");
+        const printed = spy.mock.calls.map((call) => String(call[0])).join("");
+        expect(printed).toContain(
+          `(node:${child.pid}) [DEP0005] DeprecationWarning: `,
+        );
+      });
+    } finally {
+      spy.mockRestore();
+      child.kill("SIGKILL");
+      await exitPromise;
+    }
+  }, 15_000);
 });

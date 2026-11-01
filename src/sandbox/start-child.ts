@@ -18,6 +18,16 @@ import { buildChildExecArgv } from "./sandbox.js";
 
 const SANDBOX_DIR = dirname(fileURLToPath(import.meta.url));
 const LOADER_ENTRY = join(SANDBOX_DIR, "loader-entry.js");
+const WARNING_FORWARDER = join(SANDBOX_DIR, "warning-forwarder.cjs");
+
+/** Print a forwarded child warning the way Node prints it on stderr. */
+function formatNodeWarning(
+  pid: number,
+  warning: { name: string; code?: string; message: string },
+): string {
+  const code = warning.code ? `[${warning.code}] ` : "";
+  return `(node:${pid}) ${code}${warning.name}: ${warning.message}\n`;
+}
 
 export interface StartSandboxedChildOptions {
   sessionId: string;
@@ -92,6 +102,7 @@ export function startSandboxedChild(
   const execArgv = buildChildExecArgv({
     loaderDir: SANDBOX_DIR,
     bundlePath,
+    warningForwarderPath: WARNING_FORWARDER,
   });
 
   const child: ChildProcess = fork(LOADER_ENTRY, [], {
@@ -115,6 +126,10 @@ export function startSandboxedChild(
   child.on("message", (message: unknown) => {
     if (!message || typeof message !== "object") return;
     const payload = message as ChildToParentMessage;
+    if (payload.type === "node_warning") {
+      // Local dev: show warnings in the developer's terminal.
+      process.stderr.write(formatNodeWarning(child.pid ?? -1, payload));
+    }
     for (const handler of messageHandlers) {
       handler(payload);
     }

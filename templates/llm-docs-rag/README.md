@@ -35,7 +35,8 @@ Redeploy the project. The agent connects to `/mcp` on the service with the proje
 
 - Tool names and the search tool's description are set with environment variables on the image: `DOCS_RAG_TOOL_PREFIX` (for example `acme_`, which gives `acme_search_docs` and `acme_get_doc`; update `allow` and the prompt to match) and `DOCS_RAG_DESCRIPTION` (for example `Search the Acme docs`).
 - Edit `prompt.md` for tone and scope. Keep the rule that the model searches before it states a fact.
-- Set the provider, model and API key as in the `llm-agent` template: the template starts on OpenRouter with `amazon/nova-micro-v1`, key `AGENT_OPENROUTER_API_KEY` (a project secret).
+- `"toolChoice": "required-first-round"` makes every turn start with a docs search, so the answer comes from your docs and not from the model's memory. Remove it if the assistant should also handle small talk without searching.
+- Set the provider, model and API key as in the `llm-agent` template: the template starts on OpenRouter with `anthropic/claude-haiku-5.5`, key `AGENT_OPENROUTER_API_KEY` (a project secret).
 
 ## Files
 

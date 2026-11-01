@@ -23,9 +23,11 @@ export const LLM_PROVIDERS: Record<
   },
   openrouter: {
     title: "OpenRouter",
-    // Chosen by the 2026-10-27 probe: tool calls 3/3, median first token 438 ms.
-    // A paid model; the free `:free` models were rate-limited or returned no content.
-    defaultModel: "amazon/nova-micro-v1",
+    // Chosen by the 2026-11-01 probe: tool calls 3/3, median first token 837 ms,
+    // and `tool_choice` in OpenRouter's supported_parameters (needed by
+    // toolChoice "required-first-round"). amazon/nova-micro-v1, the previous
+    // default, does not list tool_choice and skipped tools it was told to call.
+    defaultModel: "anthropic/claude-haiku-5.5",
     apiKeyEnv: "AGENT_OPENROUTER_API_KEY",
     docsUrl: "https://openrouter.ai/docs/api-reference/overview",
   },

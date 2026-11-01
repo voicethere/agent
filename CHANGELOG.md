@@ -14,6 +14,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 - `LinkExtractor` and `cleanLinkSentence` are exported for custom loops.
 - Config `toolChoice`: `"required-first-round"` makes the first LLM call of every turn call a tool (OpenAI and OpenRouter `tool_choice: "required"`, Anthropic `tool_choice: { type: "any" }`, Gemini function calling mode `ANY`). Use it when every answer must come from a tool, such as a docs search. Later calls in the turn stay `auto`; the default `"auto"` never forces a tool.
 
+### Changed
+
+- The OpenRouter default model is now `anthropic/claude-haiku-5.5` (catalog default and the `llm-agent`, `llm-docs-rag` and `llm-mcp-service` templates). `amazon/nova-micro-v1` does not support `tool_choice` on OpenRouter and often answered from memory instead of calling the docs search. Projects that set `model` keep it.
+- The `llm-docs-rag` template sets `"toolChoice": "required-first-round"`, so every turn starts with a docs search.
+
 ## [0.21.0] - 2026-10-31
 
 ### Added

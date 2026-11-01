@@ -10,7 +10,7 @@ describe("llm catalog", () => {
   });
 
   it("openrouter resolves a default model", () => {
-    expect(resolveModel("openrouter")).toBe("amazon/nova-micro-v1");
+    expect(resolveModel("openrouter")).toBe("anthropic/claude-haiku-5.5");
   });
 
   it("resolveModel requires a model for gemini", () => {

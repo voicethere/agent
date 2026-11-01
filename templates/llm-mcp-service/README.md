@@ -42,7 +42,7 @@ The rest of this file is the `llm-agent` README, which applies here too.
 
 ## Set the API key
 
-The template starts on OpenRouter with the model `amazon/nova-micro-v1`. Create a key at openrouter.ai, add it as a project secret named `AGENT_OPENROUTER_API_KEY`, then deploy. For production, pick the model from OpenRouter's list yourself, checking cost, latency and tool support. The key is read by name from `apiKeySecret` in `voicethere.llm.json`; it is never stored in the file. Only project secrets whose names start with `AGENT_` reach the agent.
+The template starts on OpenRouter with the model `anthropic/claude-haiku-5.5`. Create a key at openrouter.ai, add it as a project secret named `AGENT_OPENROUTER_API_KEY`, then deploy. For production, pick the model from OpenRouter's list yourself, checking cost, latency and tool support. The key is read by name from `apiKeySecret` in `voicethere.llm.json`; it is never stored in the file. Only project secrets whose names start with `AGENT_` reach the agent.
 
 ## Filler phrases
 

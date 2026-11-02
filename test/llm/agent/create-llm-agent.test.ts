@@ -1425,6 +1425,75 @@ describe("createLlmAgent", () => {
       expect(summaries[0]).toMatchObject({ linksSent: 1, linksDropped: 1 });
     });
 
+    describe("bare domains", () => {
+      const hostText = (): string => allText();
+
+      it("requireToolSource does not offer a bare domain that no tool returned", async () => {
+        await boot(
+          [[delta("See voicethere.dev/pricing for plans."), done("")]],
+          { config: { links: { requireToolSource: true } } },
+        );
+        say("price?");
+        await vi.waitFor(() => expect(summaries).toHaveLength(1));
+        expect(
+          clientPayloads().filter((p) => p.type === "assistant_content"),
+        ).toEqual([]);
+        expect(summaries[0]).toMatchObject({ linksDropped: 1 });
+        expect(hostText()).toContain("voicethere.dev");
+        expect(hostText()).not.toContain("/pricing");
+      });
+
+      for (const [label, result] of [
+        [
+          "its https url",
+          "1. Pricing - https://voicethere.dev/pricing (id: pricing)",
+        ],
+        [
+          "its text as written",
+          "1. Pricing - voicethere.dev/pricing (id: pricing)",
+        ],
+      ] as const) {
+        it(`requireToolSource offers a bare domain once when a tool result holds ${label}`, async () => {
+          await boot(
+            [
+              [done("", [call("c1", "search_docs", { query: "price" })])],
+              [delta("See voicethere.dev/pricing for plans."), done("")],
+            ],
+            {
+              config: { links: { requireToolSource: true } },
+              options: { tools: [docsTool(result)] },
+            },
+          );
+          say("price?");
+          await vi.waitFor(() => expect(summaries).toHaveLength(1));
+          const content = clientPayloads().filter(
+            (p) => p.type === "assistant_content",
+          );
+          expect(content).toHaveLength(1);
+          expect(content[0].content).toEqual({
+            kind: "link",
+            url: "https://voicethere.dev/pricing",
+            label: "voicethere.dev",
+          });
+          expect(summaries[0]).toMatchObject({ linksSent: 1 });
+          expect(hostText()).toContain("voicethere.dev");
+          expect(hostText()).not.toContain("/pricing");
+        });
+      }
+
+      it("mode off leaves a bare domain in the text as written", async () => {
+        await boot([[delta("See voicethere.dev/pricing now."), done("")]], {
+          config: { links: { mode: "off" } },
+        });
+        say("hi");
+        await vi.waitFor(() => expect(summaries).toHaveLength(1));
+        expect(
+          clientPayloads().filter((p) => p.type === "assistant_content"),
+        ).toEqual([]);
+        expect(hostText()).toContain("voicethere.dev/pricing");
+      });
+    });
+
     it("never sends an http URL", async () => {
       await boot([[delta("Old page: http://example.com/x. Bye."), done("")]]);
       say("hi");

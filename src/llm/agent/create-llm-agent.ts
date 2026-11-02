@@ -420,7 +420,11 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     }
     if (
       linksRequireToolSource &&
-      !t.toolResults.some((r) => r.includes(link.url))
+      !t.toolResults.some(
+        (r) =>
+          r.includes(link.url) ||
+          (link.sourceText !== undefined && r.includes(link.sourceText)),
+      )
     ) {
       t.linksDropped += 1;
       return;

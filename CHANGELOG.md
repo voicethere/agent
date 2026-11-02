@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- `assistant_filler`: each filler the LLM agent speaks is also sent to the client once as `{ type: "assistant_filler", turnId, text }`, through the same client-message path as `assistant_delta`. Fillers stay out of `assistant_delta`, `assistant_done`, `chat_reply` and the model's conversation history. A filler that is not spoken sends nothing. Clients that do not know the message ignore it.
+- `SpeakOptions` and the `speak` message gain `kind?: "filler"` and `fillerKind?: "thinking" | "toolCall" | "toolWait"`. The LLM agent sets them for fillers only; replies carry neither. Runners that predate the options ignore them.
+
 ## [0.24.0] - 2026-11-02
 
 ### Fixed

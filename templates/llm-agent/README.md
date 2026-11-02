@@ -34,7 +34,9 @@ The `fillers` block in `voicethere.llm.json` lists short sentences the agent spe
 - `toolWait`: a tool round is still running `afterMs` (1000 to 30000, default 4000) after it started. Once per tool round, twice per turn.
 - At most 3 fillers per turn. Two fillers never play back to back unless the reply spoke in between or `afterMs` passed. Phrases are picked at random and never repeat the previous filler of the session. Each list takes up to 20 phrases.
 - Callers can cut a filler by speaking (`interruptible`, default true). If the answer arrives while a filler plays, the answer follows it.
-- Fillers are speech only. They do not appear in the conversation the model sees or in chat text.
+- Fillers are not part of the conversation the model sees (`ConversationHistory`), so the model does not copy them, and they never appear in `assistant_delta`, `assistant_done` or `chat_reply` text.
+- Each filler that is spoken also reaches the client once as `{ "type": "assistant_filler", "turnId", "text" }`, with the `turnId` of the turn it belongs to, so a chat UI can show it as its own line before the reply. A filler that is not spoken (typed chat with `speakChatReplies` off, a limit reached) sends nothing.
+- The speak request for a filler carries `kind: "filler"` and `fillerKind` (`"thinking"`, `"toolCall"` or `"toolWait"`), so a runner can tag the stored utterance. Replies carry neither. Runners that predate the options ignore them.
 - `tools.filler` (a single text) is deprecated. It still works when `toolCall` and `toolWait` have no phrases; otherwise `fillers` wins and a warning is logged.
 
 ## Speech coalescing
@@ -43,7 +45,7 @@ The `fillers` block in `voicethere.llm.json` lists short sentences the agent spe
 
 ## Client messages for voice replies
 
-A voice reply also reaches the client as text. Each spoken sentence arrives as `{ "type": "assistant_delta", "turnId", "text", "spoken": true }`, and the turn ends with one `{ "type": "assistant_done", "turnId", "text", "spoken": true, "status" }`. `status` is `completed`, `failed`, `interrupted` or `cancelled`, and `text` holds the sentences delivered so far. When the runner sends an utterance id for the caller's final (`SpeechContext.utteranceId` in `onUserSpeechFinal`), both messages also carry `inReplyTo`, the caller utterance the reply answers. Render one line per `turnId` and reveal it as the speech plays. Typed (chat) turns keep sending `assistant_delta`, `assistant_done` and `chat_reply` without `spoken`. Fillers are never sent as text.
+A voice reply also reaches the client as text. Each spoken sentence arrives as `{ "type": "assistant_delta", "turnId", "text", "spoken": true }`, and the turn ends with one `{ "type": "assistant_done", "turnId", "text", "spoken": true, "status" }`. `status` is `completed`, `failed`, `interrupted` or `cancelled`, and `text` holds the sentences delivered so far. When the runner sends an utterance id for the caller's final (`SpeechContext.utteranceId` in `onUserSpeechFinal`), both messages also carry `inReplyTo`, the caller utterance the reply answers. Render one line per `turnId` and reveal it as the speech plays. Typed (chat) turns keep sending `assistant_delta`, `assistant_done` and `chat_reply` without `spoken`. Fillers are never part of this reply text; see `assistant_filler` below.
 
 ## Always search first
 

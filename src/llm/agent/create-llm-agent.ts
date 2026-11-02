@@ -457,16 +457,33 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     }
   }
 
+  /**
+   * The one place where a filler reaches the client as text. Fillers are not
+   * reply text: never `assistant_delta`, never in `chat_reply`, never in history.
+   */
+  function sendFillerMessage(
+    s: SessionState,
+    turnId: string,
+    text: string,
+  ): void {
+    sendToClient(s.sessionId, { type: "assistant_filler", turnId, text });
+  }
+
+  /** Speak options for a filler; replies carry no `kind`. */
   function speakAnnouncement(
     s: SessionState,
     turnId: string,
     text: string,
     interruptible: boolean,
+    fillerKind?: FillerKind,
   ): SpeakHandle {
+    const opts = fillerKind
+      ? { turnId, kind: "filler" as const, fillerKind }
+      : { turnId };
     if (interruptible) {
-      return speak(s.sessionId, text, { turnId });
+      return speak(s.sessionId, text, opts);
     }
-    const h = announce(s.sessionId, text, { turnId });
+    const h = announce(s.sessionId, text, opts);
     trackAnnouncement(s, h.done);
     return h;
   }
@@ -549,7 +566,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     if (kind === "thinking") t.thinkingSpoken = true;
     if (kind === "toolCall") t.toolCallSpoken = true;
     if (kind === "toolWait") t.toolWaitSpoken += 1;
-    speakAnnouncement(s, t.turnId, text, fillersInterruptible);
+    speakAnnouncement(s, t.turnId, text, fillersInterruptible, kind);
+    sendFillerMessage(s, t.turnId, text);
     return undefined;
   }
 
@@ -1221,7 +1239,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
               t.turnId,
               fillerLegacy.text,
               fillerLegacy.interruptible ?? D.fillerInterruptible,
+              "toolWait",
             );
+            sendFillerMessage(s, t.turnId, fillerLegacy.text);
           }, fillerLegacy.afterMs ?? D.fillerAfterMs);
         }
         let results: LlmToolResult[];

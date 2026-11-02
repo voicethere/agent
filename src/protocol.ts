@@ -232,6 +232,10 @@ export interface SpeakMessage {
    * advertise `speakControlAvailable`. Old runners ignore it.
    */
   inReplyTo?: string;
+  /** `"filler"` marks a filler phrase; absent means a reply. Old runners ignore it. */
+  kind?: "filler";
+  /** Which filler situation this is. Only with `kind: "filler"`. Old runners ignore it. */
+  fillerKind?: "thinking" | "toolCall" | "toolWait";
 }
 
 /** Final state of one {@link SpeakMessage}. */

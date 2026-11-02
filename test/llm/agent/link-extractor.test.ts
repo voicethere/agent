@@ -190,3 +190,166 @@ describe("cleanLinkSentence", () => {
     );
   });
 });
+
+/** Raw extractor output (marks kept) and the links, without splitting or cleaning. */
+function extract(deltas: string[]): { text: string; links: ExtractedLink[] } {
+  const x = new LinkExtractor();
+  let text = "";
+  for (const d of deltas) text += x.push(d);
+  text += x.end();
+  return { text, links: x.takeAll() };
+}
+
+describe("LinkExtractor bare domains", () => {
+  const splits = [
+    ["one delta", (t: string) => [t]],
+    ["char by char", chars],
+    ["chunks of 3", (t: string) => chunks(t, 3)],
+  ] as const;
+
+  for (const [name, split] of splits) {
+    describe(name, () => {
+      it("turns app.voicethere.dev/docs/pricing into a link, keeps the host, drops the path", () => {
+        const input = "See app.voicethere.dev/docs/pricing.";
+        const r = run(split(input));
+        expect(r.sentences).toEqual(["See app.voicethere.dev."]);
+        expect(r.links).toEqual([
+          {
+            url: "https://app.voicethere.dev/docs/pricing",
+            label: "app.voicethere.dev",
+            secure: true,
+            sourceText: "app.voicethere.dev/docs/pricing",
+          },
+        ]);
+        const raw = extract(split(input));
+        expect(raw.text).toBe(`See app.voicethere.dev${LINK_MARK}.`);
+        expect(raw.text).not.toContain("/docs");
+      });
+
+      it("handles a host-only domain at the end of a sentence", () => {
+        const r = run(split("Go to voicethere.dev."));
+        expect(r.sentences).toEqual(["Go to voicethere.dev."]);
+        expect(r.links).toEqual([
+          {
+            url: "https://voicethere.dev",
+            label: "voicethere.dev",
+            secure: true,
+            sourceText: "voicethere.dev",
+          },
+        ]);
+      });
+
+      it("handles a host-only domain followed by a period and another sentence", () => {
+        const r = run(split("Go to voicethere.dev. Then relax."));
+        expect(r.sentences).toEqual(["Go to voicethere.dev.", "Then relax."]);
+        expect(r.links.map((l) => l.url)).toEqual(["https://voicethere.dev"]);
+      });
+
+      it("handles a domain with a path at the end of a sentence followed by a period", () => {
+        const r = run(split("Pricing is at voicethere.dev/pricing. Next."));
+        expect(r.sentences).toEqual(["Pricing is at voicethere.dev.", "Next."]);
+        expect(r.links.map((l) => l.url)).toEqual([
+          "https://voicethere.dev/pricing",
+        ]);
+      });
+
+      it("leaves a comma after the path in the text", () => {
+        const r = run(
+          split("See docs.voicethere.dev/docs/knowledge-rag, then ask."),
+        );
+        expect(r.sentences).toEqual(["See docs.voicethere.dev, then ask."]);
+        expect(r.links.map((l) => l.url)).toEqual([
+          "https://docs.voicethere.dev/docs/knowledge-rag",
+        ]);
+      });
+
+      it("gives an unbalanced closing parenthesis back to the text", () => {
+        const r = run(split("(voicethere.dev/pricing)"));
+        expect(r.links.map((l) => l.url)).toEqual([
+          "https://voicethere.dev/pricing",
+        ]);
+        const raw = extract(split("(voicethere.dev/pricing)"));
+        expect(raw.text).toBe(`(voicethere.dev${LINK_MARK})`);
+      });
+
+      it("keeps the host as written", () => {
+        const r = run(split("VoiceThere.DEV"));
+        expect(r.links.map((l) => l.url)).toEqual(["https://VoiceThere.DEV"]);
+      });
+
+      it("a scheme URL is one link, not two", () => {
+        const r = run(split("https://voicethere.dev/pricing"));
+        expect(r.links).toEqual([
+          { url: "https://voicethere.dev/pricing", secure: true },
+        ]);
+      });
+
+      it("a markdown link is one link with its label", () => {
+        const r = run(split("[Pricing](https://voicethere.dev/pricing)"));
+        expect(r.links).toEqual([
+          {
+            url: "https://voicethere.dev/pricing",
+            label: "Pricing",
+            secure: true,
+          },
+        ]);
+      });
+
+      it("a domain inside a markdown label does not add a second link", () => {
+        const r = run(split("[voicethere.dev](https://voicethere.dev/x)"));
+        expect(r.links.map((l) => l.url)).toEqual(["https://voicethere.dev/x"]);
+      });
+
+      for (const text of [
+        "Node.js",
+        "next.config.ts",
+        "package.json",
+        "README.md",
+        "run.sh",
+        "e.g. this",
+        "e.g., this",
+        "i.e. that",
+        "v1.2.3",
+        "3.14",
+        "U.S. users",
+        "mail me at hi@voicethere.dev",
+        "@voicethere/agent",
+        "process.env.KEY",
+        "foo.bar",
+        "voicethere.devices",
+        "my-file.com.backup",
+        "voicethere.dev2",
+        "x-voicethere.dev_y",
+      ]) {
+        it(`leaves ${JSON.stringify(text)} as text`, () => {
+          const raw = extract(split(text));
+          expect(raw.links).toEqual([]);
+          expect(raw.text).toBe(text);
+        });
+      }
+    });
+  }
+
+  it("holds a domain that is split across streamed chunks", () => {
+    const x = new LinkExtractor();
+    expect(x.push("Visit voicethere.d")).toBe("Visit ");
+    expect(x.push("ev now.")).toBe(`voicethere.dev${LINK_MARK} `);
+    expect(x.end()).toBe("now.");
+    expect(x.takeLink()).toMatchObject({ url: "https://voicethere.dev" });
+  });
+
+  it("gives the same result when a domain with a path is split across chunks", () => {
+    const whole = extract(["Open app.voicethere.dev/docs/llms-txt now."]);
+    const split = extract(["Open app.voice", "there.dev/docs/llms-txt now."]);
+    expect(split).toEqual(whole);
+    expect(split.links.map((l) => l.url)).toEqual([
+      "https://app.voicethere.dev/docs/llms-txt",
+    ]);
+  });
+
+  it("decides a held domain on end()", () => {
+    const x = new LinkExtractor();
+    expect(x.push("Go to voicethere.dev")).toBe("Go to ");
+    expect(x.end()).toBe(`voicethere.dev${LINK_MARK}`);
+  });
+});

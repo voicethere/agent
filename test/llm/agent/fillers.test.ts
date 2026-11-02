@@ -227,7 +227,12 @@ describe("llm fillers", () => {
     });
   const toolStep = (): Step[] => [done("", [call("c", "slow")])];
 
-  it("fillers send no assistant events", async () => {
+  const fillerMsgs = (): Msg[] =>
+    sent("send_to_client")
+      .map((m) => m.payload as Msg)
+      .filter((p) => p.type === "assistant_filler");
+
+  it("fillers send no assistant_delta, assistant_done or chat_reply text", async () => {
     const gate = mk();
     await boot([[{ gate: gate.promise }, delta("Answer."), done("Answer.")]]);
     vi.useFakeTimers();
@@ -235,13 +240,97 @@ describe("llm fillers", () => {
     await vi.advanceTimersByTimeAsync(1600);
     expect(THINK).toContain(texts()[0]);
     const filler = String(texts()[0]);
-    const assistant = () =>
+    const replyText = () =>
       sent("send_to_client")
         .map((m) => m.payload as Msg)
-        .filter((p) => String(p.type).startsWith("assistant_"));
-    expect(assistant().some((p) => p.text === filler)).toBe(false);
-    expect(assistant()).toHaveLength(0);
+        .filter((p) => p.type !== "assistant_filler")
+        .filter(
+          (p) =>
+            String(p.type).startsWith("assistant_") || p.type === "chat_reply",
+        );
+    expect(replyText().some((p) => p.text === filler)).toBe(false);
+    expect(replyText()).toHaveLength(0);
     gate.resolve();
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.waitFor(() => expect(texts()).toHaveLength(2));
+    expect(replyText().some((p) => String(p.text ?? "").includes(filler))).toBe(
+      false,
+    );
+    expect(replyText().length).toBeGreaterThan(0);
+  });
+
+  it("thinking filler sends one assistant_filler with the spoken text and turn id, and tags the speak", async () => {
+    const gate = mk();
+    await boot([[{ gate: gate.promise }, delta("Answer."), done("Answer.")]]);
+    vi.useFakeTimers();
+    say("hi");
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(fillerMsgs()).toEqual([
+      {
+        type: "assistant_filler",
+        turnId: speaks()[0].turnId,
+        text: texts()[0],
+      },
+    ]);
+    expect(speaks()[0]).toMatchObject({
+      kind: "filler",
+      fillerKind: "thinking",
+    });
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.waitFor(() => expect(texts()).toHaveLength(2));
+    expect(fillerMsgs()).toHaveLength(1);
+    expect(speaks()[1]).not.toHaveProperty("kind");
+    expect(speaks()[1]).not.toHaveProperty("fillerKind");
+  });
+
+  it("toolCall filler sends one assistant_filler and tags the speak", async () => {
+    const tool = mk();
+    await boot([toolStep(), [delta("Done."), done("Done.")]], {
+      options: { tools: [slowTool(tool)] },
+    });
+    vi.useFakeTimers();
+    say("go");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(CALL).toContain(texts()[0]);
+    expect(fillerMsgs()).toEqual([
+      {
+        type: "assistant_filler",
+        turnId: speaks()[0].turnId,
+        text: texts()[0],
+      },
+    ]);
+    expect(speaks()[0]).toMatchObject({
+      kind: "filler",
+      fillerKind: "toolCall",
+    });
+    tool.resolve();
+  });
+
+  it("toolWait filler sends one assistant_filler and tags the speak", async () => {
+    const tool = mk();
+    await boot([toolStep(), [delta("Done."), done("Done.")]], {
+      options: { tools: [slowTool(tool)] },
+      config: {
+        fillers: { toolWait: { phrases: WAIT, afterMs: 4000 } },
+      },
+    });
+    vi.useFakeTimers();
+    say("go");
+    await vi.advanceTimersByTimeAsync(4100);
+    expect(WAIT).toContain(texts()[0]);
+    expect(fillerMsgs()).toEqual([
+      {
+        type: "assistant_filler",
+        turnId: speaks()[0].turnId,
+        text: texts()[0],
+      },
+    ]);
+    expect(speaks()[0]).toMatchObject({
+      kind: "filler",
+      fillerKind: "toolWait",
+    });
+    tool.resolve();
   });
 
   it("thinking filler fires after afterMs", async () => {
@@ -488,6 +577,17 @@ describe("llm fillers", () => {
     say("go");
     await vi.advanceTimersByTimeAsync(1600);
     expect(texts()).toEqual(["Legacy text."]);
+    expect(fillerMsgs()).toEqual([
+      {
+        type: "assistant_filler",
+        turnId: speaks()[0].turnId,
+        text: "Legacy text.",
+      },
+    ]);
+    expect(speaks()[0]).toMatchObject({
+      kind: "filler",
+      fillerKind: "toolWait",
+    });
     tool.resolve();
   });
 
@@ -535,6 +635,7 @@ describe("llm fillers", () => {
     chat("hello");
     await vi.advanceTimersByTimeAsync(5000);
     expect(speaks()).toHaveLength(0);
+    expect(fillerMsgs()).toHaveLength(0);
     expect(
       sent("send_to_client").some((m) => JSON.stringify(m).includes("Hmm")),
     ).toBe(false);

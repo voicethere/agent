@@ -367,6 +367,8 @@ defineAgent({
 
 `turnId` groups several speaks into one reply. `inReplyTo` names the caller turn the reply answers.
 
+`kind: "filler"` marks a speak as a filler phrase, and `fillerKind` (`"thinking"`, `"toolCall"` or `"toolWait"`) says which situation. Leave both out for a reply. The LLM agent sets them for its fillers so the runner can tag the stored utterance; runners that predate the options ignore them. The LLM agent also sends each spoken filler to the client once as `{ "type": "assistant_filler", "turnId", "text" }`.
+
 ### Barge-in control
 
 ```ts

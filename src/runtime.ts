@@ -1828,6 +1828,10 @@ export interface SpeakOptions {
   turnId?: string;
   /** Utterance id of the caller turn this reply answers. */
   inReplyTo?: string;
+  /** `"filler"` marks a filler phrase; absent means a reply. Runners that predate it ignore it. */
+  kind?: "filler";
+  /** Which filler situation this is. Only with `kind: "filler"`. */
+  fillerKind?: "thinking" | "toolCall" | "toolWait";
 }
 
 export type SpeakResultStatus = SpeakStatus | "unsupported";
@@ -1847,6 +1851,16 @@ export interface SpeakHandle {
   readonly done: Promise<SpeakResult>;
   /** Cancel this utterance (no-op on runners without speak control). */
   cancel(): void;
+}
+
+function speakKindFields(
+  options?: SpeakOptions,
+): Pick<SpeakOptions, "kind" | "fillerKind"> {
+  if (options?.kind !== "filler") return {};
+  return {
+    kind: "filler",
+    ...(options.fillerKind ? { fillerKind: options.fillerKind } : {}),
+  };
 }
 
 function speakControlAvailableFor(sessionId: string): boolean {
@@ -1908,6 +1922,7 @@ export function speak(
       sessionId,
       text,
       ...(options?.interruptible === false ? { interruptible: false } : {}),
+      ...speakKindFields(options),
     });
     warnSpeakControlUnavailable(sessionId);
     return handle({ requestId, status: "unsupported", playedMs: 0 });
@@ -1941,6 +1956,7 @@ export function speak(
     ...(options?.interruptible === false ? { interruptible: false } : {}),
     ...(turnId ? { turnId } : {}),
     ...(inReplyTo ? { inReplyTo } : {}),
+    ...speakKindFields(options),
   });
   return {
     requestId,

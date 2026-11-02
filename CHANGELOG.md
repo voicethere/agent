@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-02
+
 ### Fixed
 
 - Bare domains in a reply (`example.com/path`) are sent as https links like full URLs; the host stays in the spoken text and the path is removed from it. Only a closed list of top-level domains counts (`com`, `org`, `net`, `dev`, `io`, `ai`, `app`, `co`, `cloud`, `eu`, `de`, `uk`, `us`), so names such as `Node.js`, `package.json` and `README.md` stay text. With `links.requireToolSource`, a bare domain is offered only when a tool result contains its `https://` URL or the text as written.

@@ -107,6 +107,16 @@ export function createAnthropicProvider(config: AnthropicConfig): LlmProvider {
           ...(tools.length > 0 && req.toolChoice === "required"
             ? { tool_choice: { type: "any" as const } }
             : {}),
+          ...(tools.length > 0 &&
+          typeof req.toolChoice === "object" &&
+          req.toolChoice !== null
+            ? {
+                tool_choice: {
+                  type: "tool" as const,
+                  name: req.toolChoice.name,
+                },
+              }
+            : {}),
           ...(req.temperature !== undefined
             ? { temperature: req.temperature }
             : {}),

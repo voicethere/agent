@@ -1,5 +1,6 @@
 import type { CompiledFlow, CompiledNode } from "./compile.js";
 import type { FlowEffects } from "./effects.js";
+import { matchRule } from "./route.js";
 import { renderTemplate, type TemplatePart } from "./template.js";
 import type { FlowTraceEvent } from "./trace.js";
 
@@ -389,8 +390,95 @@ export class FlowSession {
           this.fx.end(node.reason);
           return;
         }
+        case "route": {
+          const text = this.render(node.input);
+          const rule = matchRule(node.paths, text);
+          let chosen = rule.path;
+          let via: "rule" | "classifier" = "rule";
+          let errCode: string | undefined;
+          if (!chosen) {
+            via = "classifier";
+            const model =
+              this.compiled.models[node.model ?? "classifier"] ??
+              this.compiled.models["default"];
+            const ctl = new AbortController();
+            let cancelTimer: () => void = () => {};
+            const outcome = await new Promise<
+              | { k: "ok"; path: string }
+              | { k: "timeout" }
+              | { k: "err"; code: string }
+              | { k: "cancelled" }
+            >((resolve) => {
+              cancelTimer = this.fx.clock.setTimeout(() => {
+                ctl.abort();
+                resolve({ k: "timeout" });
+              }, node.timeoutMs);
+              this.cancelCurrent = () => {
+                cancelTimer();
+                ctl.abort();
+                resolve({ k: "cancelled" });
+              };
+              let p: Promise<{ path: string }>;
+              try {
+                p = this.fx.classify(
+                  {
+                    model: model!,
+                    input: text,
+                    paths: node.paths.map((x) => ({
+                      id: x.id,
+                      examples: x.examples,
+                    })),
+                    ...(node.historyTurns > 0
+                      ? {
+                          history: this.history
+                            .slice(-node.historyTurns * 2)
+                            .map((h) => ({ ...h })),
+                        }
+                      : {}),
+                    timeoutMs: node.timeoutMs,
+                  },
+                  ctl.signal,
+                );
+              } catch (err) {
+                resolve({ k: "err", code: errorCode(err) });
+                return;
+              }
+              p.then(
+                (r) => resolve({ k: "ok", path: r.path }),
+                (err) => resolve({ k: "err", code: errorCode(err) }),
+              );
+            });
+            cancelTimer();
+            this.cancelCurrent = undefined;
+            if (this.stale(seq)) return;
+            if (outcome.k === "timeout") errCode = "ROUTE_TIMEOUT";
+            else if (outcome.k === "err") errCode = outcome.code;
+            else if (outcome.k === "ok")
+              chosen = node.paths.find((x) => x.id === outcome.path);
+          }
+          if (errCode !== undefined) {
+            this.vars[`error.${node.id}`] = errCode;
+            done(node.onError, {
+              via,
+              error: errCode,
+              varsChanged: [`error.${node.id}`],
+            });
+            break;
+          }
+          if (!chosen) {
+            done(node.onNone, { via, edge: "none" });
+            break;
+          }
+          this.vars[`route.${node.id}`] = chosen.id;
+          done(chosen.next, {
+            edge: chosen.id,
+            via,
+            varsChanged: [`route.${node.id}`],
+          });
+          break;
+        }
         default: {
-          // route, http, mcp, llm are implemented in later chunks.
+          // http, mcp, llm are implemented in later chunks.
           done(undefined, { error: "FLOW_NODE_UNSUPPORTED" });
           this._ended = true;
           this.fx.end("unsupported_node");
@@ -399,4 +487,9 @@ export class FlowSession {
       }
     }
   }
+}
+
+function errorCode(err: unknown): string {
+  const c = (err as { code?: unknown } | null)?.code;
+  return typeof c === "string" && c !== "" ? c : "ROUTE_ERROR";
 }

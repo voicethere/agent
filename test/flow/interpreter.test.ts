@@ -223,9 +223,10 @@ describe("FlowSession", () => {
     const d = doc([
       {
         id: "r",
-        type: "route",
-        paths: [{ id: "p", examples: ["x"], next: "r" }],
-        onNone: "r",
+        type: "http",
+        method: "GET",
+        url: "https://api.example.com/x",
+        next: "r",
         onError: "r",
       },
     ]);

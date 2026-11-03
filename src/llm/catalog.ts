@@ -2,17 +2,26 @@ import { LlmProviderError, type LlmProviderId } from "./types.js";
 
 export const LLM_PROVIDERS: Record<
   LlmProviderId,
-  { title: string; defaultModel?: string; apiKeyEnv: string; docsUrl: string }
+  {
+    title: string;
+    defaultModel?: string;
+    /** Model for cheap, short calls (the flow route classifier). */
+    cheapModel?: string;
+    apiKeyEnv: string;
+    docsUrl: string;
+  }
 > = {
   openai: {
     title: "OpenAI",
     defaultModel: "gpt-4o-mini",
+    cheapModel: "gpt-4o-mini",
     apiKeyEnv: "AGENT_OPENAI_API_KEY",
     docsUrl: "https://platform.openai.com/docs/api-reference/chat",
   },
   anthropic: {
     title: "Anthropic",
     defaultModel: "claude-haiku-5-5",
+    cheapModel: "claude-haiku-5-5",
     apiKeyEnv: "AGENT_ANTHROPIC_API_KEY",
     docsUrl: "https://docs.anthropic.com/en/api/messages",
   },
@@ -28,6 +37,7 @@ export const LLM_PROVIDERS: Record<
     // toolChoice "required-first-round"). amazon/nova-micro-v1, the previous
     // default, does not list tool_choice and skipped tools it was told to call.
     defaultModel: "anthropic/claude-haiku-5.5",
+    cheapModel: "anthropic/claude-haiku-5.5",
     apiKeyEnv: "AGENT_OPENROUTER_API_KEY",
     docsUrl: "https://openrouter.ai/docs/api-reference/overview",
   },
@@ -42,4 +52,9 @@ export function resolveModel(provider: LlmProviderId, model?: string): string {
     "LLM_BAD_REQUEST",
     `model is required for ${entry.title}`,
   );
+}
+
+/** The provider's cheap model, or undefined when the catalog has none (the caller must choose one). */
+export function cheapModelFor(provider: LlmProviderId): string | undefined {
+  return LLM_PROVIDERS[provider].cheapModel;
 }

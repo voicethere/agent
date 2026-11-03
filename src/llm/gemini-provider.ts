@@ -102,6 +102,18 @@ export function createGeminiProvider(config: GeminiConfig): LlmProvider {
                 },
               }
             : {}),
+          ...(req.tools.length &&
+          typeof req.toolChoice === "object" &&
+          req.toolChoice !== null
+            ? {
+                toolConfig: {
+                  functionCallingConfig: {
+                    mode: FunctionCallingConfigMode.ANY,
+                    allowedFunctionNames: [req.toolChoice.name],
+                  },
+                },
+              }
+            : {}),
           temperature: req.temperature,
           maxOutputTokens: req.maxOutputTokens,
           abortSignal: req.signal,

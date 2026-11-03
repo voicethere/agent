@@ -210,4 +210,18 @@ describe("createFlowAgent({ mocks })", () => {
       }),
     ).toThrowError(expect.objectContaining({ code: "FLOW_MOCKS_INVALID" }));
   });
+
+  it("does not start tool sources", async () => {
+    const { createFlowAgent } =
+      await import("../../src/flow/create-flow-agent.js");
+    const h = createFlowAgent({
+      flow: doc(),
+      mocks: full,
+      env: () => ({}),
+      sourceFactory: () => {
+        throw new Error("network");
+      },
+    });
+    expect(() => h.onAgentStart!({} as any)).not.toThrow();
+  });
 });

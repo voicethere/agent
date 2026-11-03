@@ -32,11 +32,11 @@ export function createMockEffects(
   let current = "";
   const pick = opts.pick ?? ((_id, cases) => cases[0]);
 
-  function caseFor(): FlowMockCase {
-    const cases = Object.hasOwn(mocks.nodes, current)
-      ? mocks.nodes[current]
+  function caseFor(nodeId: string = current): FlowMockCase {
+    const cases = Object.hasOwn(mocks.nodes, nodeId)
+      ? mocks.nodes[nodeId]
       : undefined;
-    const c = cases && cases.length > 0 ? pick(current, cases) : undefined;
+    const c = cases && cases.length > 0 ? pick(nodeId, cases) : undefined;
     if (!c) throw coded("MOCK_MISSING");
     return c;
   }
@@ -75,9 +75,12 @@ export function createMockEffects(
       };
     },
     llm(req) {
+      const c = caseFor();
       const fn = (async function* (): AsyncGenerator<FlowLlmEvent> {
-        const l = caseFor().llm;
+        const l = c.llm;
         if (!l) throw coded("MOCK_MISSING");
+        // v1: toolCalls are trace-only (child start/end events); no tool mocks
+        // run, and the mocked text is the answer.
         for (const t of l.toolCalls ?? []) {
           yield { type: "tool", name: t.name, phase: "start" };
           yield { type: "tool", name: t.name, phase: "end", durationMs: 0 };

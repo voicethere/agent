@@ -84,15 +84,11 @@ function fromSchema(schema: unknown, r: Rng, depth: number): unknown {
       return out;
     }
     case "array": {
-      const min =
-        typeof schema["minItems"] === "number" ? schema["minItems"] : 1;
-      const max = Math.max(
-        min,
-        typeof schema["maxItems"] === "number"
-          ? Math.min(schema["maxItems"], min + 1)
-          : min + 1,
-      );
-      const n = Math.min(int(r, min, max), schema["maxItems"] === 0 ? 0 : 3);
+      const minItems =
+        typeof schema["minItems"] === "number" ? schema["minItems"] : 0;
+      const maxItems =
+        typeof schema["maxItems"] === "number" ? schema["maxItems"] : 3;
+      const n = Math.max(minItems, Math.min(3, maxItems));
       return Array.from({ length: n }, () =>
         fromSchema(schema["items"], r, depth + 1),
       );
@@ -104,7 +100,11 @@ function fromSchema(schema: unknown, r: Rng, depth: number): unknown {
         typeof schema["maximum"] === "number"
           ? schema["maximum"]
           : Math.max(lo, 0) + 100;
-      if (type === "integer") return int(r, Math.ceil(lo), Math.floor(hi));
+      if (type === "integer") {
+        // No integer in [lo, hi]: documented fallback is ceil(lo).
+        if (Math.ceil(lo) > Math.floor(hi)) return Math.ceil(lo);
+        return int(r, Math.ceil(lo), Math.floor(hi));
+      }
       return Math.round((lo + r() * (hi - lo)) * 100) / 100;
     }
     case "boolean":

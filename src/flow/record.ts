@@ -56,10 +56,10 @@ export function wrapRecording(
   });
   const counts = new Map<string, number>();
   let current = "";
-  const record = (c: Omit<FlowMockCase, "name">): void => {
-    const n = (counts.get(current) ?? 0) + 1;
-    counts.set(current, n);
-    sink.add(current, { name: `recorded-${n}`, ...c });
+  const record = (nodeId: string, c: Omit<FlowMockCase, "name">): void => {
+    const n = (counts.get(nodeId) ?? 0) + 1;
+    counts.set(nodeId, n);
+    sink.add(nodeId, { name: `recorded-${n}`, ...c });
   };
 
   return {
@@ -69,13 +69,14 @@ export function wrapRecording(
       effects.trace(e);
     },
     async http(req, signal) {
+      const nodeId = current;
       try {
         const res = await effects.http(req, signal);
         const headers: Record<string, string> = {};
         for (const [k, v] of Object.entries(res.headers ?? {}))
           if (!DROPPED_HEADERS.has(k.toLowerCase()))
             headers[k] = String(redactor.redact(v));
-        record({
+        record(nodeId, {
           http: {
             status: res.status,
             ...(Object.keys(headers).length > 0 ? { headers } : {}),
@@ -86,14 +87,15 @@ export function wrapRecording(
       } catch (err) {
         const code = codeOf(err);
         if (code === "HTTP_TIMEOUT" || code === "HTTP_NETWORK")
-          record({ http: { error: code } });
+          record(nodeId, { http: { error: code } });
         throw err;
       }
     },
     async tool(source, tool, args, signal, o) {
+      const nodeId = current;
       const res = await effects.tool(source, tool, args, signal, o);
       if (res.isError)
-        record({
+        record(nodeId, {
           mcp: { isError: true, content: String(redactor.redact(res.content)) },
         });
       else {
@@ -103,23 +105,27 @@ export function wrapRecording(
         } catch {
           // plain text result
         }
-        record({ mcp: { result: redactor.redact(value) } });
+        record(nodeId, { mcp: { result: redactor.redact(value) } });
       }
       return res;
     },
     llm(req, signal) {
+      const nodeId = current;
       const inner = effects.llm(req, signal);
       return (async function* () {
         for await (const ev of inner) {
           if (ev.type === "done")
-            record({ llm: { text: String(redactor.redact(ev.text)) } });
+            record(nodeId, {
+              llm: { text: String(redactor.redact(ev.text)) },
+            });
           yield ev;
         }
       })();
     },
     async classify(req, signal) {
+      const nodeId = current;
       const res = await effects.classify(req, signal);
-      record({ route: { path: res.path } });
+      record(nodeId, { route: { path: res.path } });
       return res;
     },
   };

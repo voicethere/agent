@@ -117,4 +117,29 @@ describe("generateMock", () => {
       ).route,
     ).toEqual({ path: "p1" });
   });
+
+  it("returns ceil(minimum) when no integer fits the range", () => {
+    const n = { id: "t", type: "mcp", source: "s", tool: "t" } as any;
+    const r = (
+      generateMock(n, {
+        flow: f,
+        seed: 1,
+        outputSchema: { type: "integer", minimum: 1.5, maximum: 1.7 },
+      }).mcp as any
+    ).result;
+    expect(Number.isInteger(r)).toBe(true);
+    expect(r).toBe(2);
+  });
+
+  it("respects minItems above 3", () => {
+    const n = { id: "t", type: "mcp", source: "s", tool: "t" } as any;
+    const r = (
+      generateMock(n, {
+        flow: f,
+        seed: 1,
+        outputSchema: { type: "array", minItems: 5, items: { type: "string" } },
+      }).mcp as any
+    ).result;
+    expect(r).toHaveLength(5);
+  });
 });

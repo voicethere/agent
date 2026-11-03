@@ -157,6 +157,8 @@ export function createFlowAgent(opts: CreateFlowAgentOptions): AgentHandlers {
             );
         }
       }
+      // Mock mode never starts tool sources (no network).
+      if (mocks) return;
       const toolSources = flow.tools?.toolSources ?? [];
       const customTools = opts.tools ?? [];
       if (toolSources.length === 0 && customTools.length === 0) return;

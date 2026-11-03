@@ -3,7 +3,8 @@ import type { FlowModel } from "./types.js";
 export interface FlowHttpRequest {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   url: string;
-  headers: Record<string, string>;
+  /** A string is sent as is; `{secret}` is resolved by the effect layer from the environment. */
+  headers: Record<string, string | { secret: string; prefix: string }>;
   body?: unknown;
   timeoutMs: number;
 }
@@ -23,16 +24,18 @@ export interface FlowLlmCall {
   speak: boolean;
   maxRounds?: number;
   timeoutMs?: number;
+  /** Said once, marked as filler, when no sentence has arrived after `afterMs`. */
+  filler?: { text: string; afterMs: number };
 }
 
 export type FlowLlmEvent =
-  | { type: "text_delta"; text: string }
+  | { type: "sentence"; text: string; filler?: boolean }
   | {
-      type: "tool_call";
+      type: "tool";
       name: string;
-      args: unknown;
-      result?: string;
-      isError?: boolean;
+      phase: "start" | "end";
+      durationMs?: number;
+      error?: string;
     }
   | {
       type: "done";
@@ -65,6 +68,7 @@ export interface FlowEffects {
     tool: string,
     args: unknown,
     signal: AbortSignal,
+    opts?: { timeoutMs?: number },
   ): Promise<{ content: string; isError?: boolean }>;
   llm(req: FlowLlmCall, signal: AbortSignal): AsyncIterable<FlowLlmEvent>;
   classify(
@@ -72,6 +76,12 @@ export interface FlowEffects {
     signal: AbortSignal,
   ): Promise<{ path: string; tokens?: { input?: number; output?: number } }>;
   end(reason: string): void;
+  /** Metadata-only log line (ids, lengths, codes; never customer content). */
+  log?(
+    level: "info" | "warn",
+    message: string,
+    fields: Record<string, unknown>,
+  ): void;
   trace(e: import("./trace.js").FlowTraceEvent): void;
   clock: {
     now(): number;

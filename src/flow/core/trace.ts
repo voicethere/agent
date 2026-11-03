@@ -18,4 +18,6 @@ export interface FlowTraceEvent {
   /** seq of the parent event (tool calls inside an llm node). */
   parent?: number;
   tool?: string;
+  /** Token counts of a classifier or llm call. Counts only. */
+  tokens?: { input?: number; output?: number };
 }

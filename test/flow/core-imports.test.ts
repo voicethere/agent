@@ -60,6 +60,7 @@ describe("src/flow/core stays portable", () => {
       "host.ts",
       "index.ts",
       "interpreter.ts",
+      "json-pointer.ts",
       "migrate.ts",
       "route.ts",
       "schema.ts",

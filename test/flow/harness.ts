@@ -15,6 +15,11 @@ export function makeHarness(opts: { autoSpeak?: boolean } = {}) {
   const traces: FlowTraceEvent[] = [];
   const ends: string[] = [];
   const pending: Deferred[] = [];
+  const logs: {
+    level: string;
+    message: string;
+    fields: Record<string, unknown>;
+  }[] = [];
 
   const effects: FlowEffects = {
     speak(text, o) {
@@ -52,6 +57,9 @@ export function makeHarness(opts: { autoSpeak?: boolean } = {}) {
     trace(e) {
       traces.push(e);
     },
+    log(level, message, fields) {
+      logs.push({ level, message, fields });
+    },
     clock: {
       now: () => now,
       setTimeout(fn, ms) {
@@ -70,6 +78,7 @@ export function makeHarness(opts: { autoSpeak?: boolean } = {}) {
     speaks,
     chats,
     traces,
+    logs,
     ends,
     pending,
     advance(ms: number) {

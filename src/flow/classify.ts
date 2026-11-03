@@ -26,7 +26,7 @@ export function createClassifier(
       tools: [prompt.tool],
       toolChoice: { name: ROUTE_TOOL_NAME },
       temperature: 0,
-      maxOutputTokens: 20,
+      maxOutputTokens: 200,
       signal,
     })) {
       if (ev.type !== "done") continue;

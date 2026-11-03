@@ -218,23 +218,6 @@ describe("FlowSession", () => {
     expect(h.ends).toEqual(["ok"]);
   });
 
-  it("ends with unsupported_node for nodes later chunks implement", async () => {
-    const h = makeHarness();
-    const d = doc([
-      {
-        id: "r",
-        type: "http",
-        method: "GET",
-        url: "https://api.example.com/x",
-        next: "r",
-        onError: "r",
-      },
-    ]);
-    const s = session(d, h);
-    await s.start();
-    expect(h.ends).toEqual(["unsupported_node"]);
-  });
-
   it("prototype names are not variables", async () => {
     const h = makeHarness();
     const d = doc([

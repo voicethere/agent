@@ -10,3 +10,4 @@ export * from "./effects.js";
 export * from "./interpreter.js";
 export * from "./trace.js";
 export * from "./route.js";
+export * from "./json-pointer.js";

@@ -604,7 +604,11 @@ export function validateFlow(
   nodes.forEach((n, i) => {
     if (n.type !== "route" && n.type !== "llm") return;
     const name = n.model ?? (n.type === "route" ? "classifier" : "default");
-    if (!(name in flow.models)) {
+    // A route without its own model falls back to the flow's default model.
+    const resolves =
+      name in flow.models ||
+      (n.type === "route" && n.model === undefined && "default" in flow.models);
+    if (!resolves) {
       err(
         "FLOW_MODEL_UNKNOWN",
         `Model "${name}" is not defined in models`,

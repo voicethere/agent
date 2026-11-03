@@ -77,7 +77,7 @@ describe("createClassifier", () => {
       function: { name: "choose_path" },
     });
     expect(body.temperature).toBe(0);
-    expect(body.max_completion_tokens).toBe(20);
+    expect(body.max_completion_tokens).toBe(200);
     expect(body.tools[0].function.parameters.properties.path.enum).toEqual([
       "billing",
       "support",

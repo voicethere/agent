@@ -37,6 +37,8 @@ for (const subpath of [
   "/build",
   "/host",
   "/llm",
+  "/flow",
+  "/flow/core",
 ]) {
   const resolved = requireFromPkg.resolve(`${pkg.name}${subpath}`);
   if (!resolved.endsWith(".js")) {
@@ -91,6 +93,18 @@ for (const subpath of [
     }
     if (typeof mod.LLM_PROVIDERS !== "object" || mod.LLM_PROVIDERS == null) {
       throw new Error("@voicethere/agent/llm must export LLM_PROVIDERS");
+    }
+  } else if (subpath === "/flow") {
+    if (typeof mod.createFlowAgent !== "function") {
+      throw new Error("@voicethere/agent/flow must export createFlowAgent");
+    }
+  } else if (subpath === "/flow/core") {
+    for (const exportName of ["validateFlow", "compileFlow", "FlowSession"]) {
+      if (typeof mod[exportName] !== "function") {
+        throw new Error(
+          `@voicethere/agent/flow/core must export ${exportName}`,
+        );
+      }
     }
   } else if (typeof mod !== "object" || mod == null) {
     throw new Error("@voicethere/agent root export must be an object");

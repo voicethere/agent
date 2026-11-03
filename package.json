@@ -46,6 +46,18 @@
       "require": "./dist/llm/index.js",
       "default": "./dist/llm/index.js"
     },
+    "./flow": {
+      "types": "./dist/flow/index.d.ts",
+      "import": "./dist/flow/index.js",
+      "require": "./dist/flow/index.js",
+      "default": "./dist/flow/index.js"
+    },
+    "./flow/core": {
+      "types": "./dist/flow/core/index.d.ts",
+      "import": "./dist/flow/core/index.js",
+      "require": "./dist/flow/core/index.js",
+      "default": "./dist/flow/core/index.js"
+    },
     "./llm/schema.json": {
       "import": "./schema/voicethere.llm.schema.json",
       "require": "./schema/voicethere.llm.schema.json",

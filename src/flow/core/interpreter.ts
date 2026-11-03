@@ -1,5 +1,11 @@
+import { renderValue } from "./compile.js";
 import type { CompiledFlow, CompiledNode } from "./compile.js";
-import type { FlowEffects } from "./effects.js";
+import type {
+  FlowEffects,
+  FlowHttpRequest,
+  FlowSpeakHandle,
+} from "./effects.js";
+import { resolvePointer } from "./json-pointer.js";
 import { matchRule } from "./route.js";
 import { renderTemplate, type TemplatePart } from "./template.js";
 import type { FlowTraceEvent } from "./trace.js";
@@ -15,7 +21,18 @@ export interface FlowSessionOptions {
 export interface UserInputOptions {
   utteranceId?: string;
   language?: string;
+  /** Where the caller typed or spoke; replies follow it. Default: unchanged. */
+  source?: "voice" | "chat";
 }
+
+/** Backstop for a whole llm node (all rounds and tool calls). */
+export const LLM_NODE_TIMEOUT_MS = 120_000;
+
+type Bounded<T> =
+  | { k: "ok"; v: T }
+  | { k: "timeout" }
+  | { k: "err"; err: unknown }
+  | { k: "cancelled" };
 
 interface UserInput extends UserInputOptions {
   text: string;
@@ -38,6 +55,7 @@ export class FlowSession {
   private vars: Record<string, unknown> = {};
   private history: { role: "user" | "assistant"; text: string }[] = [];
   private nodeIndex: number;
+  private channel: "voice" | "chat";
   private pendingFinal: UserInput | undefined;
   private stepSeq = 0;
   private traceSeq = 0;
@@ -60,6 +78,7 @@ export class FlowSession {
     this.fx = effects;
     this.opts = opts;
     this.maxSteps = opts.maxStepsPerTurn ?? 100;
+    this.channel = opts.channel;
     this.nodeIndex = compiled.start;
     this.vars = Object.assign(
       Object.create(null) as Record<string, unknown>,
@@ -103,6 +122,12 @@ export class FlowSession {
       this.resumeListen(w, "input", { text, ...o });
       return this.drive();
     }
+    // Metadata only: no text.
+    this.fx.log?.("info", "flow_input_buffered", {
+      length: text.length,
+      ...(o.utteranceId !== undefined ? { utteranceId: o.utteranceId } : {}),
+      replaced: this.pendingFinal !== undefined,
+    });
     this.pendingFinal = { text, ...o };
     return Promise.resolve();
   }
@@ -235,6 +260,11 @@ export class FlowSession {
   }
 
   private applyInput(input: UserInput, changed: string[]): void {
+    if (input.source !== undefined && input.source !== this.channel) {
+      this.channel = input.source;
+      this.vars["session.channel"] = input.source;
+      changed.push("session.channel");
+    }
     this.vars["last.transcript"] = input.text;
     changed.push("last.transcript");
     if (input.utteranceId !== undefined) {
@@ -249,6 +279,65 @@ export class FlowSession {
       changed.push("last.language");
     }
     this.history.push({ role: "user", text: input.text });
+  }
+
+  private setError(id: string, code: string, changed: string[]): void {
+    this.vars[`error.${id}`] = code;
+    changed.push(`error.${id}`);
+  }
+
+  private clearError(id: string, changed: string[]): void {
+    if (Object.hasOwn(this.vars, `error.${id}`)) {
+      delete this.vars[`error.${id}`];
+      changed.push(`error.${id}`);
+    }
+  }
+
+  private applyMap(
+    map: [string, string][],
+    body: unknown,
+    changed: string[],
+  ): void {
+    for (const [name, pointer] of map) {
+      const v = resolvePointer(body, pointer);
+      if (v === undefined) continue;
+      this.vars[name] = v;
+      changed.push(name);
+    }
+  }
+
+  /** Runs one effect call with a timeout; `cancelCurrent` cancels it. */
+  private async bounded<T>(
+    timeoutMs: number,
+    start: (signal: AbortSignal) => Promise<T>,
+  ): Promise<Bounded<T>> {
+    const ctl = new AbortController();
+    let cancelTimer: () => void = () => {};
+    const out = await new Promise<Bounded<T>>((resolve) => {
+      cancelTimer = this.fx.clock.setTimeout(() => {
+        ctl.abort();
+        resolve({ k: "timeout" });
+      }, timeoutMs);
+      this.cancelCurrent = () => {
+        cancelTimer();
+        ctl.abort();
+        resolve({ k: "cancelled" });
+      };
+      let p: Promise<T>;
+      try {
+        p = start(ctl.signal);
+      } catch (err) {
+        resolve({ k: "err", err });
+        return;
+      }
+      p.then(
+        (v) => resolve({ k: "ok", v }),
+        (err) => resolve({ k: "err", err }),
+      );
+    });
+    cancelTimer();
+    this.cancelCurrent = undefined;
+    return out;
   }
 
   private stale(seq: number): boolean {
@@ -276,7 +365,6 @@ export class FlowSession {
       this.stepsThisTurn++;
       const t0 = this.fx.clock.now();
       const enterSeq = this.emit(node, "enter");
-      void enterSeq;
       const done = (
         target: number | undefined,
         extra: Partial<FlowTraceEvent> = {},
@@ -293,7 +381,7 @@ export class FlowSession {
         case "speak": {
           const text = this.render(node.text);
           this.history.push({ role: "assistant", text });
-          if (this.opts.channel === "chat") {
+          if (this.channel === "chat") {
             this.fx.chat?.(text);
           } else {
             const h = this.fx.speak(text, {
@@ -372,7 +460,7 @@ export class FlowSession {
           if (node.text) {
             const text = this.render(node.text);
             this.history.push({ role: "assistant", text });
-            if (this.opts.channel === "chat") {
+            if (this.channel === "chat") {
               this.fx.chat?.(text);
             } else {
               const h = this.fx.speak(text, {
@@ -396,6 +484,7 @@ export class FlowSession {
           let chosen = rule.path;
           let via: "rule" | "classifier" = "rule";
           let errCode: string | undefined;
+          let tokens: { input?: number; output?: number } | undefined;
           if (!chosen) {
             via = "classifier";
             const model =
@@ -404,7 +493,7 @@ export class FlowSession {
             const ctl = new AbortController();
             let cancelTimer: () => void = () => {};
             const outcome = await new Promise<
-              | { k: "ok"; path: string }
+              | { k: "ok"; path: string; tokens?: typeof tokens }
               | { k: "timeout" }
               | { k: "err"; code: string }
               | { k: "cancelled" }
@@ -418,7 +507,7 @@ export class FlowSession {
                 ctl.abort();
                 resolve({ k: "cancelled" });
               };
-              let p: Promise<{ path: string }>;
+              let p: ReturnType<FlowEffects["classify"]>;
               try {
                 p = this.fx.classify(
                   {
@@ -444,7 +533,7 @@ export class FlowSession {
                 return;
               }
               p.then(
-                (r) => resolve({ k: "ok", path: r.path }),
+                (r) => resolve({ k: "ok", path: r.path, tokens: r.tokens }),
                 (err) => resolve({ k: "err", code: errorCode(err) }),
               );
             });
@@ -453,43 +542,263 @@ export class FlowSession {
             if (this.stale(seq)) return;
             if (outcome.k === "timeout") errCode = "ROUTE_TIMEOUT";
             else if (outcome.k === "err") errCode = outcome.code;
-            else if (outcome.k === "ok")
+            else if (outcome.k === "ok") {
               chosen = node.paths.find((x) => x.id === outcome.path);
+              tokens = outcome.tokens;
+            }
           }
           if (errCode !== undefined) {
             this.vars[`error.${node.id}`] = errCode;
             done(node.onError, {
               via,
               error: errCode,
+              ...(tokens ? { tokens } : {}),
               varsChanged: [`error.${node.id}`],
             });
             break;
           }
           if (!chosen) {
-            done(node.onNone, { via, edge: "none" });
+            done(node.onNone, {
+              via,
+              edge: "none",
+              ...(tokens ? { tokens } : {}),
+            });
             break;
           }
           this.vars[`route.${node.id}`] = chosen.id;
           done(chosen.next, {
             edge: chosen.id,
             via,
+            ...(tokens ? { tokens } : {}),
             varsChanged: [`route.${node.id}`],
           });
           break;
         }
-        default: {
-          // http, mcp, llm are implemented in later chunks.
-          done(undefined, { error: "FLOW_NODE_UNSUPPORTED" });
-          this._ended = true;
-          this.fx.end("unsupported_node");
-          return;
+        case "http": {
+          const headers: FlowHttpRequest["headers"] = {};
+          for (const [k, h] of node.headers) {
+            headers[k] =
+              h.kind === "secret"
+                ? { secret: h.secret, prefix: h.prefix }
+                : this.render(h.parts);
+          }
+          const req: FlowHttpRequest = {
+            method: node.method,
+            url: this.render(node.url),
+            headers,
+            ...(node.body !== undefined
+              ? { body: renderValue(node.body, (p) => this.render(p)) }
+              : {}),
+            timeoutMs: node.timeoutMs,
+          };
+          const out = await this.bounded(node.timeoutMs, (sig) =>
+            this.fx.http(req, sig),
+          );
+          if (this.stale(seq)) return;
+          const changed: string[] = [];
+          let code: string | undefined;
+          if (out.k === "timeout") code = "HTTP_TIMEOUT";
+          else if (out.k === "err") code = errorCode(out.err, "HTTP_NETWORK");
+          else if (out.k === "ok") {
+            const st = out.v.status;
+            this.vars[`${node.id}.status`] = st;
+            changed.push(`${node.id}.status`);
+            if (st < 200 || st >= 300) code = `HTTP_${st}`;
+            else this.applyMap(node.map, out.v.body, changed);
+          }
+          if (code !== undefined) {
+            this.setError(node.id, code, changed);
+            done(node.onError, { error: code, varsChanged: changed });
+          } else {
+            this.clearError(node.id, changed);
+            done(node.next, { varsChanged: changed });
+          }
+          break;
+        }
+        case "mcp": {
+          const args =
+            node.args === undefined
+              ? {}
+              : renderValue(node.args, (p) => this.render(p));
+          const out = await this.bounded(node.timeoutMs, (sig) =>
+            this.fx.tool(node.source, node.tool, args, sig, {
+              timeoutMs: node.timeoutMs,
+            }),
+          );
+          if (this.stale(seq)) return;
+          const changed: string[] = [];
+          let code: string | undefined;
+          if (out.k === "timeout") code = "MCP_TIMEOUT";
+          else if (out.k === "err") code = errorCode(out.err, "MCP_ERROR");
+          else if (out.k === "ok") {
+            if (out.v.isError) code = "MCP_TOOL_ERROR";
+            else {
+              const parsed = parseJson(out.v.content);
+              const structured =
+                parsed !== null && typeof parsed === "object"
+                  ? parsed
+                  : undefined;
+              if (node.map.length > 0)
+                this.applyMap(node.map, structured ?? out.v.content, changed);
+              else {
+                this.vars[`${node.id}.result`] = structured ?? out.v.content;
+                changed.push(`${node.id}.result`);
+              }
+            }
+          }
+          if (code !== undefined) {
+            this.setError(node.id, code, changed);
+            done(node.onError, { error: code, varsChanged: changed });
+          } else {
+            this.clearError(node.id, changed);
+            done(node.next, { varsChanged: changed });
+          }
+          break;
+        }
+        case "llm": {
+          const hist = this.history.map((h) => ({ ...h }));
+          const messages =
+            node.send === "message"
+              ? [
+                  {
+                    role: "user" as const,
+                    text: node.message ? this.render(node.message) : "",
+                  },
+                ]
+              : node.historyTurns !== undefined
+                ? hist.slice(-node.historyTurns)
+                : hist;
+          const ctl = new AbortController();
+          const handles: FlowSpeakHandle[] = [];
+          const spoken: string[] = [];
+          let timedOut = false;
+          let cancelled = false;
+          let abortWake: () => void = () => {};
+          const aborted = new Promise<"aborted">((resolve) => {
+            abortWake = () => resolve("aborted");
+          });
+          const cancelTimer = this.fx.clock.setTimeout(() => {
+            timedOut = true;
+            ctl.abort();
+            abortWake();
+          }, LLM_NODE_TIMEOUT_MS);
+          this.cancelCurrent = () => {
+            cancelled = true;
+            ctl.abort();
+            abortWake();
+            for (const h of handles) h.cancel();
+          };
+          let code: string | undefined;
+          let finalText: string | undefined;
+          let tokens: { input?: number; output?: number } | undefined;
+          try {
+            const iter = this.fx
+              .llm(
+                {
+                  model: this.compiled.models[node.model ?? "default"]!,
+                  system: this.render(node.instructions),
+                  messages,
+                  tools: node.tools,
+                  speak: node.speak,
+                  maxRounds: node.maxRounds,
+                  ...(node.filler ? { filler: node.filler } : {}),
+                },
+                ctl.signal,
+              )
+              [Symbol.asyncIterator]();
+            for (;;) {
+              const r = await Promise.race([iter.next(), aborted]);
+              if (r === "aborted") {
+                void iter.return?.(undefined)?.catch?.(() => {});
+                break;
+              }
+              if (r.done) break;
+              const ev = r.value;
+              if (ev.type === "sentence") {
+                if (this.channel === "chat") {
+                  if (!ev.filler) this.fx.chat?.(ev.text);
+                } else {
+                  handles.push(
+                    this.fx.speak(ev.text, {
+                      interruptible: true,
+                      turnId: this.turnId,
+                      ...(ev.filler ? { filler: true } : {}),
+                    }),
+                  );
+                }
+                if (!ev.filler) spoken.push(ev.text);
+              } else if (ev.type === "tool") {
+                if (ev.phase === "start") {
+                  this.emit(node, "enter", { parent: enterSeq, tool: ev.name });
+                } else {
+                  this.emit(node, "exit", {
+                    parent: enterSeq,
+                    tool: ev.name,
+                    ...(ev.durationMs !== undefined
+                      ? { durationMs: ev.durationMs }
+                      : {}),
+                    ...(ev.error ? { error: ev.error } : {}),
+                  });
+                }
+              } else {
+                finalText = ev.text;
+                tokens = ev.tokens;
+              }
+            }
+            if (timedOut) code = "LLM_TIMEOUT";
+            else if (!cancelled && finalText === undefined)
+              code = "LLM_NO_RESULT";
+          } catch (err) {
+            code = timedOut ? "LLM_TIMEOUT" : errorCode(err, "LLM_ERROR");
+          }
+          cancelTimer();
+          this.cancelCurrent = undefined;
+          if (cancelled || this.stale(seq)) return;
+          if (handles.length > 0) {
+            this.cancelCurrent = () => {
+              for (const h of handles) h.cancel();
+            };
+            await Promise.all(handles.map((h) => h.done.catch(() => {})));
+            this.cancelCurrent = undefined;
+            if (this.stale(seq)) return;
+          }
+          const changed: string[] = [];
+          if (spoken.length > 0)
+            this.history.push({ role: "assistant", text: spoken.join(" ") });
+          if (code !== undefined) {
+            this.setError(node.id, code, changed);
+            done(node.onError, {
+              error: code,
+              varsChanged: changed,
+              ...(tokens ? { tokens } : {}),
+            });
+          } else {
+            if (node.saveAs !== undefined) {
+              this.vars[node.saveAs] = finalText ?? "";
+              changed.push(node.saveAs);
+            }
+            this.clearError(node.id, changed);
+            done(node.next, {
+              varsChanged: changed,
+              ...(tokens ? { tokens } : {}),
+            });
+          }
+          break;
         }
       }
     }
   }
 }
 
-function errorCode(err: unknown): string {
+function errorCode(err: unknown, fallback = "ROUTE_ERROR"): string {
   const c = (err as { code?: unknown } | null)?.code;
-  return typeof c === "string" && c !== "" ? c : "ROUTE_ERROR";
+  return typeof c === "string" && c !== "" ? c : fallback;
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }

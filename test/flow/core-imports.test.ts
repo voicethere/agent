@@ -54,11 +54,16 @@ describe("src/flow/core stays portable", () => {
 
   it("has the expected modules", () => {
     expect(files.sort()).toEqual([
+      "compile.ts",
+      "conditions.ts",
+      "effects.ts",
       "host.ts",
       "index.ts",
+      "interpreter.ts",
       "migrate.ts",
       "schema.ts",
       "template.ts",
+      "trace.ts",
       "types.ts",
       "validate.ts",
     ]);

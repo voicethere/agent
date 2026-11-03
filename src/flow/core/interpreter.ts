@@ -1,0 +1,353 @@
+import type { CompiledFlow, CompiledNode } from "./compile.js";
+import type { FlowEffects } from "./effects.js";
+import { renderTemplate, type TemplatePart } from "./template.js";
+import type { FlowTraceEvent } from "./trace.js";
+
+export interface FlowSessionOptions {
+  sessionId: string;
+  channel: "voice" | "chat";
+  initialVars?: Record<string, unknown>;
+  includeValuesInTrace?: boolean;
+  maxStepsPerTurn?: number;
+}
+
+interface Waiting {
+  index: number;
+  seq: number;
+  cancelTimer: () => void;
+  enterAt: number;
+  eventSeq: number;
+}
+
+export class FlowSession {
+  private readonly compiled: CompiledFlow;
+  private readonly fx: FlowEffects;
+  private readonly opts: FlowSessionOptions;
+  private readonly maxSteps: number;
+
+  private vars: Record<string, unknown> = {};
+  private history: { role: "user" | "assistant"; text: string }[] = [];
+  private nodeIndex: number;
+  private pendingFinal: { text: string; utteranceId?: string } | undefined;
+  private stepSeq = 0;
+  private traceSeq = 0;
+  private stepsThisTurn = 0;
+  private turnStartSeq = 0;
+  private waiting: Waiting | undefined;
+  private cancelCurrent: (() => void) | undefined;
+  private running = false;
+  private again = false;
+  private started = false;
+  private _ended = false;
+  private _staleDropped = 0;
+
+  constructor(
+    compiled: CompiledFlow,
+    effects: FlowEffects,
+    opts: FlowSessionOptions,
+  ) {
+    this.compiled = compiled;
+    this.fx = effects;
+    this.opts = opts;
+    this.maxSteps = opts.maxStepsPerTurn ?? 100;
+    this.nodeIndex = compiled.start;
+    this.vars = {
+      ...compiled.defaults,
+      ...(opts.initialVars ?? {}),
+      "session.id": opts.sessionId,
+      "session.channel": opts.channel,
+    };
+  }
+
+  get ended(): boolean {
+    return this._ended;
+  }
+
+  get staleDropped(): number {
+    return this._staleDropped;
+  }
+
+  get variables(): Record<string, unknown> {
+    return { ...this.vars };
+  }
+
+  get conversation(): { role: "user" | "assistant"; text: string }[] {
+    return this.history.map((h) => ({ ...h }));
+  }
+
+  start(): Promise<void> {
+    if (this.started || this._ended) return Promise.resolve();
+    this.started = true;
+    return this.drive();
+  }
+
+  onUserText(text: string, utteranceId?: string): Promise<void> {
+    if (this._ended || !this.started) return Promise.resolve();
+    const w = this.waiting;
+    if (w) {
+      this.resumeListen(w, "input", { text, utteranceId });
+      return this.drive();
+    }
+    this.pendingFinal = { text, utteranceId };
+    return Promise.resolve();
+  }
+
+  stop(): void {
+    if (this._ended) return;
+    this._ended = true;
+    this.stepSeq++;
+    this.waiting?.cancelTimer();
+    this.waiting = undefined;
+    this.cancelCurrent?.();
+    this.cancelCurrent = undefined;
+  }
+
+  // ---- internals ----
+
+  private lookup = (path: string): unknown => {
+    if (path in this.vars) return this.vars[path];
+    const parts = path.split(".");
+    for (let k = parts.length - 1; k >= 1; k--) {
+      const head = parts.slice(0, k).join(".");
+      if (head in this.vars) {
+        let cur: unknown = this.vars[head];
+        for (const key of parts.slice(k)) {
+          if (cur === null || typeof cur !== "object") return undefined;
+          cur = (cur as Record<string, unknown>)[key];
+        }
+        return cur;
+      }
+    }
+    return undefined;
+  };
+
+  private render(parts: TemplatePart[]): string {
+    return renderTemplate(parts, this.lookup);
+  }
+
+  private emit(
+    node: CompiledNode,
+    phase: "enter" | "exit",
+    extra: Partial<FlowTraceEvent> = {},
+  ): number {
+    const seq = ++this.traceSeq;
+    const e: FlowTraceEvent = {
+      seq,
+      stepSeq: this.stepSeq,
+      nodeId: node.id,
+      type: node.type,
+      phase,
+      ...extra,
+    };
+    if (phase === "exit" && this.opts.includeValuesInTrace)
+      e.vars = { ...this.vars };
+    this.fx.trace(e);
+    return seq;
+  }
+
+  private async drive(): Promise<void> {
+    if (this.running) {
+      this.again = true;
+      return;
+    }
+    this.running = true;
+    try {
+      do {
+        this.again = false;
+        await this.loop();
+      } while (this.again && !this._ended);
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private nameOf(i: number): string {
+    return this.compiled.nodes[i]!.id;
+  }
+
+  private get turnId(): string {
+    return `${this.opts.sessionId}:${this.turnStartSeq}`;
+  }
+
+  private resumeListen(
+    w: Waiting,
+    how: "input" | "timeout",
+    input?: { text: string; utteranceId?: string },
+  ): void {
+    const node = this.compiled.nodes[w.index]!;
+    if (node.type !== "listen") return;
+    w.cancelTimer();
+    this.waiting = undefined;
+    const changed: string[] = [];
+    let target: number;
+    if (how === "input" && input) {
+      this.vars["last.transcript"] = input.text;
+      changed.push("last.transcript");
+      if (input.utteranceId !== undefined) {
+        this.vars["last.utteranceId"] = input.utteranceId;
+        changed.push("last.utteranceId");
+      }
+      this.history.push({ role: "user", text: input.text });
+      target = node.next;
+    } else {
+      target = node.onNoInput;
+    }
+    this.stepsThisTurn = 0;
+    this.turnStartSeq = this.stepSeq;
+    this.emit(node, "exit", {
+      edge: this.nameOf(target),
+      durationMs: this.fx.clock.now() - w.enterAt,
+      varsChanged: changed,
+    });
+    this.nodeIndex = target;
+  }
+
+  private stale(seq: number): boolean {
+    if (this._ended || seq !== this.stepSeq) {
+      this._staleDropped++;
+      return true;
+    }
+    return false;
+  }
+
+  private async loop(): Promise<void> {
+    while (!this._ended) {
+      if (this.waiting) return;
+      if (this.stepsThisTurn >= this.maxSteps) {
+        const node = this.compiled.nodes[this.nodeIndex]!;
+        this.stepSeq++;
+        this.emit(node, "exit", { error: "FLOW_STEP_LIMIT" });
+        this._ended = true;
+        this.fx.end("step_limit");
+        return;
+      }
+      const index = this.nodeIndex;
+      const node = this.compiled.nodes[index]!;
+      const seq = ++this.stepSeq;
+      this.stepsThisTurn++;
+      const t0 = this.fx.clock.now();
+      const enterSeq = this.emit(node, "enter");
+      void enterSeq;
+      const done = (
+        target: number | undefined,
+        extra: Partial<FlowTraceEvent> = {},
+      ): void => {
+        this.emit(node, "exit", {
+          durationMs: this.fx.clock.now() - t0,
+          ...(target !== undefined ? { edge: this.nameOf(target) } : {}),
+          ...extra,
+        });
+        if (target !== undefined) this.nodeIndex = target;
+      };
+
+      switch (node.type) {
+        case "speak": {
+          const text = this.render(node.text);
+          this.history.push({ role: "assistant", text });
+          if (this.opts.channel === "chat") {
+            this.fx.chat?.(text);
+          } else {
+            const h = this.fx.speak(text, {
+              interruptible: node.interruptible,
+              turnId: this.turnId,
+            });
+            this.cancelCurrent = h.cancel;
+            await h.done;
+            this.cancelCurrent = undefined;
+            if (this.stale(seq)) return;
+          }
+          done(node.next);
+          break;
+        }
+        case "listen": {
+          if (this.pendingFinal) {
+            const p = this.pendingFinal;
+            this.pendingFinal = undefined;
+            this.vars["last.transcript"] = p.text;
+            const changed = ["last.transcript"];
+            if (p.utteranceId !== undefined) {
+              this.vars["last.utteranceId"] = p.utteranceId;
+              changed.push("last.utteranceId");
+            }
+            this.history.push({ role: "user", text: p.text });
+            this.stepsThisTurn = 0;
+            this.turnStartSeq = this.stepSeq;
+            done(node.next, { varsChanged: changed });
+            break;
+          }
+          const cancelTimer = this.fx.clock.setTimeout(() => {
+            const w = this.waiting;
+            if (!w || w.seq !== seq || this._ended) return;
+            this.resumeListen(w, "timeout");
+            void this.drive();
+          }, node.timeoutMs);
+          this.waiting = {
+            index,
+            seq,
+            cancelTimer,
+            enterAt: t0,
+            eventSeq: enterSeq,
+          };
+          return;
+        }
+        case "wait": {
+          let cancel: () => void = () => {};
+          await new Promise<void>((resolve) => {
+            cancel = this.fx.clock.setTimeout(resolve, node.ms);
+            this.cancelCurrent = () => {
+              cancel();
+              resolve();
+            };
+          });
+          this.cancelCurrent = undefined;
+          if (this.stale(seq)) return;
+          done(node.next);
+          break;
+        }
+        case "set": {
+          const changed: string[] = [];
+          for (const a of node.assign) {
+            this.vars[a.name] =
+              typeof a.value === "object" ? this.render(a.value) : a.value;
+            changed.push(a.name);
+          }
+          done(node.next, { varsChanged: changed });
+          break;
+        }
+        case "condition": {
+          done(node.test(this.lookup) ? node.then : node.else);
+          break;
+        }
+        case "end": {
+          if (node.text) {
+            const text = this.render(node.text);
+            this.history.push({ role: "assistant", text });
+            if (this.opts.channel === "chat") {
+              this.fx.chat?.(text);
+            } else {
+              const h = this.fx.speak(text, {
+                interruptible: false,
+                turnId: this.turnId,
+              });
+              this.cancelCurrent = h.cancel;
+              await h.done;
+              this.cancelCurrent = undefined;
+              if (this.stale(seq)) return;
+            }
+          }
+          done(undefined);
+          this._ended = true;
+          this.fx.end(node.reason);
+          return;
+        }
+        default: {
+          // route, http, mcp, llm are implemented in later chunks.
+          done(undefined, { error: "FLOW_NODE_UNSUPPORTED" });
+          this._ended = true;
+          this.fx.end("unsupported_node");
+          return;
+        }
+      }
+    }
+  }
+}

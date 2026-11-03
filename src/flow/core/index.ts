@@ -4,3 +4,8 @@ export * from "./template.js";
 export * from "./host.js";
 export * from "./validate.js";
 export * from "./migrate.js";
+export * from "./compile.js";
+export * from "./conditions.js";
+export * from "./effects.js";
+export * from "./interpreter.js";
+export * from "./trace.js";

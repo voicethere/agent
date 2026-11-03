@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { LLM_PROVIDERS, resolveModel } from "../../src/llm/catalog.js";
+import {
+  LLM_PROVIDERS,
+  cheapModelFor,
+  resolveModel,
+} from "../../src/llm/catalog.js";
 
 describe("llm catalog", () => {
   it("resolveModel uses the catalog default", () => {
@@ -18,5 +22,13 @@ describe("llm catalog", () => {
       "model is required for Google Gemini",
     );
     expect(resolveModel("gemini", "gemini-x")).toBe("gemini-x");
+  });
+
+  it("cheapModelFor returns the provider's default model, none for gemini", () => {
+    for (const id of ["openai", "anthropic", "openrouter"] as const) {
+      expect(cheapModelFor(id)).toBe(LLM_PROVIDERS[id].defaultModel);
+      expect(cheapModelFor(id)).toBeTruthy();
+    }
+    expect(cheapModelFor("gemini")).toBeUndefined();
   });
 });

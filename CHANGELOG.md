@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- `@voicethere/agent/flow`: `createFlowAgent` runs a conversation described in `voicethere.flow.json` (speak, listen, wait, route, condition, set, http, mcp, llm, end). `validateFlow`, `migrateFlow`, `compileFlow`, the mock helpers and `FLOW_JSON_SCHEMA` come from the same module, and `@voicethere/agent/flow/core` is the browser-safe part. The schema is also published as `@voicethere/agent/flow/schema.json`.
+- `flow-agent` template ("Conversation flow"): a greeting, a route between billing and support, and an LLM answer, with mock answers for local runs.
+- `npx @voicethere/agent flow validate|migrate|mock generate|run`. `flow run` is a text REPL over the real interpreter: real HTTP, MCP and LLM calls by default, `--mock [case]` for no key and no network, `--record` to save the real answers (redacted) as mock cases, `--trace out.json`, `--step` and `--values`. Mock cases for `mcp`, `llm` and `route` nodes can be error cases (`{ "error": "MCP_TIMEOUT" }`) that drive the node's `onError`; a recording marks a result that arrived after its timeout this way.
+- `LlmRequest.toolChoice` forces one tool call in the OpenAI, OpenRouter, Anthropic and Gemini adapters.
+- `LLM_PROVIDERS[*].cheapModel`: the model id used to prefill route classifiers.
+
 ## [0.25.0] - 2026-11-02
 
 ### Added

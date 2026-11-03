@@ -119,6 +119,16 @@ export function createOpenAiCompatibleProvider(
         ...(tools.length > 0 && req.toolChoice === "required"
           ? { tool_choice: "required" as const }
           : {}),
+        ...(tools.length > 0 &&
+        typeof req.toolChoice === "object" &&
+        req.toolChoice !== null
+          ? {
+              tool_choice: {
+                type: "function" as const,
+                function: { name: req.toolChoice.name },
+              },
+            }
+          : {}),
         ...(req.temperature !== undefined
           ? { temperature: req.temperature }
           : {}),

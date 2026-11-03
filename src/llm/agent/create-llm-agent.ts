@@ -36,7 +36,7 @@ import type {
 import { McpToolSource } from "../mcp/mcp-tool-source.js";
 import type { McpToolSourceOptions } from "../mcp/mcp-tool-source.js";
 import { secretValuesFromEnv } from "./redact.js";
-import { ToolRegistry } from "../mcp/tool-registry.js";
+import type { ToolRegistry } from "../mcp/tool-registry.js";
 import type { CustomTool } from "../mcp/tool-registry.js";
 import { LlmProviderError } from "../types.js";
 import type {
@@ -49,6 +49,7 @@ import type {
 } from "../types.js";
 import { LLM_AGENT_CONFIG_DEFAULTS, validateLlmAgentConfig } from "./config.js";
 import type { LlmAgentConfig } from "./config.js";
+import { buildToolRegistry } from "./build-tool-registry.js";
 import { ConversationHistory } from "./history.js";
 import type {
   AgentContent,
@@ -769,106 +770,32 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
   }
 
   function buildRegistry(env: Record<string, string | undefined>): void {
-    const reg = new ToolRegistry({
-      log: (level, message, fields) => agentLog(level, message, fields ?? {}),
-      toolCallLog: {
-        mode: config.toolCallLogs ?? D.toolCallLogs,
-        secretValues: secretValuesFromEnv(env, [
-          config.apiKeySecret,
-          "AGENT_SERVICE_TOKEN",
-          ...(config.knowledge?.embeddings
-            ? [config.knowledge.embeddings.apiKeySecret]
-            : []),
-          ...(config.knowledge?.supabase
-            ? [
-                config.knowledge.supabase.keySecret,
-                config.knowledge.supabase.urlSecret,
-              ]
-            : []),
-          ...(config.toolSources ?? []).flatMap((src) => {
-            if (src.kind !== "mcp" || !src.auth) return [];
-            if (src.auth.type === "bearer") return [src.auth.secret];
-            if (src.auth.type === "headers")
-              return Object.values(src.auth.headers);
-            return [];
-          }),
-        ]),
-        emit: (fields, sid) =>
-          agentLog("info", "llm tool call", { ...fields }, sid),
-      },
+    const built = buildToolRegistry({
+      env,
+      toolSources: config.toolSources ?? [],
+      customTools: [
+        ...(opts.tools ?? []),
+        ...(knowledgeTool ? [knowledgeTool] : []),
+      ],
+      secretNames: [
+        config.apiKeySecret,
+        "AGENT_SERVICE_TOKEN",
+        ...(config.knowledge?.embeddings
+          ? [config.knowledge.embeddings.apiKeySecret]
+          : []),
+        ...(config.knowledge?.supabase
+          ? [
+              config.knowledge.supabase.keySecret,
+              config.knowledge.supabase.urlSecret,
+            ]
+          : []),
+      ],
+      toolCallLogs: config.toolCallLogs ?? D.toolCallLogs,
+      servicePath: D.servicePath,
+      makeSource,
     });
-    for (const tool of opts.tools ?? []) reg.addCustomTool(tool);
-    if (knowledgeTool) reg.addCustomTool(knowledgeTool);
-    const sources: McpToolSource[] = [];
-    for (const src of config.toolSources ?? []) {
-      if (src.kind === "service") {
-        const base = env.AGENT_SERVICE_URL;
-        if (!nonEmpty(base)) {
-          agentLog(
-            "warn",
-            "toolSources: service configured but this project has no service",
-          );
-          continue;
-        }
-        const headers: Record<string, string> = {};
-        const token = env.AGENT_SERVICE_TOKEN;
-        if (nonEmpty(token)) {
-          headers.Authorization = `Bearer ${token}`;
-        } else {
-          agentLog("warn", "toolSources: AGENT_SERVICE_TOKEN is not set");
-        }
-        const source = makeSource({
-          name: "service",
-          kind: "service",
-          url: `${base}${src.path ?? D.servicePath}`,
-          headers,
-          allow: src.allow,
-          deny: src.deny,
-          log: (level, message, fields) =>
-            agentLog(level, message, fields ?? {}),
-        });
-        serviceSource = source;
-        sources.push(source);
-      } else {
-        const headers: Record<string, string> = {};
-        let missing: string | undefined;
-        const auth = src.auth ?? { type: "none" as const };
-        if (auth.type === "bearer") {
-          const v = env[auth.secret];
-          if (nonEmpty(v)) headers.Authorization = `Bearer ${v}`;
-          else missing = auth.secret;
-        } else if (auth.type === "headers") {
-          for (const [header, envName] of Object.entries(auth.headers)) {
-            const v = env[envName];
-            if (nonEmpty(v)) headers[header] = v;
-            else missing = envName;
-          }
-        }
-        if (missing) {
-          agentLog(
-            "warn",
-            `toolSources: ${src.name} skipped, environment variable ${missing} is not set`,
-          );
-          continue;
-        }
-        sources.push(
-          makeSource({
-            name: src.name,
-            url: src.url,
-            headers,
-            allow: src.allow,
-            deny: src.deny,
-            log: (level, message, fields) =>
-              agentLog(level, message, fields ?? {}),
-          }),
-        );
-      }
-    }
-    for (const source of sources) {
-      reg.addSource(source);
-      source.start();
-    }
-    registry = reg;
+    if (built.serviceSource) serviceSource = built.serviceSource;
+    registry = built.registry;
   }
 
   async function runTools(

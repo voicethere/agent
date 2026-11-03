@@ -1,6 +1,6 @@
 function parseIpv4(host: string): number[] | null {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!m) return null;
+  if (!m || m.slice(1).some((x) => /^0\d/.test(x))) return null;
   const n = m.slice(1).map(Number);
   return n.every((x) => x <= 255) ? n : null;
 }

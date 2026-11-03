@@ -28,6 +28,8 @@ describe("isPrivateHostLiteral", () => {
     "2130706433",
     "0x7f.1",
     "127.1",
+    "012.0.0.1",
+    "0300.0250.0.1",
   ])("private: %s", (h) => {
     expect(isPrivateHostLiteral(h)).toBe(true);
   });

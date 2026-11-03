@@ -24,6 +24,7 @@ const esc = (s: string): string => s.replace(/~/g, "~0").replace(/\//g, "~1");
 const BUILTINS = new Set([
   "last.transcript",
   "last.language",
+  "last.utteranceId",
   "session.id",
   "session.channel",
 ]);
@@ -232,9 +233,15 @@ function urlProblem(url: string): { code: string; message: string } | null {
       message: "The host and port of a URL cannot contain {{variables}}",
     };
   }
-  let host = authority.slice(authority.lastIndexOf("@") + 1);
-  if (host.startsWith("[")) host = host.slice(0, host.indexOf("]") + 1);
-  else host = host.replace(/:\d*$/, "");
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return {
+      code: "FLOW_URL_NOT_HTTPS",
+      message: "URL is not a valid https URL",
+    };
+  }
   if (isPrivateHostLiteral(host)) {
     return {
       code: "FLOW_URL_PRIVATE_HOST",

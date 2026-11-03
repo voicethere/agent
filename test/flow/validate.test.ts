@@ -187,6 +187,25 @@ const cases: Record<string, Case> = {
     nodeId: "lookup",
     path: "/nodes/4/url",
   },
+  FLOW_URL_PRIVATE_HOST_backslash: {
+    code: "FLOW_URL_PRIVATE_HOST",
+    mutate: (f) =>
+      (node(f, "lookup").url = "https://127.0.0.1\\@example.com/x"),
+    nodeId: "lookup",
+    path: "/nodes/4/url",
+  },
+  FLOW_URL_PRIVATE_HOST_percent: {
+    code: "FLOW_URL_PRIVATE_HOST",
+    mutate: (f) => (node(f, "lookup").url = "https://%31%32%37.0.0.1/x"),
+    nodeId: "lookup",
+    path: "/nodes/4/url",
+  },
+  FLOW_URL_PRIVATE_HOST_octal: {
+    code: "FLOW_URL_PRIVATE_HOST",
+    mutate: (f) => (node(f, "lookup").url = "https://012.0.0.1/x"),
+    nodeId: "lookup",
+    path: "/nodes/4/url",
+  },
   FLOW_URL_PRIVATE_HOST_tool_source: {
     code: "FLOW_URL_PRIVATE_HOST",
     mutate: (f) => (f.tools.toolSources[0].url = "https://localhost/mcp"),
@@ -325,11 +344,18 @@ describe("validateFlow", () => {
         "https://api.example.com/{{customerId}}",
         "https://8.8.8.8/x",
         "https://[2606:4700::1111]/x",
+        "https://api.example.com/{{customerId}}?q={{customerId}}",
       ]) {
         const f = baseFlow();
         node(f, "lookup").url = url;
         expect(codesOf(f), url).toEqual([]);
       }
+    });
+
+    it("knows the last.utteranceId built-in", () => {
+      const f = baseFlow();
+      node(f, "greet").text = "{{last.utteranceId}}";
+      expect(codesOf(f)).toEqual([]);
     });
 
     it("rejects private literals in every spelling", () => {

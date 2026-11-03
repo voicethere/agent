@@ -11,6 +11,15 @@ export interface FlowSessionOptions {
   maxStepsPerTurn?: number;
 }
 
+export interface UserInputOptions {
+  utteranceId?: string;
+  language?: string;
+}
+
+interface UserInput extends UserInputOptions {
+  text: string;
+}
+
 interface Waiting {
   index: number;
   seq: number;
@@ -28,7 +37,7 @@ export class FlowSession {
   private vars: Record<string, unknown> = {};
   private history: { role: "user" | "assistant"; text: string }[] = [];
   private nodeIndex: number;
-  private pendingFinal: { text: string; utteranceId?: string } | undefined;
+  private pendingFinal: UserInput | undefined;
   private stepSeq = 0;
   private traceSeq = 0;
   private stepsThisTurn = 0;
@@ -51,12 +60,12 @@ export class FlowSession {
     this.opts = opts;
     this.maxSteps = opts.maxStepsPerTurn ?? 100;
     this.nodeIndex = compiled.start;
-    this.vars = {
-      ...compiled.defaults,
-      ...(opts.initialVars ?? {}),
-      "session.id": opts.sessionId,
-      "session.channel": opts.channel,
-    };
+    this.vars = Object.assign(
+      Object.create(null) as Record<string, unknown>,
+      compiled.defaults,
+      opts.initialVars ?? {},
+      { "session.id": opts.sessionId, "session.channel": opts.channel },
+    );
   }
 
   get ended(): boolean {
@@ -71,6 +80,11 @@ export class FlowSession {
     return { ...this.vars };
   }
 
+  /** Prototype of the internal variable store (null). */
+  get variablesPrototype(): object | null {
+    return Object.getPrototypeOf(this.vars);
+  }
+
   get conversation(): { role: "user" | "assistant"; text: string }[] {
     return this.history.map((h) => ({ ...h }));
   }
@@ -81,14 +95,14 @@ export class FlowSession {
     return this.drive();
   }
 
-  onUserText(text: string, utteranceId?: string): Promise<void> {
+  onUserText(text: string, o: UserInputOptions = {}): Promise<void> {
     if (this._ended || !this.started) return Promise.resolve();
     const w = this.waiting;
     if (w) {
-      this.resumeListen(w, "input", { text, utteranceId });
+      this.resumeListen(w, "input", { text, ...o });
       return this.drive();
     }
-    this.pendingFinal = { text, utteranceId };
+    this.pendingFinal = { text, ...o };
     return Promise.resolve();
   }
 
@@ -105,15 +119,17 @@ export class FlowSession {
   // ---- internals ----
 
   private lookup = (path: string): unknown => {
-    if (path in this.vars) return this.vars[path];
+    if (Object.hasOwn(this.vars, path)) return this.vars[path];
     const parts = path.split(".");
     for (let k = parts.length - 1; k >= 1; k--) {
       const head = parts.slice(0, k).join(".");
-      if (head in this.vars) {
+      if (Object.hasOwn(this.vars, head)) {
         let cur: unknown = this.vars[head];
         for (const key of parts.slice(k)) {
           if (cur === null || typeof cur !== "object") return undefined;
-          cur = (cur as Record<string, unknown>)[key];
+          cur = Object.hasOwn(cur, key)
+            ? (cur as Record<string, unknown>)[key]
+            : undefined;
         }
         return cur;
       }
@@ -154,10 +170,31 @@ export class FlowSession {
     try {
       do {
         this.again = false;
-        await this.loop();
+        try {
+          await this.loop();
+        } catch {
+          this.failEffect();
+          return;
+        }
       } while (this.again && !this._ended);
     } finally {
       this.running = false;
+    }
+  }
+
+  private failEffect(): void {
+    this.cancelCurrent?.();
+    this.cancelCurrent = undefined;
+    if (this._ended) return;
+    this._ended = true;
+    this.waiting?.cancelTimer();
+    this.waiting = undefined;
+    try {
+      const node = this.compiled.nodes[this.nodeIndex]!;
+      this.emit(node, "exit", { error: "FLOW_EFFECT_ERROR" });
+      this.fx.end("error");
+    } catch {
+      // reporting must not throw out of the drive loop
     }
   }
 
@@ -172,7 +209,7 @@ export class FlowSession {
   private resumeListen(
     w: Waiting,
     how: "input" | "timeout",
-    input?: { text: string; utteranceId?: string },
+    input?: UserInput,
   ): void {
     const node = this.compiled.nodes[w.index]!;
     if (node.type !== "listen") return;
@@ -181,13 +218,7 @@ export class FlowSession {
     const changed: string[] = [];
     let target: number;
     if (how === "input" && input) {
-      this.vars["last.transcript"] = input.text;
-      changed.push("last.transcript");
-      if (input.utteranceId !== undefined) {
-        this.vars["last.utteranceId"] = input.utteranceId;
-        changed.push("last.utteranceId");
-      }
-      this.history.push({ role: "user", text: input.text });
+      this.applyInput(input, changed);
       target = node.next;
     } else {
       target = node.onNoInput;
@@ -200,6 +231,23 @@ export class FlowSession {
       varsChanged: changed,
     });
     this.nodeIndex = target;
+  }
+
+  private applyInput(input: UserInput, changed: string[]): void {
+    this.vars["last.transcript"] = input.text;
+    changed.push("last.transcript");
+    if (input.utteranceId !== undefined) {
+      this.vars["last.utteranceId"] = input.utteranceId;
+      changed.push("last.utteranceId");
+    }
+    if (input.language !== undefined) {
+      this.vars["last.language"] = input.language;
+      changed.push("last.language");
+    } else if (Object.hasOwn(this.vars, "last.language")) {
+      delete this.vars["last.language"];
+      changed.push("last.language");
+    }
+    this.history.push({ role: "user", text: input.text });
   }
 
   private stale(seq: number): boolean {
@@ -263,13 +311,8 @@ export class FlowSession {
           if (this.pendingFinal) {
             const p = this.pendingFinal;
             this.pendingFinal = undefined;
-            this.vars["last.transcript"] = p.text;
-            const changed = ["last.transcript"];
-            if (p.utteranceId !== undefined) {
-              this.vars["last.utteranceId"] = p.utteranceId;
-              changed.push("last.utteranceId");
-            }
-            this.history.push({ role: "user", text: p.text });
+            const changed: string[] = [];
+            this.applyInput(p, changed);
             this.stepsThisTurn = 0;
             this.turnStartSeq = this.stepSeq;
             done(node.next, { varsChanged: changed });
@@ -278,7 +321,12 @@ export class FlowSession {
           const cancelTimer = this.fx.clock.setTimeout(() => {
             const w = this.waiting;
             if (!w || w.seq !== seq || this._ended) return;
-            this.resumeListen(w, "timeout");
+            try {
+              this.resumeListen(w, "timeout");
+            } catch {
+              this.failEffect();
+              return;
+            }
             void this.drive();
           }, node.timeoutMs);
           this.waiting = {
@@ -301,6 +349,7 @@ export class FlowSession {
           });
           this.cancelCurrent = undefined;
           if (this.stale(seq)) return;
+          this.stepsThisTurn = 0;
           done(node.next);
           break;
         }

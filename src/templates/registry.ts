@@ -270,6 +270,31 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     },
   },
   {
+    id: "flow-agent",
+    entry: "flow-agent/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    title: "Conversation flow",
+    summary:
+      "Scripted voice and chat conversation built from nodes in the Flow tab.",
+    category: "voice-data",
+    description:
+      "Runs a conversation described in voicethere.flow.json: speak, listen, route by example sentences, call an API or an MCP tool, ask an LLM, branch on variables, end. The dashboard Flow tab edits the file; the flow also runs locally with the flow CLI commands.",
+    sourceFiles: [
+      "flow-agent/agent.ts",
+      "flow-agent/voicethere.flow.json",
+      "flow-agent/voicethere.flow.mocks.json",
+      "flow-agent/tools.ts",
+    ],
+    npmDependencies: {
+      openai: "^7.43.0",
+      "@anthropic-ai/sdk": "^1.3.0",
+      "@google/genai": "^2.31.0",
+      "@modelcontextprotocol/sdk": "^1.32.2",
+      ioredis: "^5.11.1",
+    },
+  },
+  {
     id: "llm-docs-rag",
     entry: "llm-docs-rag/agent.ts",
     kind: "product",

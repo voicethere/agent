@@ -580,6 +580,32 @@ It is adapted from the two Supabase guides ([Semantic search](https://supabase.c
 
 The agent calls `POST {AGENT_SUPABASE_URL}/rest/v1/rpc/match_documents` with the arguments `query_embedding`, `match_threshold` and `match_count` and reads `id`, `content` and `similarity` from each row. Use a key that may only execute that function (a restricted role), not a service-role key. With Project Redis enabled, identical questions are answered from a Redis cache for `cacheTtlSeconds` (10 minutes by default; cache entries have a TTL so they are evicted first when memory is full). `createSupabaseKnowledgeBase` and `searchKnowledgeTool` are exported for custom agents.
 
+## Conversation flows (`@voicethere/agent/flow`)
+
+A flow is a graph of nodes saved as `voicethere.flow.json`: speak, listen, wait, route by example sentences, condition, set, http, mcp, llm and end. `createFlowAgent` runs it for voice and chat sessions, and the dashboard Flow tab edits the same file. Create a project from the `flow-agent` template to start:
+
+```ts
+import { defineAgent } from "@voicethere/agent";
+import { createFlowAgent } from "@voicethere/agent/flow";
+import { openai } from "@voicethere/agent/llm/openai";
+import flow from "./voicethere.flow.json";
+
+defineAgent(createFlowAgent({ flow, providers: [openai] }));
+```
+
+`createFlowAgent` migrates and validates the file at start and throws `FLOW_INVALID` with the first problems. Secrets are referenced by name only (`apiKeySecret`, `{ "secret": "AGENT_..." }`), and only `AGENT_*` project secrets reach the agent. The JSON schema is at `@voicethere/agent/flow/schema.json`.
+
+Work on a flow from the terminal:
+
+```bash
+npx @voicethere/agent flow validate [file]
+npx @voicethere/agent flow migrate [file] [--write]
+npx @voicethere/agent flow mock generate [nodeId] [--seed N]
+npx @voicethere/agent flow run [file] [--env file] [--mock [case]] [--record] [--trace out.json] [--step] [--values]
+```
+
+`flow validate` prints one line per problem (node, JSON Pointer, code, message) and exits 1 when there is an error. `flow run` reads what you type and prints what the agent says. By default it makes real HTTP, MCP and LLM calls with the keys from the env file you name. With `--mock` it answers those nodes from `voicethere.flow.mocks.json` instead, so no key or network is needed. `--record` saves the real answers as mock cases, with secret values and auth headers removed.
+
 ## Multiplayer / shared state
 
 Each end-user connection must call **`startSession()`** once — one orchestrator session id per client (one signaling room per client). Do **not** join multiple browsers to the same session credentials.

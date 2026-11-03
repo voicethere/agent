@@ -5,6 +5,7 @@
  *   npx @voicethere/agent build
  *   npx @voicethere/agent verify
  *   npx @voicethere/agent verify-start
+ *   npx @voicethere/agent flow validate|migrate|mock|run
  */
 
 import { buildAgentBundle } from "./build-bundle.js";
@@ -17,6 +18,7 @@ import {
   runAgentVerify,
 } from "./verify/run-verify.js";
 import { runAgentVerifyStart } from "./verify/run-verify-start.js";
+import { processFlowIo, runFlowCommand } from "./flow/cli-flow.js";
 
 const DEFAULT_ENTRY = DEFAULT_VERIFY_ENTRY;
 const DEFAULT_OUTFILE = DEFAULT_VERIFY_BUNDLE;
@@ -29,11 +31,13 @@ Usage:
   npx @voicethere/agent build [options]
   npx @voicethere/agent verify [options]
   npx @voicethere/agent verify-start [options]
+  npx @voicethere/agent flow <validate|migrate|mock generate|run> [options]
 
 Commands:
   build    Bundle agent source to a single ESM file
   verify   Build (optional) and run static bundle checks
   verify-start  Start bundle in sandbox with restricted Node flags and verify startup
+  flow     Validate, migrate, mock and run a voicethere.flow.json (see \`flow --help\`)
 
 Build options:
   --entry, -e <path>     Agent entry file (default: ${DEFAULT_ENTRY})
@@ -219,6 +223,11 @@ async function main(): Promise<void> {
   if (args[0] === "verify-start") {
     await runVerifyStart(args.slice(1));
     return;
+  }
+
+  if (args[0] === "flow") {
+    const code = await runFlowCommand(args.slice(1), processFlowIo());
+    process.exit(code);
   }
 
   if (args[0]?.startsWith("-")) {

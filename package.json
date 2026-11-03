@@ -63,6 +63,11 @@
       "require": "./schema/voicethere.llm.schema.json",
       "default": "./schema/voicethere.llm.schema.json"
     },
+    "./flow/schema.json": {
+      "import": "./schema/voicethere.flow.schema.json",
+      "require": "./schema/voicethere.flow.schema.json",
+      "default": "./schema/voicethere.flow.schema.json"
+    },
     "./verify": {
       "types": "./dist/verify/run-verify.d.ts",
       "import": "./dist/verify/run-verify.js",
@@ -105,7 +110,7 @@
   ],
   "scripts": {
     "build:lib": "tsc -p tsconfig.json && mkdir -p dist/sandbox && cp src/sandbox/loader-entry.js src/sandbox/warning-forwarder.cjs dist/sandbox/",
-    "build:schema": "node scripts/build-llm-schema.mjs",
+    "build:schema": "node scripts/build-llm-schema.mjs && node scripts/build-flow-schema.mjs",
     "build:eject": "node scripts/build-llm-eject.mjs",
     "build:templates": "node dist/templates/build-seed-bundles-cli.js",
     "build:example": "node dist/cli.js build --entry examples/agent.ts --outfile dist/agent.js",

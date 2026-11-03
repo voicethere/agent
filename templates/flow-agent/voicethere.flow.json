@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "start": "greet",
+  "models": {
+    "default": {
+      "provider": "openrouter",
+      "model": "amazon/nova-micro-v1",
+      "apiKeySecret": "AGENT_OPENROUTER_API_KEY"
+    },
+    "classifier": { "use": "default" }
+  },
+  "nodes": [
+    {
+      "id": "greet",
+      "type": "speak",
+      "text": "Hi! Is this about billing or support?",
+      "interruptible": true,
+      "next": "ask"
+    },
+    {
+      "id": "ask",
+      "type": "listen",
+      "timeoutMs": 8000,
+      "next": "topic",
+      "onNoInput": "reprompt"
+    },
+    {
+      "id": "reprompt",
+      "type": "speak",
+      "text": "Sorry, I did not catch that. Is it billing or support?",
+      "next": "ask"
+    },
+    {
+      "id": "topic",
+      "type": "route",
+      "input": "{{last.transcript}}",
+      "paths": [
+        {
+          "id": "billing",
+          "examples": [
+            "I have a question about my invoice",
+            "why was I charged twice",
+            "billing"
+          ],
+          "next": "billingReply"
+        },
+        {
+          "id": "support",
+          "examples": [
+            "my app is not working",
+            "I need help with setup",
+            "technical problem"
+          ],
+          "next": "supportHelp"
+        }
+      ],
+      "onNone": "reprompt",
+      "onError": "reprompt",
+      "timeoutMs": 3000
+    },
+    {
+      "id": "billingReply",
+      "type": "speak",
+      "text": "Thanks. A billing specialist will follow up on your invoice by email.",
+      "next": "end"
+    },
+    {
+      "id": "supportHelp",
+      "type": "llm",
+      "instructions": "Help with the caller's support question in two short spoken sentences.",
+      "send": "conversation",
+      "historyTurns": 6,
+      "speak": true,
+      "saveAs": "answer",
+      "next": "end",
+      "onError": "reprompt"
+    },
+    { "id": "end", "type": "end", "reason": "done" }
+  ]
+}

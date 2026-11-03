@@ -1,0 +1,681 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VoiceThere conversation flow",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "start": {
+      "type": "string"
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "enum": ["openai", "anthropic", "gemini", "openrouter"]
+              },
+              "model": {
+                "type": "string"
+              },
+              "apiKeySecret": {
+                "type": "string"
+              },
+              "baseUrl": {
+                "type": "string"
+              }
+            },
+            "required": ["provider", "model", "apiKeySecret"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "use": {
+                "type": "string"
+              }
+            },
+            "required": ["use"],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "secrets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "variables": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": ["string", "number", "boolean", "object"]
+          },
+          "default": {}
+        },
+        "required": ["type"],
+        "additionalProperties": false
+      }
+    },
+    "tools": {
+      "type": "object",
+      "properties": {
+        "toolSources": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "service"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "allow": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "deny": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": ["kind"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "mcp"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "auth": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "none"
+                          }
+                        },
+                        "required": ["type"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "bearer"
+                          },
+                          "secret": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["type", "secret"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "headers"
+                          },
+                          "headers": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": ["type", "headers"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "allow": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "deny": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": ["kind", "name", "url"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "nodes": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
+                "const": "speak"
+              },
+              "label": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "interruptible": {
+                "type": "boolean"
+              },
+              "next": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "type", "text", "next"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
+                "const": "listen"
+              },
+              "label": {
+                "type": "string"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "next": {
+                "type": "string"
+              },
+              "onNoInput": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "type", "next", "onNoInput"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
+                "const": "wait"
+              },
+              "label": {
+                "type": "string"
+              },
+              "ms": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 60000
+              },
+              "next": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "type", "ms", "next"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
+                "const": "route"
+              },
+              "label": {
+                "type": "string"
+              },
+              "input": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "paths": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+                    },
+                    "examples": {
+                      "type": "array",
+                      "maxItems": 50,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    },
+                    "keywords": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "next": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "examples", "next"],
+                  "additionalProperties": false
+                }
+              },
+              "onNone": {
+                "type": "string"
+              },
+              "onError": {
+                "type": "string"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "model": {
+                "type": "string"
+              },
+              "historyTurns": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": ["id", "type", "paths", "onNone", "onError"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
+                "const": "condition"
+              },
+              "label": {
+                "type": "string"
+              },
+              "rules": {
+                "$ref": "#/$defs/ruleGroup"
+              },
+              "then": {
+                "type": "string"
+              },
+              "else": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "type", "rules", "then", "else"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
+                "const": "set"
+              },
+              "label": {
+                "type": "string"
+              },
+              "assign": {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 4000
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              },
+              "next": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "type", "assign", "next"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
+                "const": "http"
+              },
+              "label": {
+                "type": "string"
+              },
+              "method": {
+                "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "secret": {
+                          "type": "string"
+                        },
+                        "prefix": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["secret"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "body": {},
+              "map": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 15000
+              },
+              "next": {
+                "type": "string"
+              },
+              "onError": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "type", "method", "url", "next", "onError"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
+                "const": "mcp"
+              },
+              "label": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "args": {},
+              "map": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "next": {
+                "type": "string"
+              },
+              "onError": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "type", "source", "tool", "next", "onError"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
+                "const": "llm"
+              },
+              "label": {
+                "type": "string"
+              },
+              "instructions": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "send": {
+                "enum": ["conversation", "message"]
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "historyTurns": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "model": {
+                "type": "string"
+              },
+              "speak": {
+                "type": "boolean"
+              },
+              "saveAs": {
+                "type": "string"
+              },
+              "tools": {
+                "oneOf": [
+                  {
+                    "enum": ["none", "all"]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "maxRounds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "filler": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 4000
+                  },
+                  "afterMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": ["text", "afterMs"],
+                "additionalProperties": false
+              },
+              "next": {
+                "type": "string"
+              },
+              "onError": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "instructions",
+              "send",
+              "next",
+              "onError"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
+                "const": "end"
+              },
+              "label": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 4000
+              }
+            },
+            "required": ["id", "type", "reason"],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "ui": {
+      "type": "object"
+    }
+  },
+  "required": ["version", "start", "models", "nodes"],
+  "additionalProperties": false,
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "properties": {
+        "var": {
+          "type": "string"
+        },
+        "op": {
+          "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "contains", "exists"]
+        },
+        "value": {}
+      },
+      "required": ["var", "op"],
+      "additionalProperties": false
+    },
+    "ruleGroup": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "all": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/rule"
+                  },
+                  {
+                    "$ref": "#/$defs/ruleGroup"
+                  }
+                ]
+              }
+            }
+          },
+          "required": ["all"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "any": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/rule"
+                  },
+                  {
+                    "$ref": "#/$defs/ruleGroup"
+                  }
+                ]
+              }
+            }
+          },
+          "required": ["any"],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

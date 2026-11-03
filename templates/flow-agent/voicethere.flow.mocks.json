@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "nodes": {
+    "topic": [
+      { "name": "billing", "route": { "path": "billing" } },
+      { "name": "support", "route": { "path": "support" } }
+    ],
+    "supportHelp": [
+      {
+        "name": "answer",
+        "llm": {
+          "text": "Try restarting the app. If that does not help, I will send you the setup guide."
+        }
+      }
+    ]
+  }
+}

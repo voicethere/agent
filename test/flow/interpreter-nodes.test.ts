@@ -4,6 +4,7 @@ import {
   FlowSession,
   resolvePointer,
 } from "../../src/flow/core/index.js";
+import { createNodeEffects } from "../../src/flow/effects-node.js";
 import { flush, makeHarness } from "./harness.js";
 
 const model = { provider: "openrouter", model: "m", apiKeySecret: "AGENT_K" };
@@ -366,6 +367,54 @@ describe("llm node", () => {
     expect(h.speaks).toEqual([]);
   });
 
+  it("chat channel: three sentences become exactly one chat reply", async () => {
+    const h = makeHarness();
+    h.effects.llm = () =>
+      (async function* () {
+        yield { type: "sentence", text: "One." } as const;
+        yield { type: "sentence", text: "Two." } as const;
+        yield { type: "sentence", text: "Three." } as const;
+        yield { type: "done", text: "One. Two. Three." } as const;
+      })();
+    const s = session(flow(), h, { channel: "chat" });
+    await s.start();
+    expect(h.chats).toEqual(["One. Two. Three."]);
+    expect(h.speaks).toEqual([]);
+    expect(s.conversation).toEqual([
+      { role: "assistant", text: "One. Two. Three." },
+    ]);
+  });
+
+  it("stop while a sentence event is already resolved: nothing is spoken", async () => {
+    const h = makeHarness();
+    let s!: FlowSession;
+    h.effects.llm = () => {
+      queueMicrotask(() => s.stop());
+      let n = 0;
+      return {
+        [Symbol.asyncIterator]() {
+          return {
+            next: () =>
+              Promise.resolve(
+                n++ === 0
+                  ? {
+                      done: false as const,
+                      value: { type: "sentence" as const, text: "Late." },
+                    }
+                  : { done: true as const, value: undefined },
+              ),
+            return: () =>
+              Promise.resolve({ done: true as const, value: undefined }),
+          };
+        },
+      } as any;
+    };
+    s = session(flow(), h);
+    await s.start();
+    await flush();
+    expect(h.speaks).toEqual([]);
+  });
+
   it("tool events become child trace events of the node's enter", async () => {
     const h = makeHarness();
     h.effects.llm = () =>
@@ -439,5 +488,61 @@ describe("route trace carries classifier token counts", () => {
       edge: "a",
       tokens: { input: 11, output: 2 },
     });
+  });
+});
+
+describe("flow_route log", () => {
+  const make = () => {
+    const logs: { m: string; f: Record<string, unknown> }[] = [];
+    const fx = createNodeEffects({
+      sessionId: "s1",
+      env: {},
+      providerFor: () => {
+        throw new Error("unused");
+      },
+      log: (_l, m, f) => logs.push({ m, f }),
+    });
+    return { logs, fx };
+  };
+
+  it("flow_route log carries path, via, latency and token counts, no transcript", () => {
+    const { logs, fx } = make();
+    fx.trace({
+      seq: 3,
+      stepSeq: 1,
+      nodeId: "topic",
+      type: "route",
+      phase: "exit",
+      edge: "billing",
+      via: "classifier",
+      durationMs: 12,
+      tokens: { input: 11, output: 2 },
+      vars: { "last.transcript": "refund please" },
+    } as any);
+    const route = logs.find((l) => l.m === "flow_route")!;
+    expect(route.f).toEqual({
+      nodeId: "topic",
+      path: "billing",
+      via: "classifier",
+      latencyMs: 12,
+      tokens: { input: 11, output: 2 },
+    });
+    expect(JSON.stringify(logs)).not.toContain("refund please");
+  });
+
+  it("an errored route logs the error code and no path", () => {
+    const { logs, fx } = make();
+    fx.trace({
+      seq: 3,
+      stepSeq: 1,
+      nodeId: "topic",
+      type: "route",
+      phase: "exit",
+      edge: "again",
+      error: "ROUTE_TIMEOUT",
+    } as any);
+    const route = logs.find((l) => l.m === "flow_route")!;
+    expect(route.f.error).toBe("ROUTE_TIMEOUT");
+    expect("path" in route.f).toBe(false);
   });
 });

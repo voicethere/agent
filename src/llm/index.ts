@@ -50,6 +50,8 @@ export { secretValuesFromEnv } from "./agent/redact.js";
 export type { ToolCallLogMode } from "./agent/redact.js";
 export { createLlmAgent } from "./agent/create-llm-agent.js";
 export type { CreateLlmAgentOptions } from "./agent/create-llm-agent.js";
+export { buildToolRegistry } from "./agent/build-tool-registry.js";
+export type { BuildToolRegistryOptions } from "./agent/build-tool-registry.js";
 export { defineTool } from "./agent/define-tool.js";
 export {
   LLM_AGENT_CONFIG_DEFAULTS,

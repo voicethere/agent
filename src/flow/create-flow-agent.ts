@@ -123,6 +123,18 @@ export function createFlowAgent(opts: CreateFlowAgentOptions): AgentHandlers {
 
   return {
     onAgentStart() {
+      if (!opts.provider && !opts.effectsFactory) {
+        // Fail the deploy load check early, not on the first caller turn.
+        const env = getEnv();
+        for (const m of Object.values(compiled.models)) {
+          const v = env[m.apiKeySecret];
+          if (v === undefined || v === "")
+            throw flowError(
+              `environment variable ${m.apiKeySecret} is not set`,
+              "LLM_API_KEY_MISSING",
+            );
+        }
+      }
       const toolSources = flow.tools?.toolSources ?? [];
       const customTools = opts.tools ?? [];
       if (toolSources.length === 0 && customTools.length === 0) return;

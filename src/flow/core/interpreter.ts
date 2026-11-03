@@ -708,6 +708,11 @@ export class FlowSession {
               [Symbol.asyncIterator]();
             for (;;) {
               const r = await Promise.race([iter.next(), aborted]);
+              if (cancelled || this._ended) {
+                // stop() can win while a result is already resolved: act on nothing.
+                void iter.return?.(undefined)?.catch?.(() => {});
+                break;
+              }
               if (r === "aborted") {
                 void iter.return?.(undefined)?.catch?.(() => {});
                 break;
@@ -716,7 +721,7 @@ export class FlowSession {
               const ev = r.value;
               if (ev.type === "sentence") {
                 if (this.channel === "chat") {
-                  if (!ev.filler) this.fx.chat?.(ev.text);
+                  // Chat gets one reply at the end of the node, not one per sentence.
                 } else {
                   handles.push(
                     this.fx.speak(ev.text, {
@@ -754,6 +759,8 @@ export class FlowSession {
           cancelTimer();
           this.cancelCurrent = undefined;
           if (cancelled || this.stale(seq)) return;
+          if (this.channel === "chat" && spoken.length > 0)
+            this.fx.chat?.(spoken.join(" "));
           if (handles.length > 0) {
             this.cancelCurrent = () => {
               for (const h of handles) h.cancel();

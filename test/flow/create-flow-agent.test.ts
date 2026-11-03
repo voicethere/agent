@@ -151,6 +151,40 @@ describe("createFlowAgent", () => {
     ).not.toThrow();
   });
 
+  it("onAgentStart throws LLM_API_KEY_MISSING naming the variable when the key is unset", () => {
+    const handlers = createFlowAgent({
+      flow: flowDoc(),
+      providers: [openai],
+      env: () => ({}),
+    });
+    let caught: any;
+    try {
+      handlers.onAgentStart!({} as any);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught.code).toBe("LLM_API_KEY_MISSING");
+    expect(caught.message).toContain("AGENT_K");
+  });
+
+  it("with an injected provider and no key onAgentStart starts fine", () => {
+    const handlers = createFlowAgent({
+      flow: flowDoc(),
+      provider: fakeProvider,
+      env: () => ({}),
+    });
+    expect(() => handlers.onAgentStart!({} as any)).not.toThrow();
+  });
+
+  it("with the key set onAgentStart starts fine", () => {
+    const handlers = createFlowAgent({
+      flow: flowDoc(),
+      providers: [openai],
+      env: () => ({ AGENT_K: "k" }),
+    });
+    expect(() => handlers.onAgentStart!({} as any)).not.toThrow();
+  });
+
   it("session start returns before the greeting finishes playing", async () => {
     boot();
     await vi.waitFor(() => expect(sent("session_start_ack")).toHaveLength(1));

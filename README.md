@@ -193,7 +193,7 @@ defineAgent({
 });
 ```
 
-`getUserHistory` has no user id parameter: the runner reads earlier conversations of the verified user it holds for that session. Unverified sessions get an empty list with `reason: "unverified"`.
+`getUserHistory` has no user id parameter: the runner reads earlier conversations of the verified user it holds for that session. Unverified sessions get an empty list with `reason: "unverified"`. When history access is off for the project the reason is `"disabled"`, and when the runner could not read the history it is `"unavailable"` (`ok: false`; retry later).
 
 For LLM agents, `defineTool({ requiresVerifiedUser: true, ... })` keeps a tool away from the model until the user is verified (handlers read `ctx.user`, never an id from the model's input). `createLlmAgent({ endUserTools: true })` adds `get_previous_conversations` and `get_current_user`.
 

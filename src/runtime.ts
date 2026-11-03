@@ -687,6 +687,7 @@ export type UserHistoryResult = {
   reason?:
     | "unverified"
     | "disabled"
+    | "unavailable"
     | "timeout"
     | "session_ended"
     | "local_mock"

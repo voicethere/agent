@@ -7,3 +7,5 @@ export { createNodeEffects } from "./effects-node.js";
 export type { FlowLog, NodeEffectsOptions } from "./effects-node.js";
 export { createFlowAgent } from "./create-flow-agent.js";
 export type { CreateFlowAgentOptions } from "./create-flow-agent.js";
+export { createMockRecorder, wrapRecording } from "./record.js";
+export type { RecordingOptions, RecordingSink } from "./record.js";

@@ -11,3 +11,6 @@ export * from "./interpreter.js";
 export * from "./trace.js";
 export * from "./route.js";
 export * from "./json-pointer.js";
+export * from "./mocks.js";
+export * from "./generate-mock.js";
+export * from "./mock-effects.js";

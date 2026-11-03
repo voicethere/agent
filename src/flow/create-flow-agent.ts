@@ -11,6 +11,9 @@ import { compileFlow } from "./core/compile.js";
 import type { FlowEffects } from "./core/effects.js";
 import { FlowSession } from "./core/interpreter.js";
 import { migrateFlow } from "./core/migrate.js";
+import { createMockEffects } from "./core/mock-effects.js";
+import { validateMocks } from "./core/mocks.js";
+import type { FlowMocks } from "./core/mocks.js";
 import type { FlowModel } from "./core/types.js";
 import { validateFlow } from "./core/validate.js";
 import { createNodeEffects } from "./effects-node.js";
@@ -33,6 +36,12 @@ export interface CreateFlowAgentOptions {
   effectsFactory?: (opts: NodeEffectsOptions) => FlowEffects;
   /** Test injection: one provider for every model. */
   provider?: LlmProvider;
+  /**
+   * Local and test use only: answers http / mcp / llm / route from mock cases
+   * (parsed `voicethere.flow.mocks.json`). No keys or network are needed. The
+   * template's `agent.ts` never passes it.
+   */
+  mocks?: unknown;
 }
 
 function flowError(message: string, code: string): Error {
@@ -64,7 +73,20 @@ export function createFlowAgent(opts: CreateFlowAgentOptions): AgentHandlers {
   const flow = validated.flow;
   const compiled = compileFlow(flow);
 
-  if (!opts.provider) {
+  let mocks: FlowMocks | undefined;
+  if (opts.mocks !== undefined) {
+    const mv = validateMocks(opts.mocks, flow);
+    if (!mv.ok || !mv.mocks) {
+      const first = mv.errors
+        .slice(0, 5)
+        .map((e) => `${e.code} ${e.path}: ${e.message}`)
+        .join("\n");
+      throw flowError(`invalid mocks:\n${first}`, "FLOW_MOCKS_INVALID");
+    }
+    mocks = mv.mocks;
+  }
+
+  if (!opts.provider && !mocks) {
     for (const [name, m] of Object.entries(compiled.models)) {
       if (!(opts.providers ?? []).some((mod) => mod.ids.includes(m.provider))) {
         const sub = m.provider === "openrouter" ? "openai" : m.provider;
@@ -123,7 +145,7 @@ export function createFlowAgent(opts: CreateFlowAgentOptions): AgentHandlers {
 
   return {
     onAgentStart() {
-      if (!opts.provider && !opts.effectsFactory) {
+      if (!opts.provider && !opts.effectsFactory && !mocks) {
         // Fail the deploy load check early, not on the first caller turn.
         const env = getEnv();
         for (const m of Object.values(compiled.models)) {
@@ -156,13 +178,16 @@ export function createFlowAgent(opts: CreateFlowAgentOptions): AgentHandlers {
 
     onSessionStart(ctx: SessionContext) {
       const sessionId = ctx.sessionId;
-      const effects = (opts.effectsFactory ?? createNodeEffects)({
+      const baseEffects = (opts.effectsFactory ?? createNodeEffects)({
         sessionId,
         env: getEnv(),
         providerFor,
         registry,
         beforeTools,
       });
+      const effects = mocks
+        ? createMockEffects(baseEffects, mocks)
+        : baseEffects;
       const session = new FlowSession(compiled, effects, {
         sessionId,
         channel: "voice",

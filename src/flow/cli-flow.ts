@@ -469,10 +469,13 @@ async function run(argv: string[], io: FlowCliIo): Promise<number> {
       io.out(`recorded cases saved to ${DEFAULT_MOCKS_FILE}\n`);
     }
   };
-  io.onInterrupt?.(() => {
-    session.stop();
-    flush();
-  });
+  // --step blocks the event loop on a synchronous stdin read, so a JS SIGINT
+  // handler would never run; leave Node's default Ctrl-C exit in place.
+  if (!step)
+    io.onInterrupt?.(() => {
+      session.stop();
+      flush();
+    });
   await session.start();
   while (!session.ended) {
     io.out("you> ");

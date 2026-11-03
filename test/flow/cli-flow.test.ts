@@ -218,4 +218,19 @@ describe("Ctrl-C", () => {
     release(null);
     expect(await done).toBe(0);
   });
+
+  it("--step does not register an interrupt handler", async () => {
+    let registered = false;
+    const lines = ["", "", "billing", "", "", "", "", "", ""];
+    const io: FlowCliIo = {
+      out: () => {},
+      err: () => {},
+      env: {},
+      cwd: dir,
+      onInterrupt: () => (registered = true),
+      readLineSync: () => lines.shift() ?? null,
+    };
+    expect(await runFlowCommand(["run", "--mock", "--step"], io)).toBe(0);
+    expect(registered).toBe(false);
+  });
 });

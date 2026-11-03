@@ -181,6 +181,22 @@ describe("createMockEffects", () => {
     },
   );
 
+  it.each([
+    ["pick", { name: "e", route: { error: "" } }, "/route/error"],
+    ["tool", { name: "e", mcp: { error: 5 } }, "/mcp/error"],
+  ])(
+    "an error case with an empty or non-string code is rejected (%s)",
+    (id, c, suffix) => {
+      const r = validateMocks(
+        { version: 1, nodes: { ...full.nodes, [id]: [c] } },
+        flowOf(doc()),
+      );
+      expect(r.ok).toBe(false);
+      expect(r.errors[0]!.code).toBe("MOCKS_SHAPE");
+      expect(r.errors[0]!.path.endsWith(suffix)).toBe(true);
+    },
+  );
+
   it("a node without a case fails with MOCK_MISSING on its onError", async () => {
     const nodes = { ...full.nodes };
     delete (nodes as any).tool;

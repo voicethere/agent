@@ -604,7 +604,7 @@ npx @voicethere/agent flow mock generate [nodeId] [--seed N]
 npx @voicethere/agent flow run [file] [--env file] [--mock [case]] [--record] [--trace out.json] [--step] [--values]
 ```
 
-`flow validate` prints one line per problem (node, JSON Pointer, code, message) and exits 1 when there is an error. `flow run` reads what you type and prints what the agent says. By default it makes real HTTP, MCP and LLM calls with the keys from the env file you name. With `--mock` it answers those nodes from `voicethere.flow.mocks.json` instead, so no key or network is needed. `--record` saves the real answers as mock cases, with secret values and auth headers removed. Press Ctrl-C to stop a run: the recording and the trace collected so far are written first, then it exits with code 130.
+`flow validate` prints one line per problem (node, JSON Pointer, code, message) and exits 1 when there is an error. `flow run` reads what you type and prints what the agent says. By default it makes real HTTP, MCP and LLM calls with the keys from the env file you name. With `--mock` it answers those nodes from `voicethere.flow.mocks.json` instead, so no key or network is needed. `--record` saves the real answers as mock cases, with secret values and auth headers removed. Press Ctrl-C to stop a run: the recording and the trace collected so far are written first, then it exits with code 130. In `--step` mode, Ctrl-C exits without saving the trace or recording.
 
 ## Multiplayer / shared state
 

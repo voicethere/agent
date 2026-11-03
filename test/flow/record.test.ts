@@ -139,6 +139,48 @@ describe("wrapRecording", () => {
     expect(validateMocks(m, validateFlow(chainFlow()).flow!).ok).toBe(true);
   });
 
+  it("a post-abort llm result is recorded as LLM_TIMEOUT", async () => {
+    const h = makeHarness();
+    const rec = createMockRecorder();
+    const fx = wrapRecording(h.effects, rec.sink, { env: {} });
+    fx.trace({
+      seq: 1,
+      stepSeq: 1,
+      nodeId: "think",
+      type: "llm",
+      phase: "enter",
+    });
+    h.effects.llm = async function* () {
+      yield { type: "done" as const, text: "late" };
+    };
+    const ctl = new AbortController();
+    ctl.abort();
+    for await (const _ of fx.llm({} as any, ctl.signal)) void _;
+    const m = rec.mocks();
+    expect(m.nodes["think"]![0]!.llm).toEqual({ error: "LLM_TIMEOUT" });
+    expect(validateMocks(m, validateFlow(chainFlow()).flow!).ok).toBe(true);
+  });
+
+  it("a post-abort classify result is recorded as ROUTE_TIMEOUT", async () => {
+    const h = makeHarness();
+    const rec = createMockRecorder();
+    const fx = wrapRecording(h.effects, rec.sink, { env: {} });
+    fx.trace({
+      seq: 1,
+      stepSeq: 1,
+      nodeId: "pick",
+      type: "route",
+      phase: "enter",
+    });
+    h.effects.classify = async () => ({ path: "billing" });
+    const ctl = new AbortController();
+    ctl.abort();
+    await fx.classify({} as any, ctl.signal);
+    const m = rec.mocks();
+    expect(m.nodes["pick"]![0]!.route).toEqual({ error: "ROUTE_TIMEOUT" });
+    expect(validateMocks(m, validateFlow(chainFlow()).flow!).ok).toBe(true);
+  });
+
   function chainFlow(): any {
     return {
       version: 1,

@@ -162,6 +162,25 @@ describe("createMockEffects", () => {
     expect(h.ends).toEqual(["bad"]);
   });
 
+  it.each([
+    ["pick", { name: "e", route: { error: "ROUTE_TIMEOUT" } }, "ROUTE_TIMEOUT"],
+    ["tool", { name: "e", mcp: { error: "MCP_TIMEOUT" } }, "MCP_TIMEOUT"],
+    ["think", { name: "e", llm: { error: "LLM_TIMEOUT" } }, "LLM_TIMEOUT"],
+  ])(
+    "an error case on %s drives onError with its code",
+    async (id, c, code) => {
+      const mocks = {
+        ...full,
+        nodes: { ...full.nodes, [id]: [c] },
+      } as FlowMocks;
+      expect(validateMocks(mocks, flowOf(doc())).ok).toBe(true);
+      const { h } = await run(mocks);
+      expect(h.ends).toEqual(["bad"]);
+      const exit = h.traces.find((e) => e.nodeId === id && e.phase === "exit");
+      expect(exit?.error).toBe(code);
+    },
+  );
+
   it("a node without a case fails with MOCK_MISSING on its onError", async () => {
     const nodes = { ...full.nodes };
     delete (nodes as any).tool;

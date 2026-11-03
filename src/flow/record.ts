@@ -99,9 +99,10 @@ export function wrapRecording(
     async tool(source, tool, args, signal, o) {
       const nodeId = current;
       const res = await effects.tool(source, tool, args, signal, o);
-      // Aborted: the interpreter already took its timeout path. Mock cases
-      // have no mcp error code, so a late result is not recorded as a success.
-      if (signal.aborted) return res;
+      if (signal.aborted) {
+        record(nodeId, { mcp: { error: "MCP_TIMEOUT" } });
+        return res;
+      }
       if (res.isError)
         record(nodeId, {
           mcp: { isError: true, content: String(redactor.redact(res.content)) },
@@ -122,7 +123,9 @@ export function wrapRecording(
       const inner = effects.llm(req, signal);
       return (async function* () {
         for await (const ev of inner) {
-          if (ev.type === "done" && !signal.aborted)
+          if (ev.type === "done" && signal.aborted)
+            record(nodeId, { llm: { error: "LLM_TIMEOUT" } });
+          else if (ev.type === "done")
             record(nodeId, {
               llm: { text: String(redactor.redact(ev.text)) },
             });
@@ -133,7 +136,8 @@ export function wrapRecording(
     async classify(req, signal) {
       const nodeId = current;
       const res = await effects.classify(req, signal);
-      if (!signal.aborted) record(nodeId, { route: { path: res.path } });
+      if (signal.aborted) record(nodeId, { route: { error: "ROUTE_TIMEOUT" } });
+      else record(nodeId, { route: { path: res.path } });
       return res;
     },
   };

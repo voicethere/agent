@@ -35,4 +35,4 @@ Run it with real calls, reading keys from an env file you name:
 npx @voicethere/agent flow run --env my-keys.env
 ```
 
-Add `--record` to save the real HTTP, MCP and LLM answers as mock cases, `--trace out.json` to write the steps, and `--step` to pause before each node. `npx @voicethere/agent flow mock generate` fills the mocks file with generated data.
+Add `--record` to save the real HTTP, MCP and LLM answers as mock cases, `--trace out.json` to write the steps, and `--step` to pause before each node. `npx @voicethere/agent flow mock generate` fills the mocks file with generated data. Press Ctrl-C to stop a run: the recording and the trace collected so far are written first, then it exits with code 130.

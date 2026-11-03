@@ -6,7 +6,7 @@
  * secret values, and recorded mocks are redacted by `wrapRecording`.
  */
 import { existsSync, readFileSync, readSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { buildToolRegistry } from "../llm/agent/build-tool-registry.js";
 import { LLM_AGENT_CONFIG_DEFAULTS } from "../llm/agent/config.js";
@@ -37,6 +37,8 @@ export interface FlowCliIo {
   readLine?: () => Promise<string | null>;
   /** Blocking line input for `--step`. */
   readLineSync?: () => string | null;
+  /** Registers a handler for Ctrl-C; the implementation exits 130 after it returns. */
+  onInterrupt?: (handler: () => void) => void;
   env: Record<string, string | undefined>;
   cwd: string;
 }
@@ -130,15 +132,27 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function readMocksFile(path: string): FlowMocks {
+/** Missing file: empty mocks. Unreadable or malformed file: message and undefined (never overwrite it). */
+function readMocksFile(path: string, io: FlowCliIo): FlowMocks | undefined {
   if (!existsSync(path)) return { version: 1, nodes: {} };
+  let v: unknown;
   try {
-    const v = JSON.parse(readFileSync(path, "utf8")) as FlowMocks;
-    if (v && typeof v === "object" && v.nodes) return v;
+    v = JSON.parse(readFileSync(path, "utf8"));
   } catch {
-    // fall through
+    v = undefined;
   }
-  return { version: 1, nodes: {} };
+  const nodes = (v as { nodes?: unknown } | null | undefined)?.nodes;
+  if (
+    !v ||
+    typeof v !== "object" ||
+    !nodes ||
+    typeof nodes !== "object" ||
+    Array.isArray(nodes)
+  ) {
+    io.err(`${basename(path)} is not valid JSON; fix it or move it away\n`);
+    return undefined;
+  }
+  return v as FlowMocks;
 }
 
 function validate(argv: string[], io: FlowCliIo): number {
@@ -195,7 +209,8 @@ function mockGenerate(argv: string[], io: FlowCliIo): number {
   if (wanted !== undefined && nodes.length === 0)
     return fail(io, `no node with id ${wanted}`);
   const path = resolve(io.cwd, mocksFile);
-  const mocks = readMocksFile(path);
+  const mocks = readMocksFile(path, io);
+  if (!mocks) return 1;
   let count = 0;
   for (const node of nodes) {
     if (!["http", "mcp", "llm", "route"].includes(node.type)) {
@@ -280,6 +295,9 @@ async function run(argv: string[], io: FlowCliIo): Promise<number> {
   const { flow } = loaded;
   const compiled = compileFlow(flow);
   const mocksPath = join(dirname(resolve(io.cwd, file)), DEFAULT_MOCKS_FILE);
+  // Read up front so a malformed mocks file stops the run before any call is made.
+  const existingMocks = record ? readMocksFile(mocksPath, io) : undefined;
+  if (record && !existingMocks) return 1;
 
   let env = { ...io.env };
   const envFile = p.flags.get("--env") as string | undefined;
@@ -345,13 +363,22 @@ async function run(argv: string[], io: FlowCliIo): Promise<number> {
   if (mockFlag !== undefined) {
     if (!existsSync(mocksPath))
       return fail(io, `--mock needs ${DEFAULT_MOCKS_FILE} next to the flow`);
-    const mv = validateMocks(readMocksFile(mocksPath), flow);
+    const parsed = readMocksFile(mocksPath, io);
+    if (!parsed) return 1;
+    const mv = validateMocks(parsed, flow);
     if (!mv.ok || !mv.mocks) {
       for (const e of mv.errors)
         io.out(`${e.nodeId ?? "-"} ${e.path} ${e.code} ${e.message}\n`);
       return 1;
     }
     const wanted = typeof mockFlag === "string" ? mockFlag : undefined;
+    if (
+      wanted !== undefined &&
+      !Object.values(mv.mocks.nodes).some((cs) =>
+        cs.some((c) => c.name === wanted),
+      )
+    )
+      return fail(io, `no mock case named ${wanted}`);
     effects = createMockEffects(base, mv.mocks, {
       pick: (_id, cases: FlowMockCase[]) =>
         (wanted !== undefined
@@ -424,6 +451,28 @@ async function run(argv: string[], io: FlowCliIo): Promise<number> {
     channel: "chat",
     includeValuesInTrace: values,
   });
+  // Writes what was collected so far; safe to call twice (Ctrl-C, then normal end).
+  let flushed = false;
+  const flush = (): void => {
+    if (flushed) return;
+    flushed = true;
+    if (tracePath !== undefined) writeJson(resolve(io.cwd, tracePath), events);
+    if (record && existingMocks) {
+      const fresh = recorder.mocks();
+      for (const [id, cases] of Object.entries(fresh.nodes)) {
+        const kept = (existingMocks.nodes[id] ?? []).filter(
+          (c) => !c.name.startsWith("recorded-"),
+        );
+        existingMocks.nodes[id] = [...kept, ...cases];
+      }
+      writeJson(mocksPath, existingMocks);
+      io.out(`recorded cases saved to ${DEFAULT_MOCKS_FILE}\n`);
+    }
+  };
+  io.onInterrupt?.(() => {
+    session.stop();
+    flush();
+  });
   await session.start();
   while (!session.ended) {
     io.out("you> ");
@@ -435,20 +484,7 @@ async function run(argv: string[], io: FlowCliIo): Promise<number> {
   }
   io.out("\n");
   session.stop();
-
-  if (tracePath !== undefined) writeJson(resolve(io.cwd, tracePath), events);
-  if (record) {
-    const existing = readMocksFile(mocksPath);
-    const fresh = recorder.mocks();
-    for (const [id, cases] of Object.entries(fresh.nodes)) {
-      const kept = (existing.nodes[id] ?? []).filter(
-        (c) => !c.name.startsWith("recorded-"),
-      );
-      existing.nodes[id] = [...kept, ...cases];
-    }
-    writeJson(mocksPath, existing);
-    io.out(`recorded cases saved to ${DEFAULT_MOCKS_FILE}\n`);
-  }
+  flush();
   return 0;
 }
 
@@ -515,6 +551,15 @@ export function processFlowIo(): FlowCliIo {
     err: (t) => void process.stderr.write(t),
     env: process.env,
     cwd: process.cwd(),
+    onInterrupt(handler) {
+      process.once("SIGINT", () => {
+        try {
+          handler();
+        } finally {
+          process.exit(130);
+        }
+      });
+    },
     readLine() {
       ensure();
       const q = queue.shift();

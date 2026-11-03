@@ -68,6 +68,7 @@ export function createMockEffects(
     async tool() {
       const m = caseFor().mcp;
       if (!m) throw coded("MOCK_MISSING");
+      if ("error" in m) throw coded(m.error);
       if ("isError" in m) return { content: m.content, isError: true };
       return {
         content:
@@ -79,6 +80,7 @@ export function createMockEffects(
       const fn = (async function* (): AsyncGenerator<FlowLlmEvent> {
         const l = c.llm;
         if (!l) throw coded("MOCK_MISSING");
+        if ("error" in l) throw coded(l.error);
         // v1: toolCalls are trace-only (child start/end events); no tool mocks
         // run, and the mocked text is the answer.
         for (const t of l.toolCalls ?? []) {
@@ -93,6 +95,7 @@ export function createMockEffects(
     async classify() {
       const r = caseFor().route;
       if (!r) throw coded("MOCK_MISSING");
+      if ("error" in r) throw coded(r.error);
       return { path: r.path };
     },
   };

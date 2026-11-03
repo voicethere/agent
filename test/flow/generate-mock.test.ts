@@ -107,8 +107,10 @@ describe("generateMock", () => {
 
   it("answers llm and route nodes", () => {
     expect(
-      generateMock({ id: "x", type: "llm" } as any, { flow: f, seed: 1 }).llm
-        ?.text,
+      (
+        generateMock({ id: "x", type: "llm" } as any, { flow: f, seed: 1 })
+          .llm as { text: string }
+      ).text,
     ).toBe("Mock answer for x.");
     expect(
       generateMock(

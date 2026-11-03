@@ -4,15 +4,18 @@ export type FlowMockHttp =
   | { status: number; headers?: Record<string, string>; body: unknown }
   | { error: "HTTP_TIMEOUT" | "HTTP_NETWORK" };
 
+/** `error` is an error code (e.g. `MCP_TIMEOUT`) that drives the node's `onError`. */
 export type FlowMockMcp =
-  { result: unknown } | { isError: true; content: string };
+  { result: unknown } | { isError: true; content: string } | { error: string };
 
 export interface FlowMockCase {
   name: string;
   http?: FlowMockHttp;
   mcp?: FlowMockMcp;
-  llm?: { text: string; toolCalls?: { name: string; input: unknown }[] };
-  route?: { path: string };
+  llm?:
+    | { text: string; toolCalls?: { name: string; input: unknown }[] }
+    | { error: string };
+  route?: { path: string } | { error: string };
 }
 
 export interface FlowMocks {
@@ -105,7 +108,24 @@ export function validateMocks(
             nodeId,
           );
       }
-      if (node.type === "route" && isObj(c["route"])) {
+      for (const k of ["mcp", "llm", "route"] as const) {
+        const d = c[k];
+        if (isObj(d) && d["error"] !== undefined) {
+          const e = d["error"];
+          if (typeof e !== "string" || e === "")
+            add(
+              "MOCKS_SHAPE",
+              "error must be a non-empty error code",
+              `${cp}/${k}/error`,
+              nodeId,
+            );
+        }
+      }
+      if (
+        node.type === "route" &&
+        isObj(c["route"]) &&
+        c["route"]["error"] === undefined
+      ) {
         const p = c["route"]["path"];
         if (typeof p !== "string" || !node.paths.some((x) => x.id === p))
           add(

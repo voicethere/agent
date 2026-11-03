@@ -119,6 +119,26 @@ describe("wrapRecording", () => {
     expect(validateMocks(m, validateFlow(d).flow!).ok).toBe(true);
   });
 
+  it("a post-abort mcp result is recorded as MCP_TIMEOUT", async () => {
+    const h = makeHarness();
+    const rec = createMockRecorder();
+    const fx = wrapRecording(h.effects, rec.sink, { env: {} });
+    fx.trace({
+      seq: 1,
+      stepSeq: 1,
+      nodeId: "tool",
+      type: "mcp",
+      phase: "enter",
+    });
+    h.effects.tool = async () => ({ content: "{}" });
+    const ctl = new AbortController();
+    ctl.abort();
+    await fx.tool("crm", "lookup", {}, ctl.signal);
+    const m = rec.mocks();
+    expect(m.nodes["tool"]![0]!.mcp).toEqual({ error: "MCP_TIMEOUT" });
+    expect(validateMocks(m, validateFlow(chainFlow()).flow!).ok).toBe(true);
+  });
+
   function chainFlow(): any {
     return {
       version: 1,

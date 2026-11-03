@@ -227,6 +227,9 @@ async function main(): Promise<void> {
 
   if (args[0] === "flow") {
     const code = await runFlowCommand(args.slice(1), processFlowIo());
+    // Let piped stdout/stderr drain before exiting.
+    await new Promise<void>((r) => process.stdout.write("", () => r()));
+    await new Promise<void>((r) => process.stderr.write("", () => r()));
     process.exit(code);
   }
 

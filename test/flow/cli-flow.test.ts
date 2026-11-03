@@ -9,7 +9,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { runFlowCommand, type FlowCliIo } from "../../src/flow/cli-flow.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CLI = join(here, "../../dist/cli.js");
@@ -151,5 +152,70 @@ describe("flow mock generate", () => {
   it("an unknown node id fails", () => {
     const r = cli(["mock", "generate", "nope"]);
     expect(r.status).toBe(1);
+  });
+});
+
+describe("malformed mocks file", () => {
+  const BROKEN = '{ "version": 1, ';
+  const mocksPath = () => join(dir, "voicethere.flow.mocks.json");
+
+  it("mock generate refuses to overwrite an unparsable mocks file", () => {
+    writeFileSync(mocksPath(), BROKEN);
+    const r = cli(["mock", "generate"]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("not valid JSON");
+    expect(readFileSync(mocksPath(), "utf8")).toBe(BROKEN);
+  });
+
+  it("run --record refuses before any call and keeps the file", () => {
+    writeFileSync(mocksPath(), BROKEN);
+    const r = cli(["run", "--record"], "", {
+      AGENT_OPENROUTER_API_KEY: "k",
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("not valid JSON");
+    expect(readFileSync(mocksPath(), "utf8")).toBe(BROKEN);
+  });
+
+  it("run --mock exits 1 on it", () => {
+    writeFileSync(mocksPath(), BROKEN);
+    const r = cli(["run", "--mock"], "");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("not valid JSON");
+  });
+});
+
+describe("--mock case name", () => {
+  it("--mock with an unknown case name fails", () => {
+    const r = cli(["run", "--mock", "nope"], "hi\n");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("no mock case named nope");
+  });
+});
+
+describe("Ctrl-C", () => {
+  it("the interrupt handler writes the trace collected so far", async () => {
+    let interrupt: (() => void) | undefined;
+    let release!: (l: string | null) => void;
+    const out: string[] = [];
+    const io: FlowCliIo = {
+      out: (t) => void out.push(t),
+      err: () => {},
+      env: {},
+      cwd: dir,
+      onInterrupt: (h) => (interrupt = h),
+      readLine: () => new Promise((r) => (release = r)),
+    };
+    const done = runFlowCommand(
+      ["run", "--mock", "--trace", "partial.json"],
+      io,
+    );
+    await vi.waitFor(() => expect(interrupt).toBeDefined());
+    await vi.waitFor(() => expect(out.join("")).toContain("you> "));
+    interrupt!();
+    const trace = JSON.parse(readFileSync(join(dir, "partial.json"), "utf8"));
+    expect(trace.some((e: any) => e.nodeId === "greet")).toBe(true);
+    release(null);
+    expect(await done).toBe(0);
   });
 });

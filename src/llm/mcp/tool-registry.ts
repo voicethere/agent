@@ -1,4 +1,5 @@
 import type { LlmToolSpec } from "../types.js";
+import type { EndUserInfo } from "../../protocol.js";
 import type { McpLogFn, McpToolSource } from "./mcp-tool-source.js";
 import { createRedactor } from "../agent/redact.js";
 import type { ToolCallLogMode } from "../agent/redact.js";
@@ -17,6 +18,8 @@ export interface ToolCallContext {
   /** Turn and model tool-call id, carried into the `llm.tool.call` log line. */
   turnId?: string;
   callId?: string;
+  /** The session's end user, set by the agent from session state, never by the model. */
+  user?: EndUserInfo;
 }
 
 export interface ToolCallLogOptions {
@@ -31,8 +34,12 @@ export interface CustomTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** Hidden from the model and refused unless the session has a verified end user. */
+  requiresVerifiedUser?: boolean;
   handler(args: unknown, ctx: ToolCallContext): Promise<string>;
 }
+
+export const VERIFIED_USER_REQUIRED_MESSAGE = "this tool needs a verified user";
 
 export interface ToolCallResult {
   content: string;
@@ -104,8 +111,13 @@ export class ToolRegistry {
     this.sources.push(source);
   }
 
-  list(): RegisteredTool[] {
-    return this.build().map(({ spec, owner }) => ({ spec, owner }));
+  /** Tools the model may see. Pass the session user: verified-user tools show only for a verified one. */
+  list(opts: { user?: EndUserInfo } = {}): RegisteredTool[] {
+    return this.build()
+      .filter(
+        (e) => !e.custom?.requiresVerifiedUser || opts.user?.verified === true,
+      )
+      .map(({ spec, owner }) => ({ spec, owner }));
   }
 
   async call(
@@ -134,7 +146,9 @@ export class ToolRegistry {
     const startedAt = clock();
     let result: ToolCallResult;
     try {
-      if (entry.custom) {
+      if (entry.custom?.requiresVerifiedUser && opts.user?.verified !== true) {
+        result = { isError: true, content: VERIFIED_USER_REQUIRED_MESSAGE };
+      } else if (entry.custom) {
         result = await this.callCustom(entry.custom, args, opts);
       } else {
         result = await entry.source!.callTool(entry.mcpName!, args, {

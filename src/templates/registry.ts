@@ -322,6 +322,34 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     },
   },
   {
+    id: "llm-support-sticky-user",
+    entry: "llm-support-sticky-user/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    title: "LLM support agent with user memory",
+    summary:
+      "Support agent that knows verified users: loads their open tickets and earlier conversations, and offers ticket tools only after login.",
+    category: "voice-data",
+    description:
+      "Same LLM agent as llm-agent, plus end-user identity. Ticket tools (requiresVerifiedUser) appear only for a verified user and take the user from the session, never from the model. Open tickets and earlier conversations load into context at start or on login. Uses an in-memory mock CRM until AGENT_CRM_API_URL is set.",
+    sourceFiles: [
+      "llm-support-sticky-user/agent.ts",
+      "llm-support-sticky-user/voicethere.llm.json",
+      "llm-support-sticky-user/prompt.md",
+      "llm-support-sticky-user/tools.ts",
+      "llm-support-sticky-user/hooks.ts",
+      "llm-support-sticky-user/md.d.ts",
+      "llm-support-sticky-user/mock-crm.ts",
+    ],
+    npmDependencies: {
+      openai: "^7.43.0",
+      "@anthropic-ai/sdk": "^1.3.0",
+      "@google/genai": "^2.31.0",
+      "@modelcontextprotocol/sdk": "^1.32.2",
+      ioredis: "^5.11.1",
+    },
+  },
+  {
     id: "echo-smoke",
     entry: "echo-smoke/agent.ts",
     kind: "e2e",

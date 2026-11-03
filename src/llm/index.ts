@@ -53,6 +53,7 @@ export type { CreateLlmAgentOptions } from "./agent/create-llm-agent.js";
 export { buildToolRegistry } from "./agent/build-tool-registry.js";
 export type { BuildToolRegistryOptions } from "./agent/build-tool-registry.js";
 export { defineTool } from "./agent/define-tool.js";
+export { endUserTools } from "./end-user/end-user-tools.js";
 export {
   LLM_AGENT_CONFIG_DEFAULTS,
   LLM_AGENT_CONFIG_JSON_SCHEMA,

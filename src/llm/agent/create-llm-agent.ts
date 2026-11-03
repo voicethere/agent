@@ -4,6 +4,7 @@ import {
   agentLog,
   announce,
   cancelSpeech,
+  getSessionUser,
   parseChatText,
   sendToClient,
   setAgentState,
@@ -37,6 +38,7 @@ import { McpToolSource } from "../mcp/mcp-tool-source.js";
 import type { McpToolSourceOptions } from "../mcp/mcp-tool-source.js";
 import { secretValuesFromEnv } from "./redact.js";
 import type { ToolRegistry } from "../mcp/tool-registry.js";
+import { endUserTools } from "../end-user/end-user-tools.js";
 import type { CustomTool } from "../mcp/tool-registry.js";
 import { LlmProviderError } from "../types.js";
 import type {
@@ -74,6 +76,11 @@ export interface CreateLlmAgentOptions {
   config: unknown;
   systemPrompt: string;
   tools?: CustomTool[];
+  /**
+   * Register `get_previous_conversations` and `get_current_user`. The first needs
+   * a verified user. Default false.
+   */
+  endUserTools?: boolean;
   hooks?: LlmAgentHooks;
   /** Environment used to resolve secrets. Default `process.env`. */
   env?: () => Record<string, string | undefined>;
@@ -775,6 +782,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       toolSources: config.toolSources ?? [],
       customTools: [
         ...(opts.tools ?? []),
+        ...(opts.endUserTools === true ? endUserTools() : []),
         ...(knowledgeTool ? [knowledgeTool] : []),
       ],
       secretNames: [
@@ -854,6 +862,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
           sessionId: s.sessionId,
           turnId: t.turnId,
           callId: call.id,
+          ...(getSessionUser(s.sessionId)
+            ? { user: getSessionUser(s.sessionId) }
+            : {}),
         });
       })();
       const raced = await Promise.race([work, aborted]);
@@ -952,7 +963,11 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       model: resolveModel(config.provider, config.model),
       system: opts.systemPrompt,
       messages,
-      tools: registry ? registry.list().map((e) => e.spec) : [],
+      tools: registry
+        ? registry
+            .list({ user: getSessionUser(s.sessionId) })
+            .map((e) => e.spec)
+        : [],
       ...(config.toolChoice === "required-first-round" && t.llmCalls === 1
         ? { toolChoice: "required" as const }
         : {}),

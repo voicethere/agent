@@ -86,6 +86,9 @@ export {
   type AgentInterruptedMessage,
   type SpeechEventMessage,
   type WebhookMessage,
+  type UserIdentifiedMessage,
+  type UserHistoryRequestMessage,
+  type UserHistoryResponseMessage,
 } from "./protocol.js";
 
 export {
@@ -93,6 +96,12 @@ export {
   addClientToMix,
   createMixGroup,
   defineAgent,
+  getUserHistory,
+  getSessionUser,
+  type GetUserHistoryOptions,
+  type UserHistoryResult,
+  type EndUserInfo,
+  type UserHistoryConversation,
   disableConversationHistory,
   disconnectClient,
   enableConversationHistory,

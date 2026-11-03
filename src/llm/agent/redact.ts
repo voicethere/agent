@@ -29,6 +29,7 @@ function isPhone(m: string): boolean {
 
 const NON_SECRET_AGENT_KEYS = new Set([
   "AGENT_CUSTOMER_CONTEXT",
+  "AGENT_END_USER",
   "AGENT_SERVICE_URL",
 ]);
 

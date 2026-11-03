@@ -36,6 +36,10 @@ import type {
   RecordingControlResult,
   ConversationHistoryControlAckMessage,
   ConversationHistoryControlResult,
+  EndUserInfo,
+  UserHistoryConversation,
+  UserHistoryResponseMessage,
+  UserIdentifiedMessage,
   SttControlAckMessage,
   SttControlResult,
   VoiceControlScope,
@@ -69,6 +73,11 @@ const DEFAULT_SESSION_START_INIT_DELAY_MS = 500;
 export interface SessionContext {
   sessionId: string;
   env: Record<string, string>;
+  /**
+   * The end user of the session. Set when the project identifies users; `verified`
+   * is true only when the platform verified the user. Updated by `onUserIdentified`.
+   */
+  user?: EndUserInfo;
   /** `true` when the runner advertises conversation recording for this project. */
   recordingAvailable: boolean;
   /** `true` when the runner advertises conversation history storage for this project. */
@@ -161,6 +170,13 @@ export interface AgentHandlers {
    * `process.env` and verify HMAC on {@link WebhookContext.body} before parsing JSON.
    */
   onWebhook?: (ctx: WebhookContext) => void | Promise<void>;
+  /**
+   * The session got a verified end user after it started (login mid-call).
+   * Called once per change, after `ctx.user` is updated.
+   */
+  onUserIdentified?: (
+    ctx: SessionContext & { user: EndUserInfo },
+  ) => void | Promise<void>;
   /** Alias for {@link AgentHandlers.onSessionStart}. */
   onClientJoin?: (ctx: SessionContext) => void | Promise<void>;
   onSessionStart?: (ctx: SessionContext) => void | Promise<void>;
@@ -229,6 +245,8 @@ export interface SessionTimeLimitContext {
   /** How long the runner waits for this hook before it closes the session. */
   graceMs: number;
 }
+
+export type { EndUserInfo, UserHistoryConversation };
 
 export type { SessionTimeLimitState, SessionTimeLimitError };
 
@@ -314,6 +332,16 @@ function isConversationHistoryControlAckMessage(
   return (
     msg.type === "conversation_history_control_ack" &&
     typeof msg.requestId === "string"
+  );
+}
+
+function isUserHistoryResponseMessage(
+  value: unknown,
+): value is UserHistoryResponseMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return (
+    msg.type === "user_history_response" && typeof msg.requestId === "string"
   );
 }
 
@@ -422,6 +450,8 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "session_time_limit_control_ack" ||
     msg.type === "recording_control_ack" ||
     msg.type === "conversation_history_control_ack" ||
+    msg.type === "user_identified" ||
+    msg.type === "user_history_response" ||
     msg.type === "play_ack" ||
     msg.type === "play_status_ack" ||
     msg.type === "play_stop_ack" ||
@@ -444,6 +474,7 @@ type SessionScopedParentMessage = Exclude<
   | WebhookMessage
   | RecordingControlAckMessage
   | ConversationHistoryControlAckMessage
+  | UserHistoryResponseMessage
   | PlayAckMessage
   | PlayStatusAckMessage
   | PlayStopAckMessage
@@ -477,6 +508,8 @@ const peerEnvBySessionId = new Map<string, Record<string, string>>();
 const recordingAvailableBySessionId = new Map<string, boolean>();
 /** Cached from `session_start.conversationHistoryAvailable` until `session_end`. */
 const conversationHistoryAvailableBySessionId = new Map<string, boolean>();
+/** Cached from `session_start.endUser` / `user_identified` until `session_end`. */
+const endUserBySessionId = new Map<string, EndUserInfo>();
 /** Cached from `session_start.mixAvailable` until `session_end`. */
 const mixAvailableBySessionId = new Map<string, boolean>();
 /** Cached from `session_start.voiceLanguageSwitchAvailable` until `session_end`. */
@@ -498,6 +531,7 @@ const endedSessionIds = new Set<string>();
 
 const RECORDING_CONTROL_ACK_TIMEOUT_MS = 5000;
 const CONVERSATION_HISTORY_CONTROL_ACK_TIMEOUT_MS = 5000;
+const USER_HISTORY_TIMEOUT_MS = 5000;
 const PLAY_CONTROL_ACK_TIMEOUT_MS = 5000;
 const BARGE_IN_CONTROL_ACK_TIMEOUT_MS = 5000;
 const SESSION_TIME_LIMIT_ACK_TIMEOUT_MS = 5_000;
@@ -639,6 +673,28 @@ const pendingConversationHistoryAcks = new Map<
   PendingConversationHistoryAck
 >();
 
+type PendingUserHistory = {
+  sessionId: string;
+  resolve: (result: UserHistoryResult) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const pendingUserHistory = new Map<string, PendingUserHistory>();
+
+/** Result of {@link getUserHistory}. */
+export type UserHistoryResult = {
+  ok: boolean;
+  reason?:
+    | "unverified"
+    | "disabled"
+    | "unavailable"
+    | "timeout"
+    | "session_ended"
+    | "local_mock"
+    | string;
+  conversations: UserHistoryConversation[];
+};
+
 type PendingPlayAck = {
   resolve: (result: PlayResult) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -742,6 +798,32 @@ function handleConversationHistoryControlAck(
     reason: message.reason,
     requestId: message.requestId,
   });
+}
+
+function handleUserHistoryResponse(message: UserHistoryResponseMessage): void {
+  const pending = pendingUserHistory.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingUserHistory.delete(message.requestId);
+  pending.resolve({
+    ok: message.ok,
+    ...(message.reason ? { reason: message.reason } : {}),
+    conversations: Array.isArray(message.conversations)
+      ? message.conversations
+      : [],
+  });
+}
+
+function clearPendingUserHistoryForSession(
+  sessionId: string,
+  reason: string,
+): void {
+  for (const [requestId, pending] of pendingUserHistory) {
+    if (pending.sessionId !== sessionId) continue;
+    clearTimeout(pending.timer);
+    pendingUserHistory.delete(requestId);
+    pending.resolve({ ok: false, reason, conversations: [] });
+  }
 }
 
 function handlePlayAck(message: PlayAckMessage): void {
@@ -1303,6 +1385,11 @@ async function handleParentMessage(
         message.sessionId,
         message.conversationHistoryAvailable ?? false,
       );
+      const startUser =
+        parseEndUserInfo(message.endUser) ??
+        parseEndUserEnv(message.env?.AGENT_END_USER);
+      if (startUser) endUserBySessionId.set(message.sessionId, startUser);
+      else endUserBySessionId.delete(message.sessionId);
       mixAvailableBySessionId.set(
         message.sessionId,
         message.mixAvailable ?? false,
@@ -1340,6 +1427,7 @@ async function handleParentMessage(
       await (handlers.onClientJoin ?? handlers.onSessionStart)?.({
         sessionId: message.sessionId,
         env: message.env,
+        ...(startUser ? { user: startUser } : {}),
         recordingAvailable: message.recordingAvailable ?? false,
         conversationHistoryAvailable:
           message.conversationHistoryAvailable ?? false,
@@ -1355,6 +1443,33 @@ async function handleParentMessage(
         sessionId: message.sessionId,
       });
       break;
+    case "user_identified": {
+      if (endedSessionIds.has(message.sessionId)) break;
+      const user = parseEndUserInfo(message.endUser);
+      if (!user) break;
+      endUserBySessionId.set(message.sessionId, user);
+      await handlers.onUserIdentified?.({
+        sessionId: message.sessionId,
+        env: peerEnvBySessionId.get(message.sessionId) ?? {},
+        recordingAvailable:
+          recordingAvailableBySessionId.get(message.sessionId) ?? false,
+        conversationHistoryAvailable:
+          conversationHistoryAvailableBySessionId.get(message.sessionId) ??
+          false,
+        mixAvailable: mixAvailableBySessionId.get(message.sessionId) ?? false,
+        voiceLanguageSwitchAvailable:
+          voiceLanguageSwitchAvailableBySessionId.get(message.sessionId) ??
+          false,
+        ttsPoseAvailable:
+          ttsPoseAvailableBySessionId.get(message.sessionId) ?? false,
+        speakControlAvailable:
+          speakControlAvailableBySessionId.get(message.sessionId) ?? false,
+        sessionTimeLimitAvailable:
+          sessionTimeLimitAvailableBySessionId.get(message.sessionId) ?? false,
+        user,
+      });
+      break;
+    }
     case "speech_event":
       await handlers.onSpeechEvent?.(
         { sessionId: message.sessionId },
@@ -1431,6 +1546,7 @@ async function handleParentMessage(
       peerEnvBySessionId.delete(message.sessionId);
       recordingAvailableBySessionId.delete(message.sessionId);
       conversationHistoryAvailableBySessionId.delete(message.sessionId);
+      endUserBySessionId.delete(message.sessionId);
       mixAvailableBySessionId.delete(message.sessionId);
       voiceLanguageSwitchAvailableBySessionId.delete(message.sessionId);
       voiceLanguageSwitchSettingsBySessionId.delete(message.sessionId);
@@ -1475,6 +1591,10 @@ export function defineAgent(handlers: AgentHandlers): void {
     }
     if (isConversationHistoryControlAckMessage(message)) {
       handleConversationHistoryControlAck(message);
+      return;
+    }
+    if (isUserHistoryResponseMessage(message)) {
+      handleUserHistoryResponse(message);
       return;
     }
     if (isSpeakResultMessage(message)) {
@@ -1542,6 +1662,7 @@ export function defineAgent(handlers: AgentHandlers): void {
         message.sessionId,
         "session_ended",
       );
+      clearPendingUserHistoryForSession(message.sessionId, "session_ended");
       inboundBySession.clear(message.sessionId);
     }
     // session_start must not chain onto a dying session_end generation — clear
@@ -1636,6 +1757,31 @@ function parseCustomerContext(
     // ignore malformed context
   }
   return undefined;
+}
+
+function parseEndUserInfo(value: unknown): EndUserInfo | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const v = value as Record<string, unknown>;
+  if (typeof v.id !== "string" || v.id.length === 0) return undefined;
+  const isObj = (x: unknown): x is Record<string, unknown> =>
+    !!x && typeof x === "object" && !Array.isArray(x);
+  return {
+    id: v.id,
+    verified: v.verified === true,
+    ...(isObj(v.attributes) ? { attributes: v.attributes } : {}),
+    ...(isObj(v.sessionContext) ? { sessionContext: v.sessionContext } : {}),
+  };
+}
+
+function parseEndUserEnv(raw: string | undefined): EndUserInfo | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    return parseEndUserInfo(JSON.parse(raw) as unknown);
+  } catch {
+    return undefined;
+  }
 }
 
 async function runErrorHook(
@@ -1776,6 +1922,7 @@ export function resetAgentIpcStateForTests(): void {
   peerEnvBySessionId.clear();
   recordingAvailableBySessionId.clear();
   conversationHistoryAvailableBySessionId.clear();
+  endUserBySessionId.clear();
   mixAvailableBySessionId.clear();
   voiceLanguageSwitchAvailableBySessionId.clear();
   voiceLanguageSwitchSettingsBySessionId.clear();
@@ -1814,6 +1961,10 @@ export function resetAgentIpcStateForTests(): void {
   for (const [requestId, pending] of pendingConversationHistoryAcks) {
     clearTimeout(pending.timer);
     pendingConversationHistoryAcks.delete(requestId);
+  }
+  for (const [requestId, pending] of pendingUserHistory) {
+    clearTimeout(pending.timer);
+    pendingUserHistory.delete(requestId);
   }
   clearPendingPlayAcks("reset");
   clearPendingMixAcks("reset");
@@ -2844,6 +2995,50 @@ export function disableConversationHistory(
   sessionId: string,
 ): Promise<ConversationHistoryControlResult> {
   return sendConversationHistoryControl(sessionId, false);
+}
+
+/** The end user the runner reported for the session, if any. */
+export function getSessionUser(sessionId: string): EndUserInfo | undefined {
+  return endUserBySessionId.get(sessionId);
+}
+
+export interface GetUserHistoryOptions {
+  /** Earlier conversations to return. The runner clamps it to 1-20. Default 5. */
+  limit?: number;
+  /** Turns per conversation (the last ones). The runner clamps it to 1-200. Default 50. */
+  maxTurnsPerConversation?: number;
+}
+
+/**
+ * Earlier conversations of the session's verified end user. The runner picks the
+ * user from its own session state: this call has no user id parameter. Returns
+ * `{ ok: true, reason: "unverified", conversations: [] }` for an unverified user.
+ */
+export async function getUserHistory(
+  sessionId: string,
+  opts: GetUserHistoryOptions = {},
+): Promise<UserHistoryResult> {
+  if (!allowOutboundForSession(sessionId)) {
+    return { ok: false, reason: "session_ended", conversations: [] };
+  }
+  if (!isVoicethereAgentChild()) {
+    return { ok: true, reason: "local_mock", conversations: [] };
+  }
+  const requestId = randomUUID();
+  return new Promise<UserHistoryResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingUserHistory.delete(requestId);
+      resolve({ ok: false, reason: "timeout", conversations: [] });
+    }, USER_HISTORY_TIMEOUT_MS);
+    pendingUserHistory.set(requestId, { sessionId, resolve, timer });
+    sendParentMessage({
+      type: "user_history_request",
+      requestId,
+      sessionId,
+      limit: opts.limit ?? 5,
+      maxTurnsPerConversation: opts.maxTurnsPerConversation ?? 50,
+    });
+  });
 }
 
 export interface PlayOptions {

@@ -6,6 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-03
+
+### Added
+
+- End-user identity. `ctx.user` (`{ id, verified, attributes?, sessionContext? }`) on the session context, set when the project identifies its users. `verified` is true only when the platform verified the user. New `onUserIdentified` handler runs once when a running session gets a verified user (login mid-call), after `ctx.user` is updated.
+- `getUserHistory(sessionId, { limit?, maxTurnsPerConversation? })` returns earlier conversations of the session's verified user. It takes no user id: the runner uses the session's own user. Unverified users get `{ ok: true, reason: "unverified", conversations: [] }`. Other reasons: `disabled` (history access is off), `unavailable` (the runner could not read the history), `timeout`, `session_ended`, `local_mock`.
+- `defineTool({ requiresVerifiedUser: true })` hides a tool from the model until the session has a verified user, and refuses a call that arrives anyway. `ToolCallContext.user` carries the session user into tool handlers.
+- `createLlmAgent({ endUserTools: true })` registers `get_previous_conversations` (verified users only) and `get_current_user`.
+- `llm-support-sticky-user` template: an LLM support agent that greets returning verified users by name, loads their last conversations and an optional CRM record (`AGENT_CRM_API_URL`, `AGENT_CRM_API_KEY`).
+- `AGENT_END_USER` joins the child environment allowlist. Runners that predate end-user identity send none of this, and `ctx.user` stays undefined.
+
 ## [0.26.0] - 2026-11-03
 
 ### Added

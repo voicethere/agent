@@ -14,6 +14,7 @@ describe("protocol", () => {
       "BUILD_ID",
       "IDLE_TIMEOUT_SEC",
       "AGENT_CUSTOMER_CONTEXT",
+      "AGENT_END_USER",
     ]);
   });
 

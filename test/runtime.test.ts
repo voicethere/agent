@@ -8,6 +8,7 @@ import {
   disconnectClient,
   enableConversationHistory,
   getPlay,
+  getUserHistory,
   getVoiceLanguageSwitchSettings,
   pauseRecording,
   play,
@@ -1454,6 +1455,128 @@ describe("conversation history control", () => {
   it("resolves local_mock when not a forked agent child", async () => {
     const result = await setConversationHistoryEnabled("peer-1", true);
     expect(result).toMatchObject({ ok: true, reason: "local_mock" });
+  });
+
+  it("passes endUser from session_start into ctx.user and onUserIdentified updates it once", async () => {
+    const capture = installProcessMessageCapture();
+    const onSessionStart = vi.fn();
+    const onUserIdentified = vi.fn();
+    defineAgent({ onSessionStart, onUserIdentified });
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-u",
+      env: { SESSION_ID: "peer-u" },
+      endUser: { id: "u1", verified: false },
+    });
+    await vi.waitFor(() => expect(onSessionStart).toHaveBeenCalled());
+    expect(onSessionStart.mock.calls[0]![0].user).toEqual({
+      id: "u1",
+      verified: false,
+    });
+    capture.emit({
+      type: "user_identified",
+      sessionId: "peer-u",
+      endUser: { id: "u1", verified: true, attributes: { plan: "pro" } },
+    });
+    await vi.waitFor(() => expect(onUserIdentified).toHaveBeenCalledTimes(1));
+    expect(onUserIdentified.mock.calls[0]![0]).toMatchObject({
+      sessionId: "peer-u",
+      user: { id: "u1", verified: true, attributes: { plan: "pro" } },
+    });
+    capture.restore();
+  });
+
+  it("reads ctx.user from AGENT_END_USER when session_start has no endUser", async () => {
+    const capture = installProcessMessageCapture();
+    const onSessionStart = vi.fn();
+    defineAgent({ onSessionStart });
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-e",
+      env: { AGENT_END_USER: '{"id":"u9","verified":true}' },
+    });
+    await vi.waitFor(() => expect(onSessionStart).toHaveBeenCalled());
+    expect(onSessionStart.mock.calls[0]![0].user).toEqual({
+      id: "u9",
+      verified: true,
+    });
+    capture.restore();
+  });
+
+  it("getUserHistory is a local mock outside a runner child", async () => {
+    delete process.env.__CHILD_BUNDLE_PATH__;
+    await expect(getUserHistory("peer-1")).resolves.toEqual({
+      ok: true,
+      reason: "local_mock",
+      conversations: [],
+    });
+  });
+
+  it("getUserHistory sends a request without a user id and resolves the response", async () => {
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    defineAgent({});
+    capture.emit({
+      type: "session_start",
+      sessionId: "peer-h",
+      env: { SESSION_ID: "peer-h" },
+    });
+    await vi.waitFor(() =>
+      expect(capture.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "session_start_ack" }),
+      ),
+    );
+    capture.send.mockClear();
+    const p = getUserHistory("peer-h", { limit: 2 });
+    await vi.waitFor(() => expect(capture.send).toHaveBeenCalled());
+    const req = capture.send.mock.calls[0]![0] as Record<string, unknown>;
+    expect(req).toMatchObject({
+      type: "user_history_request",
+      sessionId: "peer-h",
+      limit: 2,
+      maxTurnsPerConversation: 50,
+    });
+    expect(req).not.toHaveProperty("userId");
+    expect(req).not.toHaveProperty("endUserId");
+    const conversations = [
+      {
+        sessionStartedAt: "2026-11-01T10:00:00Z",
+        turns: [{ role: "user", text: "hi", at: "2026-11-01T10:00:01Z" }],
+      },
+    ];
+    capture.emit({
+      type: "user_history_response",
+      requestId: req.requestId,
+      ok: true,
+      conversations,
+    });
+    await expect(p).resolves.toEqual({ ok: true, conversations });
+    capture.restore();
+  });
+
+  it("getUserHistory resolves reason timeout when the runner does not answer", async () => {
+    vi.useFakeTimers();
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    const capture = installProcessMessageCapture();
+    try {
+      defineAgent({});
+      capture.emit({
+        type: "session_start",
+        sessionId: "peer-t",
+        env: { SESSION_ID: "peer-t" },
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+      const p = getUserHistory("peer-t");
+      await vi.advanceTimersByTimeAsync(5001);
+      await expect(p).resolves.toEqual({
+        ok: false,
+        reason: "timeout",
+        conversations: [],
+      });
+    } finally {
+      vi.useRealTimers();
+      capture.restore();
+    }
   });
 
   it("sends conversation_history_control IPC and awaits matching ack (enabled true)", async () => {

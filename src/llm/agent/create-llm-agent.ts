@@ -37,6 +37,8 @@ import { McpToolSource } from "../mcp/mcp-tool-source.js";
 import type { McpToolSourceOptions } from "../mcp/mcp-tool-source.js";
 import { secretValuesFromEnv } from "./redact.js";
 import type { ToolRegistry } from "../mcp/tool-registry.js";
+import { endUserTools } from "../end-user/end-user-tools.js";
+import type { EndUserInfo } from "../../protocol.js";
 import type { CustomTool } from "../mcp/tool-registry.js";
 import { LlmProviderError } from "../types.js";
 import type {
@@ -74,6 +76,11 @@ export interface CreateLlmAgentOptions {
   config: unknown;
   systemPrompt: string;
   tools?: CustomTool[];
+  /**
+   * Register `get_previous_conversations` and `get_current_user`. The first needs
+   * a verified user. Default false.
+   */
+  endUserTools?: boolean;
   hooks?: LlmAgentHooks;
   /** Environment used to resolve secrets. Default `process.env`. */
   env?: () => Record<string, string | undefined>;
@@ -164,6 +171,7 @@ interface ActiveTurn {
 
 interface SessionState {
   sessionId: string;
+  user?: EndUserInfo;
   history: ConversationHistory;
   active?: ActiveTurn;
   queued?: { text: string; source: Source; utteranceId?: string };
@@ -775,6 +783,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       toolSources: config.toolSources ?? [],
       customTools: [
         ...(opts.tools ?? []),
+        ...(opts.endUserTools === true ? endUserTools() : []),
         ...(knowledgeTool ? [knowledgeTool] : []),
       ],
       secretNames: [
@@ -854,6 +863,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
           sessionId: s.sessionId,
           turnId: t.turnId,
           callId: call.id,
+          ...(s.user ? { user: s.user } : {}),
         });
       })();
       const raced = await Promise.race([work, aborted]);
@@ -952,7 +962,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       model: resolveModel(config.provider, config.model),
       system: opts.systemPrompt,
       messages,
-      tools: registry ? registry.list().map((e) => e.spec) : [],
+      tools: registry ? registry.list({ user: s.user }).map((e) => e.spec) : [],
       ...(config.toolChoice === "required-first-round" && t.llmCalls === 1
         ? { toolChoice: "required" as const }
         : {}),
@@ -1493,6 +1503,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         announcing: 0,
         chain: Promise.resolve(),
         ended: false,
+        ...(ctx.user ? { user: ctx.user } : {}),
       };
       sessions.set(ctx.sessionId, s);
       const mode = config.bargeIn?.mode ?? D.bargeInMode;
@@ -1572,6 +1583,11 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       } else {
         s.history.replaceAssistantText(ctx.turnId, ctx.playedText, note);
       }
+    },
+
+    onUserIdentified(ctx) {
+      const s = sessions.get(ctx.sessionId);
+      if (s) s.user = ctx.user;
     },
 
     onSessionEnd(ctx) {

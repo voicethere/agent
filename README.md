@@ -174,6 +174,29 @@ defineAgent({
 });
 ```
 
+### End-user identity
+
+When the project identifies its users, `ctx.user` is `{ id, verified, attributes?, sessionContext? }`. `verified` is true only after the platform verified the user; treat an unverified user as a hint, never as proof.
+
+```ts
+import { defineAgent, getUserHistory } from "@voicethere/agent";
+
+defineAgent({
+  onSessionStart(ctx) {
+    if (ctx.user?.verified) console.log("known user", ctx.user.id);
+  },
+  // A user logged in during the call.
+  async onUserIdentified(ctx) {
+    const history = await getUserHistory(ctx.sessionId, { limit: 3 });
+    // history.conversations: [{ sessionStartedAt, turns: [{ role, text, at }] }]
+  },
+});
+```
+
+`getUserHistory` has no user id parameter: the runner reads earlier conversations of the verified user it holds for that session. Unverified sessions get an empty list with `reason: "unverified"`.
+
+For LLM agents, `defineTool({ requiresVerifiedUser: true, ... })` keeps a tool away from the model until the user is verified (handlers read `ctx.user`, never an id from the model's input). `createLlmAgent({ endUserTools: true })` adds `get_previous_conversations` and `get_current_user`.
+
 ### Shared Redis (project-scoped)
 
 On plans that include project Redis, the runner injects **`AGENT_REDIS_URL`** into the child environment and grants scoped `--allow-net` for that host. Add **`ioredis`** as a dependency of your agent, bundle it with the CLI, and open the client in **`onAgentStart`** so it is ready before any `onSessionStart` / session IPC.

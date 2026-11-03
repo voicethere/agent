@@ -29,6 +29,8 @@ export type ParentToChildMessage =
   | SessionTimeLimitControlAckMessage
   | RecordingControlAckMessage
   | ConversationHistoryControlAckMessage
+  | UserIdentifiedMessage
+  | UserHistoryResponseMessage
   | PlayAckMessage
   | PlayStatusAckMessage
   | PlayStopAckMessage
@@ -57,6 +59,7 @@ export type ChildToParentMessage =
   | AgentStateMessage
   | RecordingControlMessage
   | ConversationHistoryControlMessage
+  | UserHistoryRequestMessage
   | PlayMessage
   | PlayStatusMessage
   | PlayStopMessage
@@ -109,6 +112,11 @@ export interface SessionStartMessage {
    * Absent on older runners or voice/data-only sessions — treat as `false`.
    */
   mixAvailable?: boolean;
+  /**
+   * The end user of the session, when the project identifies users. Absent on older
+   * runners and for sessions without an end user.
+   */
+  endUser?: EndUserInfo;
   /**
    * When `true`, the runner can apply {@link VoiceLanguageControlMessage} for this
    * session (spoken-language switching via agent IPC). Absent on older runners —
@@ -392,6 +400,52 @@ export type ConversationHistoryControlResult = {
   reason?: string;
   requestId: string;
 };
+
+/**
+ * The end user of a session, as the runner knows it. `verified` is set by the
+ * platform only; the agent never chooses the id.
+ */
+export interface EndUserInfo {
+  id: string;
+  verified: boolean;
+  attributes?: Record<string, unknown>;
+  sessionContext?: Record<string, unknown>;
+}
+
+/** Runner tells the child that a session now has a verified end user (login mid-call). */
+export interface UserIdentifiedMessage {
+  type: "user_identified";
+  sessionId: string;
+  endUser: EndUserInfo;
+}
+
+/**
+ * Ask the runner for earlier conversations of the session's verified end user.
+ * Carries no user id: the runner uses the user it stored for `sessionId`.
+ * Use {@link getUserHistory} instead of raw `process.send`.
+ */
+export interface UserHistoryRequestMessage {
+  type: "user_history_request";
+  requestId: string;
+  sessionId: string;
+  limit: number;
+  maxTurnsPerConversation: number;
+}
+
+/** One earlier conversation of the end user. */
+export interface UserHistoryConversation {
+  sessionStartedAt: string;
+  turns: Array<{ role: "user" | "agent"; text: string; at: string }>;
+}
+
+/** Runner answer to a {@link UserHistoryRequestMessage}. */
+export interface UserHistoryResponseMessage {
+  type: "user_history_response";
+  requestId: string;
+  ok: boolean;
+  reason?: "unverified" | "disabled" | string;
+  conversations: UserHistoryConversation[];
+}
 
 /**
  * Ask the runner parent to fetch and play an audio clip to one or more voice clients.
@@ -1083,6 +1137,8 @@ export const ALLOWED_CHILD_ENV_KEYS = [
   "IDLE_TIMEOUT_SEC",
   /** JSON string — opaque customer context from browser session start. */
   "AGENT_CUSTOMER_CONTEXT",
+  /** JSON string — the end user of the session (`EndUserInfo`), when identified. */
+  "AGENT_END_USER",
 ] as const;
 
 /** Union of allowlisted env key names. */

@@ -39,9 +39,12 @@ export function createSupport(deps: SupportDeps = {}) {
   const history = deps.history ?? getUserHistory;
   const say = deps.say ?? ((id: string, text: string) => speak(id, text));
   const contextBySession = new Map<string, string>();
+  const loadSeq = new Map<string, number>();
 
   /** Returns the number of open tickets found. Never throws. */
   async function load(sessionId: string, user?: EndUserInfo): Promise<number> {
+    const seq = (loadSeq.get(sessionId) ?? 0) + 1;
+    loadSeq.set(sessionId, seq);
     if (!user?.verified) {
       contextBySession.delete(sessionId);
       return 0;
@@ -93,6 +96,8 @@ export function createSupport(deps: SupportDeps = {}) {
         sessionId,
       );
     }
+    // A newer load or the end of the session supersedes this one.
+    if (loadSeq.get(sessionId) !== seq) return ticketCount;
     if (parts.length) {
       contextBySession.set(
         sessionId,
@@ -127,6 +132,7 @@ export function createSupport(deps: SupportDeps = {}) {
     return {
       ...base,
       async onSessionStart(ctx) {
+        pending.open(ctx.sessionId);
         await Promise.all([
           load(ctx.sessionId, ctx.user),
           base.onSessionStart?.(ctx),
@@ -153,6 +159,7 @@ export function createSupport(deps: SupportDeps = {}) {
       },
       async onSessionEnd(ctx) {
         contextBySession.delete(ctx.sessionId);
+        loadSeq.delete(ctx.sessionId);
         const steps = pending.take(ctx.sessionId);
         await Promise.all(
           steps.map(async (s) => {

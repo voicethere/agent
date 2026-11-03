@@ -71,13 +71,16 @@ export interface PendingStep {
 /** Steps the model recorded during a call. `onSessionEnd` writes them to the CRM. */
 export class PendingSteps {
   private readonly bySession = new Map<string, PendingStep[]>();
-  /** Returns false when the session already holds the maximum. */
-  add(sessionId: string, s: PendingStep): boolean {
-    const list = this.bySession.get(sessionId) ?? [];
-    if (list.length >= MAX_PENDING_STEPS) return false;
+  /** Start collecting for a session. Steps for a session that is not open are refused. */
+  open(sessionId: string): void {
+    if (!this.bySession.has(sessionId)) this.bySession.set(sessionId, []);
+  }
+  add(sessionId: string, s: PendingStep): "ok" | "full" | "closed" {
+    const list = this.bySession.get(sessionId);
+    if (!list) return "closed";
+    if (list.length >= MAX_PENDING_STEPS) return "full";
     list.push({ ...s, step: s.step.slice(0, MAX_STEP_CHARS) });
-    this.bySession.set(sessionId, list);
-    return true;
+    return "ok";
   }
   take(sessionId: string): PendingStep[] {
     const list = this.bySession.get(sessionId) ?? [];
@@ -188,12 +191,15 @@ export function createTools(deps: { crm?: () => Crm; pending?: PendingSteps }) {
         try {
           const t = await crm().getTicket(ctx.user.id, args.ticketId);
           if (!t) return "No such ticket.";
-          const ok = pending.add(ctx.sessionId, {
+          const added = pending.add(ctx.sessionId, {
             userId: ctx.user.id,
             ticketId: args.ticketId,
             step: args.step.trim(),
           });
-          return ok ? "Step noted." : "Too many steps recorded in this call.";
+          if (added === "closed") return "The call has ended.";
+          return added === "ok"
+            ? "Step noted."
+            : "Too many steps recorded in this call.";
         } catch (e) {
           return failed(ctx.sessionId, "add_troubleshooting_step", e);
         }

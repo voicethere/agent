@@ -293,8 +293,22 @@ describe("support hooks", () => {
     const { crm, steps } = spyCrm();
     const pending = new PendingSteps();
     const { reg } = registryFor(crm, pending);
-    const support = createSupport({ crm: () => crm, pending });
+    const support = createSupport({
+      crm: () => crm,
+      pending,
+      history: history({ ok: true, conversations: [] }),
+    });
     const handlers = support.wrap({});
+    await handlers.onSessionStart!({
+      sessionId: "A",
+      env: {},
+      user: demo,
+    } as never);
+    await handlers.onSessionStart!({
+      sessionId: "B",
+      env: {},
+      user: { id: "456", verified: true },
+    } as never);
     const a = { ...ctx(demo), sessionId: "A" };
     const b = { ...ctx({ id: "456", verified: true }), sessionId: "B" };
     await reg.call(
@@ -316,6 +330,103 @@ describe("support hooks", () => {
     expect((await crm.getTicket("demo-user", "T-1001"))!.stepsTried).toContain(
       "Updated the firmware",
     );
+  });
+
+  it("a step recorded after session end is not kept", async () => {
+    const { crm, steps } = spyCrm();
+    const pending = new PendingSteps();
+    const { reg } = registryFor(crm, pending);
+    const support = createSupport({
+      crm: () => crm,
+      pending,
+      history: history({ ok: true, conversations: [] }),
+    });
+    const handlers = support.wrap({});
+    await handlers.onSessionStart!({
+      sessionId: "s1",
+      env: {},
+      user: demo,
+    } as never);
+    await handlers.onSessionEnd!({ sessionId: "s1" });
+    const r = await reg.call(
+      "add_troubleshooting_step",
+      { ticketId: "T-1001", step: "Too late" },
+      ctx(demo),
+    );
+    expect(r.content).toBe("The call has ended.");
+    expect(pending.take("s1")).toEqual([]);
+    expect(steps).toEqual([]);
+  });
+
+  it("a load that finishes after session end leaves no context", async () => {
+    let release!: (v: unknown) => void;
+    const gate = new Promise((r) => (release = r));
+    const support = createSupport({
+      crm: () => createMockCrm(),
+      pending: new PendingSteps(),
+      history: (async () => gate) as never,
+    });
+    const handlers = support.wrap({});
+    const start = handlers.onSessionStart!({
+      sessionId: "s1",
+      env: {},
+      user: demo,
+    } as never);
+    await handlers.onSessionEnd!({ sessionId: "s1" });
+    release({ ok: true, conversations: [] });
+    await start;
+    expect(
+      support.hooks.onBeforeLlmCall!([{ role: "user", text: "hi" }], {
+        sessionId: "s1",
+      } as never),
+    ).toBeUndefined();
+  });
+
+  it("overlapping loads keep the newest", async () => {
+    const releases: ((v: unknown) => void)[] = [];
+    const support = createSupport({
+      crm: () => createMockCrm(),
+      pending: new PendingSteps(),
+      history: (async () => new Promise((r) => releases.push(r))) as never,
+    });
+    const handlers = support.wrap({});
+    const first = handlers.onSessionStart!({
+      sessionId: "s1",
+      env: {},
+      user: demo,
+    } as never);
+    const second = handlers.onUserIdentified!({
+      sessionId: "s1",
+      env: {},
+      user: demo,
+    } as never);
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    // The second (newest) load finishes first, the first finishes last.
+    releases[1]!({
+      ok: true,
+      conversations: [
+        {
+          sessionStartedAt: "2026-11-02T10:00:00Z",
+          turns: [{ role: "user", text: "NEWEST" }],
+        },
+      ],
+    });
+    await second;
+    releases[0]!({
+      ok: true,
+      conversations: [
+        {
+          sessionStartedAt: "2026-11-01T10:00:00Z",
+          turns: [{ role: "user", text: "OLDEST" }],
+        },
+      ],
+    });
+    await first;
+    const out = support.hooks.onBeforeLlmCall!([], {
+      sessionId: "s1",
+    } as never) as { text: string }[];
+    expect(out[0]!.text).toContain("NEWEST");
+    expect(out[0]!.text).not.toContain("OLDEST");
   });
 });
 

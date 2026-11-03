@@ -38,7 +38,7 @@ Turn on end-user identification for the project in the dashboard and choose how 
 import { startSession, connectBrowserSession } from "@voicethere/client";
 
 const provision = await startSession({
-  apiBase: "https://sessions.voicethere.dev/v1",
+  apiBase: "https://sessions.example/v1",
   projectId,
   headers: { Authorization: `Bearer ${clientKey}` },
   endUserToken, // from your backend
@@ -47,7 +47,7 @@ const provision = await startSession({
 const session = await connectBrowserSession({
   mode: "voice",
   credentials: provision.credentials,
-  apiBase: "https://sessions.voicethere.dev/v1",
+  apiBase: "https://sessions.example/v1",
   projectId,
   apiHeaders: { Authorization: `Bearer ${clientKey}` },
 });

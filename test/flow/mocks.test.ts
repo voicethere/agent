@@ -223,5 +223,25 @@ describe("createFlowAgent({ mocks })", () => {
       },
     });
     expect(() => h.onAgentStart!({} as any)).not.toThrow();
+
+    // drive a session through the handlers, on mocks only
+    const base = makeHarness();
+    const h2 = createFlowAgent({
+      flow: doc(),
+      mocks: full,
+      env: () => ({}),
+      sourceFactory: () => {
+        throw new Error("network");
+      },
+      effectsFactory: () => base.effects,
+    });
+    h2.onAgentStart!({} as any);
+    h2.onSessionStart!({ sessionId: "s9" } as any);
+    h2.onUserSpeechFinal!({ sessionId: "s9", text: "hello" } as any);
+    await flush();
+    await flush();
+    expect(base.ends).toEqual(["ok"]);
+    expect(base.speaks.map((x) => x.text)).toEqual(["Mock answer."]);
+    h2.onSessionEnd!({ sessionId: "s9" } as any);
   });
 });

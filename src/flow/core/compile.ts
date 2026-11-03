@@ -48,12 +48,12 @@ export function renderValue(
 
 /** Lower-case, trim, collapse spaces, strip trailing `.!?`. */
 export function normalizeUtterance(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/[.!?]+$/, "")
-    .trim();
+  const t = s.toLowerCase().replace(/\s+/g, " ").trim();
+  // Linear scan instead of /[.!?]+$/: that regex is quadratic on long runs of
+  // punctuation that do not end the string, and this runs on caller text.
+  let end = t.length;
+  while (end > 0 && ".!?".includes(t[end - 1]!)) end--;
+  return t.slice(0, end).trim();
 }
 
 export interface CompiledRoutePath {

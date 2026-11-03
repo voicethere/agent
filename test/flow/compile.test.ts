@@ -61,6 +61,17 @@ describe("compileFlow", () => {
 
   it("normalizes utterances", () => {
     expect(normalizeUtterance("  Hello   World?! ")).toBe("hello world");
+    expect(normalizeUtterance("yes . !")).toBe("yes .");
+    expect(normalizeUtterance("!!!")).toBe("");
+    expect(normalizeUtterance("wait! what")).toBe("wait! what");
+  });
+
+  it("normalizes long punctuation runs in linear time", () => {
+    const s = "!".repeat(200_000) + "x";
+    const t0 = performance.now();
+    expect(normalizeUtterance(s)).toBe(s);
+    // The old /[.!?]+$/ took seconds here; the scan takes well under 1 ms.
+    expect(performance.now() - t0).toBeLessThan(1000);
   });
 
   it("applies defaults", () => {

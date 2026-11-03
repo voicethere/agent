@@ -11,7 +11,7 @@ A scripted voice and chat conversation built from nodes: speak, listen, route by
 
 ## Set the API key
 
-The flow starts on OpenRouter with the model `amazon/nova-micro-v1`. Create a key at openrouter.ai, add it as a project secret named `AGENT_OPENROUTER_API_KEY`, then deploy. The key is read by name from `apiKeySecret` in `voicethere.flow.json`; it is never stored in the file. Only project secrets whose names start with `AGENT_` reach the agent.
+The flow starts on OpenRouter with the model `anthropic/claude-haiku-5.5`, which supports the forced tool call the route classifier makes. Create a key at openrouter.ai, add it as a project secret named `AGENT_OPENROUTER_API_KEY`, then deploy. The key is read by name from `apiKeySecret` in `voicethere.flow.json`; it is never stored in the file. Only project secrets whose names start with `AGENT_` reach the agent.
 
 To use another provider, change `provider`, `model` and `apiKeySecret` in the `models` block and import that provider's module in `agent.ts` (the comment there shows how).
 

@@ -1508,20 +1508,27 @@ describe("conversation history control", () => {
     const capture = installProcessMessageCapture();
     const onUserIdentified = vi.fn();
     defineAgent({ onUserIdentified });
+    const acks = () =>
+      capture.send.mock.calls.filter(
+        (c) => (c[0] as { type: string }).type === "session_start_ack",
+      ).length;
     capture.emit({ type: "session_start", sessionId: "peer-x", env: {} });
-    await vi.waitFor(() =>
-      expect(capture.send).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "session_start_ack" }),
-      ),
-    );
+    capture.emit({ type: "session_start", sessionId: "peer-y", env: {} });
+    await vi.waitFor(() => expect(acks()).toBe(2));
     capture.emit({ type: "session_end", sessionId: "peer-x" });
     capture.emit({
       type: "user_identified",
       sessionId: "peer-x",
       endUser: { id: "u1", verified: true },
     });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(onUserIdentified).not.toHaveBeenCalled();
+    // Barrier: a later message for a live session is observed by its handler.
+    capture.emit({
+      type: "user_identified",
+      sessionId: "peer-y",
+      endUser: { id: "y", verified: true },
+    });
+    await vi.waitFor(() => expect(onUserIdentified).toHaveBeenCalledTimes(1));
+    expect(onUserIdentified.mock.calls[0]![0].sessionId).toBe("peer-y");
     expect(getSessionUser("peer-x")).toBeUndefined();
     capture.restore();
   });

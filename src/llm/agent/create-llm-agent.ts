@@ -4,6 +4,7 @@ import {
   agentLog,
   announce,
   cancelSpeech,
+  getSessionUser,
   parseChatText,
   sendToClient,
   setAgentState,
@@ -38,7 +39,6 @@ import type { McpToolSourceOptions } from "../mcp/mcp-tool-source.js";
 import { secretValuesFromEnv } from "./redact.js";
 import type { ToolRegistry } from "../mcp/tool-registry.js";
 import { endUserTools } from "../end-user/end-user-tools.js";
-import type { EndUserInfo } from "../../protocol.js";
 import type { CustomTool } from "../mcp/tool-registry.js";
 import { LlmProviderError } from "../types.js";
 import type {
@@ -171,7 +171,6 @@ interface ActiveTurn {
 
 interface SessionState {
   sessionId: string;
-  user?: EndUserInfo;
   history: ConversationHistory;
   active?: ActiveTurn;
   queued?: { text: string; source: Source; utteranceId?: string };
@@ -863,7 +862,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
           sessionId: s.sessionId,
           turnId: t.turnId,
           callId: call.id,
-          ...(s.user ? { user: s.user } : {}),
+          ...(getSessionUser(s.sessionId)
+            ? { user: getSessionUser(s.sessionId) }
+            : {}),
         });
       })();
       const raced = await Promise.race([work, aborted]);
@@ -962,7 +963,11 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       model: resolveModel(config.provider, config.model),
       system: opts.systemPrompt,
       messages,
-      tools: registry ? registry.list({ user: s.user }).map((e) => e.spec) : [],
+      tools: registry
+        ? registry
+            .list({ user: getSessionUser(s.sessionId) })
+            .map((e) => e.spec)
+        : [],
       ...(config.toolChoice === "required-first-round" && t.llmCalls === 1
         ? { toolChoice: "required" as const }
         : {}),
@@ -1503,7 +1508,6 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         announcing: 0,
         chain: Promise.resolve(),
         ended: false,
-        ...(ctx.user ? { user: ctx.user } : {}),
       };
       sessions.set(ctx.sessionId, s);
       const mode = config.bargeIn?.mode ?? D.bargeInMode;
@@ -1583,11 +1587,6 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       } else {
         s.history.replaceAssistantText(ctx.turnId, ctx.playedText, note);
       }
-    },
-
-    onUserIdentified(ctx) {
-      const s = sessions.get(ctx.sessionId);
-      if (s) s.user = ctx.user;
     },
 
     onSessionEnd(ctx) {

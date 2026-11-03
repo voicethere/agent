@@ -1443,6 +1443,7 @@ async function handleParentMessage(
       });
       break;
     case "user_identified": {
+      if (endedSessionIds.has(message.sessionId)) break;
       const user = parseEndUserInfo(message.endUser);
       if (!user) break;
       endUserBySessionId.set(message.sessionId, user);

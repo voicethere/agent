@@ -130,6 +130,7 @@ describe("createLlmAgent endUserTools", () => {
   });
   afterEach(() => {
     capture.emit({ type: "session_end", sessionId: "p1" });
+    capture.emit({ type: "session_end", sessionId: "A" });
     capture.restore();
     resetAgentIpcStateForTests();
     delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
@@ -204,5 +205,91 @@ describe("createLlmAgent endUserTools", () => {
       "get_current_user",
       "get_previous_conversations",
     ]);
+  });
+
+  async function boot(over: { spread?: boolean } = {}) {
+    const requests: LlmRequest[] = [];
+    const provider: LlmProvider = {
+      id: "openai",
+      stream(req) {
+        requests.push({ ...req, signal: undefined });
+        return (async function* () {
+          yield { type: "text_delta", text: "ok." } as LlmStreamEvent;
+          yield {
+            type: "done",
+            stopReason: "end",
+            text: "ok.",
+            toolCalls: [],
+            usage: { inputTokens: 1, outputTokens: 1 },
+          } as LlmStreamEvent;
+        })();
+      },
+    };
+    const base = createLlmAgent({
+      config: {
+        version: 1,
+        provider: "openai",
+        apiKeySecret: "AGENT_TEST_KEY",
+        speech: { coalesceMs: 0 },
+      },
+      systemPrompt: "t",
+      provider,
+      endUserTools: true,
+      env: () => ({ AGENT_TEST_KEY: "k" }),
+    });
+    defineAgent(over.spread ? { ...base, onUserIdentified: () => {} } : base);
+    const acks = () =>
+      capture.send.mock.calls.filter(
+        (c) => (c[0] as { type: string }).type === "session_start_ack",
+      ).length;
+    for (const id of ["A", "B"]) {
+      capture.emit({
+        type: "session_start",
+        sessionId: id,
+        env: {},
+        endUser: { id: id.toLowerCase(), verified: false },
+      });
+    }
+    await vi.waitFor(() => expect(acks()).toBe(2));
+    const say = (sessionId: string, text: string) =>
+      capture.emit({
+        type: "speech_event",
+        sessionId,
+        event: { type: "user_speech_final", text },
+      });
+    return { requests, say };
+  }
+
+  it("identifying session A leaves session B's tool list unchanged", async () => {
+    const { requests, say } = await boot();
+    capture.emit({
+      type: "user_identified",
+      sessionId: "A",
+      endUser: { id: "a", verified: true },
+    });
+    say("B", "hi");
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]!.tools.map((t) => t.name)).toEqual(["get_current_user"]);
+    say("A", "hi");
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]!.tools.map((t) => t.name)).toContain(
+      "get_previous_conversations",
+    );
+    capture.emit({ type: "session_end", sessionId: "B" });
+  });
+
+  it("a customer onUserIdentified override does not stale the tool list", async () => {
+    const { requests, say } = await boot({ spread: true });
+    capture.emit({
+      type: "user_identified",
+      sessionId: "A",
+      endUser: { id: "a", verified: true },
+    });
+    say("A", "hi");
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]!.tools.map((t) => t.name)).toContain(
+      "get_previous_conversations",
+    );
+    capture.emit({ type: "session_end", sessionId: "B" });
   });
 });

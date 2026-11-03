@@ -13,6 +13,7 @@ import {
   resetAgentIpcStateForTests,
 } from "../src/runtime.js";
 import { validateFlow, validateMocks } from "../src/flow/core/index.js";
+import { LLM_PROVIDERS } from "../src/llm/catalog.js";
 import { installProcessMessageCapture } from "./helpers/process-mock.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -21,6 +22,24 @@ const read = (f: string): unknown =>
   JSON.parse(readFileSync(join(templateDir, f), "utf8"));
 
 describe("flow-agent template", () => {
+  it("uses the catalog's cheap model and key name for every model it seeds", () => {
+    // The route classifier forces a tool call; the catalog's cheapModel is the
+    // one checked to support tool_choice (amazon/nova-micro-v1 does not).
+    const flow = read("voicethere.flow.json") as {
+      models: Record<
+        string,
+        { provider?: string; model?: string; apiKeySecret?: string }
+      >;
+    };
+    const seeded = Object.values(flow.models).filter((m) => m.provider);
+    expect(seeded.length).toBeGreaterThan(0);
+    for (const m of seeded) {
+      const entry = LLM_PROVIDERS[m.provider as keyof typeof LLM_PROVIDERS];
+      expect(m.model).toBe(entry.cheapModel);
+      expect(m.apiKeySecret).toBe(entry.apiKeyEnv);
+    }
+  });
+
   it("bundles with its json import", async () => {
     const dir = mkdtempSync(join(tmpdir(), "voicethere-flow-template-"));
     const outfile = join(dir, "agent.js");

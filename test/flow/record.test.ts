@@ -84,7 +84,7 @@ describe("wrapRecording", () => {
     });
   });
 
-  it("a late http result is recorded under its own node", async () => {
+  it("a result after abort is recorded as the timeout case", async () => {
     const h = makeHarness();
     const d: any = flow();
     d.nodes[0] = { ...d.nodes[0], timeoutMs: 100, onError: "say" };
@@ -115,7 +115,8 @@ describe("wrapRecording", () => {
     expect(h.speaks.map((x) => x.text)).toEqual(["sorry"]);
     const m = rec.mocks();
     expect(m.nodes["say"]).toBeUndefined();
-    expect((m.nodes["call"]![0]!.http as any).status).toBe(200);
+    expect(m.nodes["call"]![0]!.http).toEqual({ error: "HTTP_TIMEOUT" });
+    expect(validateMocks(m, validateFlow(d).flow!).ok).toBe(true);
   });
 
   function chainFlow(): any {

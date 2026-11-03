@@ -72,6 +72,11 @@ export function wrapRecording(
       const nodeId = current;
       try {
         const res = await effects.http(req, signal);
+        if (signal.aborted) {
+          // The interpreter gave up (timeout): replay must take that path.
+          record(nodeId, { http: { error: "HTTP_TIMEOUT" } });
+          return res;
+        }
         const headers: Record<string, string> = {};
         for (const [k, v] of Object.entries(res.headers ?? {}))
           if (!DROPPED_HEADERS.has(k.toLowerCase()))
@@ -94,6 +99,9 @@ export function wrapRecording(
     async tool(source, tool, args, signal, o) {
       const nodeId = current;
       const res = await effects.tool(source, tool, args, signal, o);
+      // Aborted: the interpreter already took its timeout path. Mock cases
+      // have no mcp error code, so a late result is not recorded as a success.
+      if (signal.aborted) return res;
       if (res.isError)
         record(nodeId, {
           mcp: { isError: true, content: String(redactor.redact(res.content)) },
@@ -114,7 +122,7 @@ export function wrapRecording(
       const inner = effects.llm(req, signal);
       return (async function* () {
         for await (const ev of inner) {
-          if (ev.type === "done")
+          if (ev.type === "done" && !signal.aborted)
             record(nodeId, {
               llm: { text: String(redactor.redact(ev.text)) },
             });
@@ -125,7 +133,7 @@ export function wrapRecording(
     async classify(req, signal) {
       const nodeId = current;
       const res = await effects.classify(req, signal);
-      record(nodeId, { route: { path: res.path } });
+      if (!signal.aborted) record(nodeId, { route: { path: res.path } });
       return res;
     },
   };

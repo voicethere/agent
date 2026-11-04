@@ -127,7 +127,10 @@ export function validateMocks(
         c["route"]["error"] === undefined
       ) {
         const p = c["route"]["path"];
-        if (typeof p !== "string" || !node.paths.some((x) => x.id === p))
+        if (
+          typeof p !== "string" ||
+          (p !== "none" && !node.paths.some((x) => x.id === p))
+        )
           add(
             "MOCK_UNKNOWN_PATH",
             `route path is not declared on node ${nodeId}`,

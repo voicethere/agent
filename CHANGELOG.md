@@ -16,6 +16,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Fixed
 
+- A recorded flow session now replays a route that took `onNone` (mocks accept `route: {path: "none"}`) and a route whose classifier call failed (the recording keeps the error code, e.g. `LLM_CLASSIFIER_NO_CALL`, `ROUTE_TIMEOUT`, or `ROUTE_ERROR` for an uncoded error), so replay takes the same `onError` edge.
 - LLM agent chat replies with `speakChatReplies: false` are now recorded in the conversation history (via `record_reply` on runners that support it).
 
 ## [0.27.2] - 2026-11-04

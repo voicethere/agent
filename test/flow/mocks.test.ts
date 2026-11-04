@@ -115,6 +115,21 @@ describe("validateMocks", () => {
     );
     expect(r.errors.map((e) => e.code)).toEqual(["MOCK_KIND_MISMATCH"]);
   });
+  it("route path none is valid", () => {
+    const r = validateMocks(
+      { version: 1, nodes: { pick: [{ name: "x", route: { path: "none" } }] } },
+      flow,
+    );
+    expect(r.errors).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+  it("undeclared path still fails MOCK_UNKNOWN_PATH", () => {
+    const r = validateMocks(
+      { version: 1, nodes: { pick: [{ name: "x", route: { path: "nope" } }] } },
+      flow,
+    );
+    expect(r.errors.map((e) => e.code)).toEqual(["MOCK_UNKNOWN_PATH"]);
+  });
   it("rejects a route path the node does not declare", () => {
     const r = validateMocks(
       { version: 1, nodes: { pick: [{ name: "x", route: { path: "zz" } }] } },

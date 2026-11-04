@@ -1,5 +1,5 @@
 import { fork } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,7 +90,7 @@ describe("bundled ioredis agent under child sandbox", () => {
       miniRedis = undefined;
     }
     if (tempDir) {
-      rmSync(join(tempDir, "ioredis-bundle-agent.js"), { force: true });
+      rmSync(tempDir, { recursive: true, force: true });
       tempDir = undefined;
     }
   });
@@ -98,8 +98,8 @@ describe("bundled ioredis agent under child sandbox", () => {
   it("loads bundle and connects via onAgentStart when allow-net includes redis host", async () => {
     miniRedis = await startMiniRedis();
     mkdirSync(TEST_TMP_DIR, { recursive: true });
-    tempDir = TEST_TMP_DIR;
-    const bundlePath = join(TEST_TMP_DIR, "ioredis-bundle-agent.js");
+    tempDir = mkdtempSync(join(TEST_TMP_DIR, "ioredis-bundle-"));
+    const bundlePath = join(tempDir, "ioredis-bundle-agent.js");
 
     await buildAgentBundle({
       cwd: AGENT_ROOT,

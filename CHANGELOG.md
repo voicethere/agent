@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-11-04
+
 ### Fixed
 
 - Flow route classifier: a reply with no `choose_path` call, or with a path id that is not in the route's path list, is now an error with code `LLM_CLASSIFIER_NO_CALL`. The route takes `onError`, sets `error.<nodeId>`, and the trace shows `error=LLM_CLASSIFIER_NO_CALL`. Before, it was logged as `none` and took `onNone`. Only an explicit `none` from the model goes to `onNone`.

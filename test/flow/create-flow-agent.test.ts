@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { recordReply } from "../../src/index.js";
 import { createFlowAgent } from "../../src/flow/create-flow-agent.js";
 import { openai } from "../../src/llm/openai.js";
 import {
@@ -94,7 +95,7 @@ describe("createFlowAgent", () => {
     return type ? all.filter((m) => m.type === type) : all;
   };
 
-  function boot(doc: unknown = flowDoc()) {
+  function boot(doc: unknown = flowDoc(), record = false) {
     const handlers = createFlowAgent({
       flow: doc,
       provider: fakeProvider,
@@ -106,6 +107,7 @@ describe("createFlowAgent", () => {
       sessionId: SESSION,
       env: { SESSION_ID: SESSION },
       speakControlAvailable: true,
+      ...(record ? { chatReplyRecordAvailable: true } : {}),
     });
     return handlers;
   }
@@ -123,6 +125,11 @@ describe("createFlowAgent", () => {
       status: "played",
       playedMs: 100,
     });
+
+  it("package entry exports recordReply", () => {
+    expect(recordReply("unknown-session", "hi")).toBe(false);
+    expect(sent("record_reply")).toHaveLength(0);
+  });
 
   it("an invalid flow throws FLOW_INVALID with the first issues", () => {
     const bad = baseFlow();
@@ -299,6 +306,65 @@ describe("createFlowAgent", () => {
       .map((m) => m.payload as Msg)
       .find((p) => p.type === "chat_reply")!;
     expect(reply.text).toBe("Support it is.");
+  });
+
+  it("chat reply with chatReplyRecordAvailable sends chat_reply + record_reply (turnId) and no speak", async () => {
+    boot(flowDoc(), true);
+    await vi.waitFor(() => expect(sent("speak")).toHaveLength(1));
+    played(sent("speak")[0]!.requestId);
+    await vi.waitFor(() =>
+      expect(
+        sent("log").some(
+          (m) =>
+            m.message === "flow_step" &&
+            (m.fields as Msg).nodeId === "ask" &&
+            (m.fields as Msg).phase === "enter",
+        ),
+      ).toBe(true),
+    );
+    capture.emit({
+      type: "data_channel_message",
+      sessionId: SESSION,
+      payload: JSON.stringify({ type: "chat", text: "my app is broken" }),
+    });
+    await vi.waitFor(() => expect(sent("record_reply")).toHaveLength(1));
+    const rec = sent("record_reply")[0]!;
+    expect(rec.text).toBe("Support it is.");
+    expect(rec.sessionId).toBe(SESSION);
+    expect(String(rec.turnId).startsWith(`${SESSION}:`)).toBe(true);
+    expect(
+      sent("send_to_client").some(
+        (m) => (m.payload as Msg).type === "chat_reply",
+      ),
+    ).toBe(true);
+    // only the greeting was spoken
+    expect(sent("speak")).toHaveLength(1);
+  });
+
+  it("chat reply without the capability falls back to speak with turnId and no record_reply", async () => {
+    boot();
+    await vi.waitFor(() => expect(sent("speak")).toHaveLength(1));
+    played(sent("speak")[0]!.requestId);
+    await vi.waitFor(() =>
+      expect(
+        sent("log").some(
+          (m) =>
+            m.message === "flow_step" &&
+            (m.fields as Msg).nodeId === "ask" &&
+            (m.fields as Msg).phase === "enter",
+        ),
+      ).toBe(true),
+    );
+    capture.emit({
+      type: "data_channel_message",
+      sessionId: SESSION,
+      payload: JSON.stringify({ type: "chat", text: "my app is broken" }),
+    });
+    await vi.waitFor(() => expect(sent("speak")).toHaveLength(2));
+    expect(String(sent("speak")[1]!.turnId).startsWith(`${SESSION}:`)).toBe(
+      true,
+    );
+    expect(sent("record_reply")).toHaveLength(0);
   });
 
   it("a chat reply is also sent as a speak request, so the runner records the agent row", async () => {

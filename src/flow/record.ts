@@ -135,7 +135,20 @@ export function wrapRecording(
     },
     async classify(req, signal) {
       const nodeId = current;
-      const res = await effects.classify(req, signal);
+      let res: Awaited<ReturnType<FlowEffects["classify"]>>;
+      try {
+        res = await effects.classify(req, signal);
+      } catch (err) {
+        // Same fallback as the interpreter's errorCode, so replay takes the same edge.
+        record(nodeId, {
+          route: {
+            error: signal.aborted
+              ? "ROUTE_TIMEOUT"
+              : codeOf(err) || "ROUTE_ERROR",
+          },
+        });
+        throw err;
+      }
       if (signal.aborted) record(nodeId, { route: { error: "ROUTE_TIMEOUT" } });
       else record(nodeId, { route: { path: res.path } });
       return res;

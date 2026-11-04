@@ -140,9 +140,23 @@ export class FlowSession {
     this.waiting = undefined;
     this.cancelCurrent?.();
     this.cancelCurrent = undefined;
+    this.cancelChatSpeech();
   }
 
   // ---- internals ----
+
+  /** Fallback speech of chat replies (runners without `record_reply`). */
+  private chatSpeech: FlowSpeakHandle[] = [];
+
+  private pushChatSpeech(h: FlowSpeakHandle | void): void {
+    if (h) this.chatSpeech.push(h);
+  }
+
+  private cancelChatSpeech(): void {
+    const hs = this.chatSpeech;
+    this.chatSpeech = [];
+    for (const h of hs) h.cancel();
+  }
 
   private lookup = (path: string): unknown => {
     if (Object.hasOwn(this.vars, path)) return this.vars[path];
@@ -244,6 +258,7 @@ export class FlowSession {
     const changed: string[] = [];
     let target: number;
     if (how === "input" && input) {
+      this.cancelChatSpeech();
       this.applyInput(input, changed);
       target = node.next;
     } else {
@@ -361,6 +376,11 @@ export class FlowSession {
       }
       const index = this.nodeIndex;
       const node = this.compiled.nodes[index]!;
+      if (this.fx.beforeNode) {
+        const gate = this.stepSeq;
+        await this.fx.beforeNode(node.id);
+        if (this._ended || this.stepSeq !== gate || this.waiting) return;
+      }
       const seq = ++this.stepSeq;
       this.stepsThisTurn++;
       const t0 = this.fx.clock.now();
@@ -382,7 +402,7 @@ export class FlowSession {
           const text = this.render(node.text);
           this.history.push({ role: "assistant", text });
           if (this.channel === "chat") {
-            this.fx.chat?.(text, { turnId: this.turnId });
+            this.pushChatSpeech(this.fx.chat?.(text, { turnId: this.turnId }));
           } else {
             const h = this.fx.speak(text, {
               interruptible: node.interruptible,
@@ -461,7 +481,9 @@ export class FlowSession {
             const text = this.render(node.text);
             this.history.push({ role: "assistant", text });
             if (this.channel === "chat") {
-              this.fx.chat?.(text, { turnId: this.turnId });
+              this.pushChatSpeech(
+                this.fx.chat?.(text, { turnId: this.turnId }),
+              );
             } else {
               const h = this.fx.speak(text, {
                 interruptible: false,
@@ -764,7 +786,9 @@ export class FlowSession {
           this.cancelCurrent = undefined;
           if (cancelled || this.stale(seq)) return;
           if (this.channel === "chat" && spoken.length > 0)
-            this.fx.chat?.(spoken.join(" "), { turnId: this.turnId });
+            this.pushChatSpeech(
+              this.fx.chat?.(spoken.join(" "), { turnId: this.turnId }),
+            );
           if (handles.length > 0) {
             this.cancelCurrent = () => {
               for (const h of handles) h.cancel();

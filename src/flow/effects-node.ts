@@ -1,4 +1,10 @@
-import { agentLog, disconnectClient, sendToClient, speak } from "../runtime.js";
+import {
+  agentLog,
+  disconnectClient,
+  recordReply,
+  sendToClient,
+  speak,
+} from "../runtime.js";
 import type { ToolRegistry } from "../llm/mcp/tool-registry.js";
 import type { LlmProvider } from "../llm/types.js";
 import { createClassifier } from "./classify.js";
@@ -89,9 +95,21 @@ export function createNodeEffects(o: NodeEffectsOptions): FlowEffects {
     },
     chat(text, co) {
       sendToClient(sid, { type: "chat_reply", text });
-      // The runner writes the agent transcript row from the speak request, as for
-      // an LLM agent's chat reply (`speakChatReplies`, default true).
-      speak(sid, text, co?.turnId ? { turnId: co.turnId } : undefined);
+      // Text-only row on runners that support it; otherwise the runner writes the
+      // agent row from a speak request (0.27.2 behaviour).
+      if (
+        recordReply(sid, text, co?.turnId ? { turnId: co.turnId } : undefined)
+      )
+        return undefined;
+      const h = speak(
+        sid,
+        text,
+        co?.turnId ? { turnId: co.turnId } : undefined,
+      );
+      return {
+        done: h.done.then((r) => ({ status: r.status })),
+        cancel: () => h.cancel(),
+      };
     },
     async http(req: FlowHttpRequest, signal): Promise<FlowHttpResponse> {
       const headers: Record<string, string> = {};

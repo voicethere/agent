@@ -137,7 +137,10 @@ describe("createLlmAgent", () => {
     over: {
       config?: Record<string, unknown>;
       options?: Partial<CreateLlmAgentOptions>;
-      session?: { speakControlAvailable?: boolean };
+      session?: {
+        speakControlAvailable?: boolean;
+        chatReplyRecordAvailable?: boolean;
+      };
       skipSessionAck?: boolean;
     } = {},
   ) {
@@ -161,6 +164,9 @@ describe("createLlmAgent", () => {
       sessionId: SESSION,
       env: { SESSION_ID: SESSION },
       speakControlAvailable: over.session?.speakControlAvailable ?? true,
+      ...(over.session?.chatReplyRecordAvailable !== undefined
+        ? { chatReplyRecordAvailable: over.session.chatReplyRecordAvailable }
+        : {}),
     });
     if (!over.skipSessionAck) {
       await vi.waitFor(() => expect(sent("session_start_ack")).toHaveLength(1));
@@ -1068,6 +1074,45 @@ describe("createLlmAgent", () => {
       { type: "assistant_done", turnId, text: "Hi." },
       { type: "chat_reply", text: "Hi." },
     ]);
+  });
+
+  it("speakChatReplies:false chat turn sends record_reply once with the joined reply and turnId", async () => {
+    await boot([[delta("Hi. There."), done("Hi. There.")]], {
+      config: { speakChatReplies: false },
+      session: { chatReplyRecordAvailable: true },
+    });
+    chat("hello");
+    await vi.waitFor(() => expect(sent("record_reply")).toHaveLength(1));
+    const done_ = clientPayloads().find((p) => p.type === "assistant_done")!;
+    expect(sent("record_reply")).toEqual([
+      {
+        type: "record_reply",
+        sessionId: SESSION,
+        text: "Hi. There.",
+        turnId: done_.turnId,
+      },
+    ]);
+    expect(speaks()).toHaveLength(0);
+  });
+
+  it("speakChatReplies:true chat turn sends no record_reply", async () => {
+    await boot([[delta("Hi."), done("Hi.")]], {
+      session: { chatReplyRecordAvailable: true },
+    });
+    chat("hello");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    expect(sent("record_reply")).toHaveLength(0);
+  });
+
+  it("speakChatReplies:false on a runner without the capability sends no record_reply", async () => {
+    await boot([[delta("Hi."), done("Hi.")]], {
+      config: { speakChatReplies: false },
+    });
+    chat("hello");
+    await vi.waitFor(() =>
+      expect(clientPayloads().map((p) => p.type)).toContain("chat_reply"),
+    );
+    expect(sent("record_reply")).toHaveLength(0);
   });
 
   it("two voice turns in the same millisecond keep their own turnId", async () => {

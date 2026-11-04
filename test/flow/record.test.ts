@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compileFlow,
+  createMockEffects,
   validateMocks,
   FlowSession,
   validateFlow,
@@ -179,6 +180,128 @@ describe("wrapRecording", () => {
     const m = rec.mocks();
     expect(m.nodes["pick"]![0]!.route).toEqual({ error: "ROUTE_TIMEOUT" });
     expect(validateMocks(m, validateFlow(chainFlow()).flow!).ok).toBe(true);
+  });
+
+  function routeFlow(): any {
+    return {
+      version: 1,
+      start: "pick",
+      models: {
+        default: {
+          provider: "openrouter",
+          model: "m",
+          apiKeySecret: "AGENT_X",
+        },
+        classifier: { use: "default" },
+      },
+      nodes: [
+        {
+          id: "pick",
+          type: "route",
+          input: "zzz unrelated",
+          paths: [
+            { id: "billing", examples: ["alpha beta"], next: "ok" },
+            { id: "other", examples: ["gamma delta"], next: "ok" },
+          ],
+          onNone: "nn",
+          onError: "ee",
+        },
+        { id: "ok", type: "end", reason: "ok" },
+        { id: "nn", type: "end", reason: "none" },
+        { id: "ee", type: "end", reason: "error" },
+      ],
+    };
+  }
+
+  /** Records a live run with `classify`, then replays the recording and compares the outcome. */
+  async function recordAndReplay(
+    classify: (signal: AbortSignal) => Promise<{ path: string }>,
+  ) {
+    const flowDoc = validateFlow(routeFlow()).flow!;
+    const h = makeHarness();
+    h.effects.classify = (_req, signal) => classify(signal);
+    const rec = createMockRecorder();
+    const fx = wrapRecording(h.effects, rec.sink, { env: {} });
+    const s = new FlowSession(compileFlow(flowDoc), fx, {
+      sessionId: "s1",
+      channel: "voice",
+    });
+    await s.start();
+    await flush();
+    const mocks = rec.mocks();
+    expect(validateMocks(mocks, flowDoc).ok).toBe(true);
+    const h2 = makeHarness();
+    const s2 = new FlowSession(
+      compileFlow(flowDoc),
+      createMockEffects(h2.effects, mocks),
+      { sessionId: "s2", channel: "voice" },
+    );
+    await s2.start();
+    await flush();
+    return {
+      mocks,
+      live: h,
+      replay: h2,
+      liveVars: s.variables,
+      replayVars: s2.variables,
+    };
+  }
+
+  it("classifier none records path none and replays to onNone", async () => {
+    const r = await recordAndReplay(async () => ({ path: "none" }));
+    expect(r.mocks.nodes["pick"]![0]!.route).toEqual({ path: "none" });
+    expect(r.live.ends).toEqual(["none"]);
+    expect(r.replay.ends).toEqual(["none"]);
+  });
+
+  it("LLM_CLASSIFIER_NO_CALL records the code and replays to onError with the same code", async () => {
+    const r = await recordAndReplay(async () => {
+      throw Object.assign(new Error("no call"), {
+        code: "LLM_CLASSIFIER_NO_CALL",
+      });
+    });
+    expect(r.mocks.nodes["pick"]![0]!.route).toEqual({
+      error: "LLM_CLASSIFIER_NO_CALL",
+    });
+    expect(r.live.ends).toEqual(["error"]);
+    expect(r.replay.ends).toEqual(["error"]);
+    expect(r.replayVars["error.pick"]).toBe("LLM_CLASSIFIER_NO_CALL");
+    expect(r.liveVars["error.pick"]).toBe("LLM_CLASSIFIER_NO_CALL");
+  });
+
+  it("uncoded classifier throw records ROUTE_ERROR", async () => {
+    const r = await recordAndReplay(async () => {
+      throw new Error("boom");
+    });
+    expect(r.mocks.nodes["pick"]![0]!.route).toEqual({ error: "ROUTE_ERROR" });
+    expect(r.replay.ends).toEqual(["error"]);
+    expect(r.replayVars["error.pick"]).toBe("ROUTE_ERROR");
+  });
+
+  it("classifier abort at timeout records ROUTE_TIMEOUT", async () => {
+    const h = makeHarness();
+    const rec = createMockRecorder();
+    const fx = wrapRecording(h.effects, rec.sink, { env: {} });
+    fx.trace({
+      seq: 1,
+      stepSeq: 1,
+      nodeId: "pick",
+      type: "route",
+      phase: "enter",
+    });
+    h.effects.classify = (_req, signal) =>
+      new Promise((_res, rej) =>
+        signal.addEventListener("abort", () =>
+          rej(Object.assign(new Error("aborted"), { code: "ABORT_ERR" })),
+        ),
+      );
+    const ctl = new AbortController();
+    const p = fx.classify({} as any, ctl.signal);
+    ctl.abort();
+    await expect(p).rejects.toThrow("aborted");
+    expect(rec.mocks().nodes["pick"]![0]!.route).toEqual({
+      error: "ROUTE_TIMEOUT",
+    });
   });
 
   function chainFlow(): any {

@@ -6,6 +6,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- `FlowEffects.beforeNode(nodeId)`: an optional hook the flow interpreter awaits before it enters each node, so a step debugger can pause a run for real. Absent means no await; a rejection ends the session like any effect failure.
+- `recordReply(sessionId, text, {turnId})` records a text-only reply on runners that advertise `chatReplyRecordAvailable`. It returns `false` and sends nothing otherwise.
+
+### Changed
+
+- Flow chat replies are text only again and are recorded via `record_reply` on runners that support it (no TTS). On older runners the 0.27.2 behaviour (a speak request) stays, and its speech is cancelled when the next chat input arrives.
+
+### Fixed
+
+- A recorded flow session now replays a route that took `onNone` (mocks accept `route: {path: "none"}`) and a route whose classifier call failed (the recording keeps the error code, e.g. `LLM_CLASSIFIER_NO_CALL`, `ROUTE_TIMEOUT`, or `ROUTE_ERROR` for an uncoded error), so replay takes the same `onError` edge. A classifier call that is cancelled mid-flight (for example by barge-in or stop) is recorded as `ROUTE_TIMEOUT`, the same as http and tool calls.
+- LLM agent chat replies with `speakChatReplies: false` are now recorded in the conversation history (via `record_reply` on runners that support it).
+
 ## [0.27.2] - 2026-11-04
 
 ### Fixed

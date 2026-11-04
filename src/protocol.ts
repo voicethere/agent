@@ -73,6 +73,7 @@ export type ChildToParentMessage =
   | AgentErrorMessage
   | NodeWarningMessage
   | SendToClientMessage
+  | RecordReplyMessage
   | SendBinaryToClientMessage
   | IdleTimeoutDoneMessage
   | SessionTimeLimitDoneMessage
@@ -139,6 +140,11 @@ export interface SessionStartMessage {
    * older runners — treat as `false`.
    */
   speakControlAvailable?: boolean;
+  /**
+   * When `true`, the runner accepts `record_reply` (a text-only agent transcript row,
+   * no TTS). Absent on older runners — treat as `false`.
+   */
+  chatReplyRecordAvailable?: boolean;
   /**
    * When `true`, the runner accepts session time limit control
    * (`session_time_limit_control`) and runs the `onSessionTimeLimit` hook before it
@@ -983,6 +989,18 @@ export interface SendToClientMessage {
   type: "send_to_client";
   sessionId: string;
   payload: unknown;
+}
+
+/**
+ * Ask the runner to store a text-only agent transcript row for a chat reply (no TTS,
+ * no audio). Only sent when the runner advertises `chatReplyRecordAvailable`.
+ */
+export interface RecordReplyMessage {
+  type: "record_reply";
+  sessionId: string;
+  text: string;
+  /** The turn's id; stored on the agent row. */
+  turnId?: string;
 }
 
 /** Send raw bytes to the browser peer over a WebRTC data channel. */

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   compileFlow,
   FlowSession,
@@ -92,6 +92,48 @@ describe("listen and buffered finals", () => {
     await p;
     expect(s.variables["last.transcript"]).toBe("later");
     expect(h.ends).toEqual(["ok"]);
+  });
+});
+
+describe("fallback chat speech", () => {
+  const loop = () =>
+    doc([
+      { id: "l", type: "listen", next: "s", onNoInput: "l" },
+      { id: "s", type: "speak", text: "reply", next: "l" },
+    ]);
+  const stubChat = (h: ReturnType<typeof makeHarness>) => {
+    const cancels: ReturnType<typeof vi.fn>[] = [];
+    h.effects.chat = () => {
+      const cancel = vi.fn();
+      cancels.push(cancel);
+      return { done: new Promise<{ status: string }>(() => {}), cancel };
+    };
+    return cancels;
+  };
+
+  it("fallback chat speech of turn 1 is cancelled when turn 2 input arrives", async () => {
+    const h = makeHarness();
+    const cancels = stubChat(h);
+    const s = session(loop(), h, { channel: "chat" });
+    await s.start();
+    await s.onUserText("one");
+    expect(cancels).toHaveLength(1);
+    expect(cancels[0]).not.toHaveBeenCalled();
+    await s.onUserText("two");
+    expect(cancels).toHaveLength(2);
+    expect(cancels[0]).toHaveBeenCalledTimes(1);
+    expect(cancels[1]).not.toHaveBeenCalled();
+  });
+
+  it("stop cancels fallback chat speech", async () => {
+    const h = makeHarness();
+    const cancels = stubChat(h);
+    const s = session(loop(), h, { channel: "chat" });
+    await s.start();
+    await s.onUserText("one");
+    expect(cancels[0]).not.toHaveBeenCalled();
+    s.stop();
+    expect(cancels[0]).toHaveBeenCalledTimes(1);
   });
 });
 

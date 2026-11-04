@@ -520,6 +520,7 @@ const lastVoiceLanguageBySessionId = new Map<string, string>();
 const ttsPoseAvailableBySessionId = new Map<string, boolean>();
 /** Cached from `session_start.speakControlAvailable` until `session_end`. */
 const speakControlAvailableBySessionId = new Map<string, boolean>();
+const chatReplyRecordAvailableBySessionId = new Map<string, boolean>();
 /** Cached from `session_start.sessionTimeLimitAvailable` until `session_end`. */
 const sessionTimeLimitAvailableBySessionId = new Map<string, boolean>();
 /** Sessions already warned that session time limit control is unavailable. */
@@ -1406,6 +1407,10 @@ async function handleParentMessage(
         message.sessionId,
         message.speakControlAvailable ?? false,
       );
+      chatReplyRecordAvailableBySessionId.set(
+        message.sessionId,
+        message.chatReplyRecordAvailable ?? false,
+      );
       sessionTimeLimitAvailableBySessionId.set(
         message.sessionId,
         message.sessionTimeLimitAvailable ?? false,
@@ -1553,6 +1558,7 @@ async function handleParentMessage(
       lastVoiceLanguageBySessionId.delete(message.sessionId);
       ttsPoseAvailableBySessionId.delete(message.sessionId);
       speakControlAvailableBySessionId.delete(message.sessionId);
+      chatReplyRecordAvailableBySessionId.delete(message.sessionId);
       sessionTimeLimitAvailableBySessionId.delete(message.sessionId);
       clearPendingSpeakForSession(message.sessionId, "session_ended");
       await (handlers.onClientLeave ?? handlers.onSessionEnd)?.({
@@ -1929,6 +1935,7 @@ export function resetAgentIpcStateForTests(): void {
   lastVoiceLanguageBySessionId.clear();
   ttsPoseAvailableBySessionId.clear();
   speakControlAvailableBySessionId.clear();
+  chatReplyRecordAvailableBySessionId.clear();
   speakControlWarnedSessionIds.clear();
   sessionTimeLimitAvailableBySessionId.clear();
   sessionTimeLimitWarnedSessionIds.clear();
@@ -3248,6 +3255,28 @@ export function setPlayPose(
   pose: MixPose,
 ): Promise<PlayPoseResult> {
   return sendPlayPose(playId, pose);
+}
+
+/**
+ * Ask the runner to store a text-only agent row for a chat reply (no TTS). Returns
+ * `false` (nothing sent) when the runner does not advertise `chatReplyRecordAvailable`
+ * or the text is blank; the caller then keeps its fallback.
+ */
+export function recordReply(
+  sessionId: string,
+  text: string,
+  o?: { turnId?: string },
+): boolean {
+  if (!(chatReplyRecordAvailableBySessionId.get(sessionId) ?? false))
+    return false;
+  if (text.trim() === "") return false;
+  sendParentMessage({
+    type: "record_reply",
+    sessionId,
+    text,
+    ...(o?.turnId ? { turnId: o.turnId } : {}),
+  });
+  return true;
 }
 
 /** Send a JSON payload to the browser peer via the runner parent. */

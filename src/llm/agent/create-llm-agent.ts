@@ -6,6 +6,7 @@ import {
   cancelSpeech,
   getSessionUser,
   parseChatText,
+  recordReply,
   sendToClient,
   setAgentState,
   setBargeIn,
@@ -1279,6 +1280,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         text,
       });
       sendToClient(s.sessionId, { type: "chat_reply", text });
+      if (!speakChat && text.trim() !== "")
+        recordReply(s.sessionId, text, { turnId: t.turnId });
     }
     if (t.source === "voice" && t.spoken.length > 0) {
       sendToClient(s.sessionId, {

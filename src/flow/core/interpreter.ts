@@ -382,7 +382,7 @@ export class FlowSession {
           const text = this.render(node.text);
           this.history.push({ role: "assistant", text });
           if (this.channel === "chat") {
-            this.fx.chat?.(text);
+            this.fx.chat?.(text, { turnId: this.turnId });
           } else {
             const h = this.fx.speak(text, {
               interruptible: node.interruptible,
@@ -461,7 +461,7 @@ export class FlowSession {
             const text = this.render(node.text);
             this.history.push({ role: "assistant", text });
             if (this.channel === "chat") {
-              this.fx.chat?.(text);
+              this.fx.chat?.(text, { turnId: this.turnId });
             } else {
               const h = this.fx.speak(text, {
                 interruptible: false,
@@ -764,7 +764,7 @@ export class FlowSession {
           this.cancelCurrent = undefined;
           if (cancelled || this.stale(seq)) return;
           if (this.channel === "chat" && spoken.length > 0)
-            this.fx.chat?.(spoken.join(" "));
+            this.fx.chat?.(spoken.join(" "), { turnId: this.turnId });
           if (handles.length > 0) {
             this.cancelCurrent = () => {
               for (const h of handles) h.cancel();

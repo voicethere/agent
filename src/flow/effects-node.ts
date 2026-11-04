@@ -87,8 +87,11 @@ export function createNodeEffects(o: NodeEffectsOptions): FlowEffects {
         cancel: () => h.cancel(),
       };
     },
-    chat(text) {
+    chat(text, co) {
       sendToClient(sid, { type: "chat_reply", text });
+      // The runner writes the agent transcript row from the speak request, as for
+      // an LLM agent's chat reply (`speakChatReplies`, default true).
+      speak(sid, text, co?.turnId ? { turnId: co.turnId } : undefined);
     },
     async http(req: FlowHttpRequest, signal): Promise<FlowHttpResponse> {
       const headers: Record<string, string> = {};

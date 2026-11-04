@@ -12,6 +12,7 @@ export function makeHarness(opts: { autoSpeak?: boolean } = {}) {
   const calls: string[] = [];
   const speaks: { text: string; turnId: string; interruptible: boolean }[] = [];
   const chats: string[] = [];
+  const chatTurnIds: (string | undefined)[] = [];
   const traces: FlowTraceEvent[] = [];
   const ends: string[] = [];
   const pending: Deferred[] = [];
@@ -40,9 +41,10 @@ export function makeHarness(opts: { autoSpeak?: boolean } = {}) {
         },
       };
     },
-    chat(text) {
+    chat(text, o) {
       calls.push("chat");
       chats.push(text);
+      chatTurnIds.push(o?.turnId);
     },
     http: () => Promise.reject(new Error("unused")),
     tool: () => Promise.reject(new Error("unused")),
@@ -77,6 +79,7 @@ export function makeHarness(opts: { autoSpeak?: boolean } = {}) {
     calls,
     speaks,
     chats,
+    chatTurnIds,
     traces,
     logs,
     ends,

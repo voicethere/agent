@@ -300,4 +300,38 @@ describe("createFlowAgent", () => {
       .find((p) => p.type === "chat_reply")!;
     expect(reply.text).toBe("Support it is.");
   });
+
+  it("a chat reply is also sent as a speak request, so the runner records the agent row", async () => {
+    boot();
+    await vi.waitFor(() => expect(sent("speak")).toHaveLength(1));
+    played(sent("speak")[0]!.requestId);
+    await vi.waitFor(() =>
+      expect(
+        sent("log").some(
+          (m) =>
+            m.message === "flow_step" &&
+            (m.fields as Msg).nodeId === "ask" &&
+            (m.fields as Msg).phase === "enter",
+        ),
+      ).toBe(true),
+    );
+    capture.emit({
+      type: "data_channel_message",
+      sessionId: SESSION,
+      payload: JSON.stringify({ type: "chat", text: "my app is broken" }),
+    });
+    await vi.waitFor(() => expect(sent("speak")).toHaveLength(2));
+    const replySpeak = sent("speak")[1]!;
+    expect(replySpeak.text).toBe("Support it is.");
+    expect(String(replySpeak.turnId).startsWith(`${SESSION}:`)).toBe(true);
+    const order = sent()
+      .filter(
+        (m) =>
+          m.type === "speak" ||
+          (m.type === "send_to_client" &&
+            (m.payload as Msg).type === "chat_reply"),
+      )
+      .map((m) => m.type);
+    expect(order).toEqual(["speak", "send_to_client", "speak"]);
+  });
 });

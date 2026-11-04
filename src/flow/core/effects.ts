@@ -61,7 +61,8 @@ export interface FlowEffects {
     text: string,
     o: { interruptible: boolean; turnId: string; filler?: boolean },
   ): FlowSpeakHandle;
-  chat?(text: string): void;
+  /** A chat-channel reply. `turnId` groups the replies of one turn into one transcript row. */
+  chat?(text: string, o?: { turnId?: string }): void;
   http(req: FlowHttpRequest, signal: AbortSignal): Promise<FlowHttpResponse>;
   tool(
     source: string,

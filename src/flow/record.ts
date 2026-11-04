@@ -1,4 +1,5 @@
 import { createRedactor, secretValuesFromEnv } from "../llm/agent/redact.js";
+import { wasCancelled } from "./core/abort.js";
 import type { FlowEffects } from "./core/effects.js";
 import type { FlowMockCase, FlowMocks } from "./core/mocks.js";
 
@@ -44,6 +45,8 @@ function codeOf(err: unknown): string | undefined {
  * Passes every call through and appends its result as case `recorded-<n>`.
  * Values are redacted (secret values from the env, sensitive keys, personal
  * data) before they reach the sink; auth and cookie headers are dropped.
+ * Calls the interpreter cancelled (stop) are not recorded: they have no outcome
+ * to replay. Timeouts are recorded as `*_TIMEOUT`.
  */
 export function wrapRecording(
   effects: FlowEffects,
@@ -72,6 +75,7 @@ export function wrapRecording(
       const nodeId = current;
       try {
         const res = await effects.http(req, signal);
+        if (wasCancelled(signal)) return res;
         if (signal.aborted) {
           // The interpreter gave up (timeout): replay must take that path.
           record(nodeId, { http: { error: "HTTP_TIMEOUT" } });
@@ -91,7 +95,10 @@ export function wrapRecording(
         return res;
       } catch (err) {
         const code = codeOf(err);
-        if (code === "HTTP_TIMEOUT" || code === "HTTP_NETWORK")
+        if (
+          !wasCancelled(signal) &&
+          (code === "HTTP_TIMEOUT" || code === "HTTP_NETWORK")
+        )
           record(nodeId, { http: { error: code } });
         throw err;
       }
@@ -99,6 +106,7 @@ export function wrapRecording(
     async tool(source, tool, args, signal, o) {
       const nodeId = current;
       const res = await effects.tool(source, tool, args, signal, o);
+      if (wasCancelled(signal)) return res;
       if (signal.aborted) {
         record(nodeId, { mcp: { error: "MCP_TIMEOUT" } });
         return res;
@@ -123,7 +131,9 @@ export function wrapRecording(
       const inner = effects.llm(req, signal);
       return (async function* () {
         for await (const ev of inner) {
-          if (ev.type === "done" && signal.aborted)
+          if (ev.type === "done" && wasCancelled(signal)) {
+            // cancelled by stop: nothing to replay
+          } else if (ev.type === "done" && signal.aborted)
             record(nodeId, { llm: { error: "LLM_TIMEOUT" } });
           else if (ev.type === "done")
             record(nodeId, {
@@ -140,15 +150,17 @@ export function wrapRecording(
         res = await effects.classify(req, signal);
       } catch (err) {
         // Same fallback as the interpreter's errorCode, so replay takes the same edge.
-        record(nodeId, {
-          route: {
-            error: signal.aborted
-              ? "ROUTE_TIMEOUT"
-              : codeOf(err) || "ROUTE_ERROR",
-          },
-        });
+        if (!wasCancelled(signal))
+          record(nodeId, {
+            route: {
+              error: signal.aborted
+                ? "ROUTE_TIMEOUT"
+                : codeOf(err) || "ROUTE_ERROR",
+            },
+          });
         throw err;
       }
+      if (wasCancelled(signal)) return res;
       if (signal.aborted) record(nodeId, { route: { error: "ROUTE_TIMEOUT" } });
       else record(nodeId, { route: { path: res.path } });
       return res;

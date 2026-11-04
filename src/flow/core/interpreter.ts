@@ -1,4 +1,5 @@
 import { renderValue } from "./compile.js";
+import { cancelReason } from "./abort.js";
 import type { CompiledFlow, CompiledNode } from "./compile.js";
 import type {
   FlowEffects,
@@ -335,7 +336,7 @@ export class FlowSession {
       }, timeoutMs);
       this.cancelCurrent = () => {
         cancelTimer();
-        ctl.abort();
+        ctl.abort(cancelReason());
         resolve({ k: "cancelled" });
       };
       let p: Promise<T>;
@@ -526,7 +527,7 @@ export class FlowSession {
               }, node.timeoutMs);
               this.cancelCurrent = () => {
                 cancelTimer();
-                ctl.abort();
+                ctl.abort(cancelReason());
                 resolve({ k: "cancelled" });
               };
               let p: ReturnType<FlowEffects["classify"]>;
@@ -710,7 +711,7 @@ export class FlowSession {
           }, LLM_NODE_TIMEOUT_MS);
           this.cancelCurrent = () => {
             cancelled = true;
-            ctl.abort();
+            ctl.abort(cancelReason());
             abortWake();
             for (const h of handles) h.cancel();
           };

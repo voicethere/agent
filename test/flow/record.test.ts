@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { cancelReason, wasCancelled } from "../../src/flow/core/abort.js";
 import {
   compileFlow,
   createMockEffects,
@@ -216,8 +217,13 @@ describe("wrapRecording", () => {
   /** Records a live run with `classify`, then replays the recording and compares the outcome. */
   async function recordAndReplay(
     classify: (signal: AbortSignal) => Promise<{ path: string }>,
+    drive?: (
+      h: ReturnType<typeof makeHarness>,
+      s: FlowSession,
+    ) => Promise<void>,
+    routeDoc: any = routeFlow(),
   ) {
-    const flowDoc = validateFlow(routeFlow()).flow!;
+    const flowDoc = validateFlow(routeDoc).flow!;
     const h = makeHarness();
     h.effects.classify = (_req, signal) => classify(signal);
     const rec = createMockRecorder();
@@ -226,8 +232,11 @@ describe("wrapRecording", () => {
       sessionId: "s1",
       channel: "voice",
     });
-    await s.start();
-    await flush();
+    if (drive) await drive(h, s);
+    else {
+      await s.start();
+      await flush();
+    }
     const mocks = rec.mocks();
     expect(validateMocks(mocks, flowDoc).ok).toBe(true);
     const h2 = makeHarness();
@@ -302,6 +311,140 @@ describe("wrapRecording", () => {
     expect(rec.mocks().nodes["pick"]![0]!.route).toEqual({
       error: "ROUTE_TIMEOUT",
     });
+  });
+
+  const hangUntilAbort = (signal: AbortSignal) =>
+    new Promise<{ path: string }>((_res, rej) =>
+      signal.addEventListener("abort", () =>
+        rej(Object.assign(new Error("aborted"), { code: "ABORT_ERR" })),
+      ),
+    );
+
+  async function stopDuringClassify(
+    classify: (signal: AbortSignal) => Promise<{ path: string }>,
+  ) {
+    const flowDoc = validateFlow(routeFlow()).flow!;
+    const h = makeHarness();
+    h.effects.classify = (_req, signal) => classify(signal);
+    const rec = createMockRecorder();
+    const fx = wrapRecording(h.effects, rec.sink, { env: {} });
+    const s = new FlowSession(compileFlow(flowDoc), fx, {
+      sessionId: "s1",
+      channel: "voice",
+    });
+    void s.start();
+    await flush();
+    s.stop();
+    await flush();
+    expect(validateMocks(rec.mocks(), flowDoc).ok).toBe(true);
+    return rec.mocks();
+  }
+
+  it("a classify cancelled by stop records nothing", async () => {
+    const m = await stopDuringClassify(hangUntilAbort);
+    expect(m.nodes["pick"]).toBeUndefined();
+  });
+
+  it("a classify that resolves after stop records nothing", async () => {
+    const m = await stopDuringClassify(
+      (signal) =>
+        new Promise((resolve) =>
+          signal.addEventListener("abort", () => resolve({ path: "billing" })),
+        ),
+    );
+    expect(m.nodes["pick"]).toBeUndefined();
+  });
+
+  it("http / mcp / llm aborted with cancelReason() record nothing", async () => {
+    const h = makeHarness();
+    const rec = createMockRecorder();
+    const fx = wrapRecording(h.effects, rec.sink, { env: {} });
+    const enter = (nodeId: string, type: any) =>
+      fx.trace({ seq: 1, stepSeq: 1, nodeId, type, phase: "enter" });
+    const abortedSignal = () => {
+      const ctl = new AbortController();
+      ctl.abort(cancelReason());
+      return ctl.signal;
+    };
+    enter("call", "http");
+    h.effects.http = async () => ({ status: 200, body: {} });
+    await fx.http(
+      { method: "GET", url: "https://x.example" } as any,
+      abortedSignal(),
+    );
+    h.effects.http = async () => {
+      throw Object.assign(new Error("t"), { code: "HTTP_TIMEOUT" });
+    };
+    await expect(
+      fx.http(
+        { method: "GET", url: "https://x.example" } as any,
+        abortedSignal(),
+      ),
+    ).rejects.toThrow("t");
+    enter("tool", "mcp");
+    h.effects.tool = async () => ({ content: "{}" });
+    await fx.tool("crm", "lookup", {}, abortedSignal());
+    enter("think", "llm");
+    h.effects.llm = async function* () {
+      yield { type: "done" as const, text: "late" };
+    };
+    for await (const _ of fx.llm({} as any, abortedSignal())) void _;
+    expect(rec.mocks().nodes).toEqual({});
+  });
+
+  it("classifier timeout round trip", async () => {
+    const d = routeFlow();
+    d.nodes[0].timeoutMs = 1000;
+    const r = await recordAndReplay(
+      hangUntilAbort,
+      async (h, s) => {
+        const started = s.start();
+        await flush();
+        h.advance(1000);
+        await started;
+        await flush();
+      },
+      d,
+    );
+    expect(r.mocks.nodes["pick"]).toEqual([
+      { name: "recorded-1", route: { error: "ROUTE_TIMEOUT" } },
+    ]);
+    expect(r.replay.ends).toEqual(["error"]);
+    expect(r.replayVars["error.pick"]).toBe("ROUTE_TIMEOUT");
+  });
+
+  it("timeout then stop records the timeout once", async () => {
+    const d = routeFlow();
+    d.nodes[0].timeoutMs = 1000;
+    const r = await recordAndReplay(
+      hangUntilAbort,
+      async (h, s) => {
+        const started = s.start();
+        await flush();
+        h.advance(1000);
+        await started;
+        s.stop();
+        await flush();
+      },
+      d,
+    );
+    expect(r.mocks.nodes["pick"]).toHaveLength(1);
+    expect(r.mocks.nodes["pick"]![0]!.route).toEqual({
+      error: "ROUTE_TIMEOUT",
+    });
+  });
+
+  it("wasCancelled is true only for the interpreter's cancel reason", () => {
+    const a = new AbortController();
+    expect(wasCancelled(a.signal)).toBe(false);
+    a.abort(cancelReason());
+    expect(wasCancelled(a.signal)).toBe(true);
+    const b = new AbortController();
+    b.abort();
+    expect(wasCancelled(b.signal)).toBe(false);
+    const c = new AbortController();
+    c.abort(new DOMException("x", "AbortError"));
+    expect(wasCancelled(c.signal)).toBe(false);
   });
 
   function chainFlow(): any {

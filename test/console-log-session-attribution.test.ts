@@ -1,5 +1,5 @@
 import { fork, type ChildProcess } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -14,8 +14,9 @@ const FIXTURES = join(__dirname, "fixtures");
 const SANDBOX_DIR = join(AGENT_ROOT, "src/sandbox");
 const LOADER = join(SANDBOX_DIR, "loader-entry.js");
 const WARNING_FORWARDER = join(SANDBOX_DIR, "warning-forwarder.cjs");
-const TMP_DIR = join(AGENT_ROOT, "test", ".tmp", "console-attribution");
-const BUNDLE = join(TMP_DIR, "console-attribution-agent.js");
+const TEST_TMP_DIR = join(AGENT_ROOT, "test", ".tmp");
+let TMP_DIR: string;
+let BUNDLE: string;
 const OLD_RUNTIME_BUNDLE = join(
   FIXTURES,
   "console-attribution-old-runtime.mjs",
@@ -76,7 +77,9 @@ function sessionStart(sessionId: string) {
 
 describe("console.* session attribution", () => {
   beforeAll(async () => {
-    mkdirSync(TMP_DIR, { recursive: true });
+    mkdirSync(TEST_TMP_DIR, { recursive: true });
+    TMP_DIR = mkdtempSync(join(TEST_TMP_DIR, "console-attribution-"));
+    BUNDLE = join(TMP_DIR, "console-attribution-agent.js");
     await buildAgentBundle({
       cwd: AGENT_ROOT,
       entry: "test/fixtures/console-attribution-agent.ts",
@@ -85,7 +88,7 @@ describe("console.* session attribution", () => {
   }, 30_000);
 
   afterAll(() => {
-    rmSync(TMP_DIR, { recursive: true, force: true });
+    if (TMP_DIR) rmSync(TMP_DIR, { recursive: true, force: true });
   });
 
   it("attributes each line to the session whose handler produced it", async () => {

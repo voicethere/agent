@@ -449,6 +449,34 @@ describe("beforeNode gate", () => {
     expect(h.calls).toEqual([]);
   });
 
+  it("user text while parked before a listen node is buffered and consumed once", async () => {
+    const h = makeHarness();
+    const { gates, calls } = gated(h);
+    const d = doc([
+      { id: "a", type: "speak", text: "Hi", next: "b" },
+      { id: "b", type: "listen", next: "c", onNoInput: "b" },
+      { id: "c", type: "end", reason: "done" },
+    ]);
+    const s = session(d, h);
+    const p = s.start();
+    await flush();
+    gates.get("a")!();
+    await flush();
+    expect(calls).toEqual(["a", "b"]);
+    await s.onUserText("hi");
+    gates.get("b")!();
+    await flush();
+    gates.get("c")?.();
+    await p;
+    await flush();
+    expect(calls).toEqual(["a", "b", "c"]);
+    expect(s.variables["last.transcript"]).toBe("hi");
+    expect(
+      h.traces.filter((t) => t.nodeId === "b" && t.phase === "exit"),
+    ).toHaveLength(1);
+    expect(h.ends).toEqual(["done"]);
+  });
+
   it("no beforeNode: runs straight through", async () => {
     const h = makeHarness();
     h.effects.http = async () => ({ status: 200, headers: {}, body: {} });

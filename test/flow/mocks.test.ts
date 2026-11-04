@@ -140,6 +140,61 @@ describe("validateMocks", () => {
 });
 
 describe("createMockEffects", () => {
+  it("passes beforeNode through and holds the http mock until released", async () => {
+    const h = makeHarness();
+    const gates = new Map<string, () => void>();
+    const calls: string[] = [];
+    h.effects.beforeNode = (id) => {
+      calls.push(id);
+      return new Promise<void>((r) => gates.set(id, r));
+    };
+    const d = {
+      version: 1,
+      start: "a",
+      models: { default: model },
+      nodes: [
+        { id: "a", type: "speak", text: "Hi", next: "b" },
+        {
+          id: "b",
+          type: "http",
+          method: "GET",
+          url: "https://api.example.com/c",
+          map: {},
+          next: "c",
+          onError: "c",
+        },
+        { id: "c", type: "end", reason: "done" },
+      ],
+    };
+    const mocks: FlowMocks = {
+      version: 1,
+      nodes: { b: [{ name: "ok", http: { status: 200, body: {} } }] },
+    };
+    const fx = createMockEffects(h.effects, mocks);
+    const s = new FlowSession(compileFlow(flowOf(d)), fx, {
+      sessionId: "s1",
+      channel: "voice",
+    });
+    void s.start();
+    await flush();
+    expect(calls).toEqual(["a"]);
+    gates.get("a")!();
+    await flush();
+    expect(calls).toEqual(["a", "b"]);
+    const httpExit = () =>
+      h.traces.find((t) => t.nodeId === "b" && t.phase === "exit");
+    expect(httpExit()).toBeUndefined();
+    gates.get("b")!();
+    await flush();
+    expect(httpExit()?.edge).toBe("c");
+  });
+
+  it("has no beforeNode when the base has none", () => {
+    const h = makeHarness();
+    const fx = createMockEffects(h.effects, { version: 1, nodes: {} });
+    expect("beforeNode" in fx).toBe(false);
+  });
+
   it("runs a whole flow on mocks without keys or network", async () => {
     const { h } = await run(full);
     expect(h.ends).toEqual(["ok"]);

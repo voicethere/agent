@@ -8,7 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Fixed
 
-- Flow agents in chat now send each reply as a speak request as well as a `chat_reply`, the same way an LLM agent does with `speakChatReplies` (default true). The runner writes a conversation history row only from a speak request, so before this a flow's chat replies were missing from the session's conversation history and only the greeting was stored. The replies of one turn share the turn's `turnId`.
+- Flow agents in chat now send each reply as a speak request as well as a `chat_reply`, the same way an LLM agent does with `speakChatReplies` (default true). The runner writes a conversation history row only from a speak request, so before this a flow's chat replies were missing from the session's conversation history and only the greeting was stored. The replies of one turn share the turn's `turnId`. Flow chat replies are now also spoken, and metered as TTS like LLM agent chat replies.
 
 ## [0.27.1] - 2026-11-04
 

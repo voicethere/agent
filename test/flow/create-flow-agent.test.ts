@@ -323,7 +323,7 @@ describe("createFlowAgent", () => {
     await vi.waitFor(() => expect(sent("speak")).toHaveLength(2));
     const replySpeak = sent("speak")[1]!;
     expect(replySpeak.text).toBe("Support it is.");
-    expect(typeof replySpeak.turnId).toBe("string");
+    expect(String(replySpeak.turnId).startsWith(`${SESSION}:`)).toBe(true);
     const order = sent()
       .filter(
         (m) =>

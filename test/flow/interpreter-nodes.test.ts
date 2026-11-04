@@ -385,6 +385,47 @@ describe("llm node", () => {
     ]);
   });
 
+  it("chat channel: an llm reply carries the turn id", async () => {
+    const h = makeHarness();
+    h.effects.llm = () =>
+      (async function* () {
+        yield { type: "sentence", text: "One." } as const;
+        yield { type: "sentence", text: "Two." } as const;
+        yield { type: "sentence", text: "Three." } as const;
+        yield { type: "done", text: "One. Two. Three." } as const;
+      })();
+    await session(flow(), h, { channel: "chat" }).start();
+    expect(h.chatTurnIds).toHaveLength(1);
+    expect(h.chatTurnIds[0]?.startsWith("s1:")).toBe(true);
+  });
+
+  it("chat channel: a speak node reply carries the turn id", async () => {
+    const h = makeHarness();
+    await session(
+      doc([
+        { id: "a", type: "speak", text: "Hello.", next: "e" },
+        { id: "e", type: "end", reason: "ok" },
+      ]),
+      h,
+      { channel: "chat" },
+    ).start();
+    expect(h.chats).toEqual(["Hello."]);
+    expect(h.chatTurnIds).toHaveLength(1);
+    expect(h.chatTurnIds[0]?.startsWith("s1:")).toBe(true);
+  });
+
+  it("chat channel: an end node reply carries the turn id", async () => {
+    const h = makeHarness();
+    await session(
+      doc([{ id: "e", type: "end", reason: "ok", text: "Bye." }]),
+      h,
+      { channel: "chat" },
+    ).start();
+    expect(h.chats).toEqual(["Bye."]);
+    expect(h.chatTurnIds).toHaveLength(1);
+    expect(h.chatTurnIds[0]?.startsWith("s1:")).toBe(true);
+  });
+
   it("stop while a sentence event is already resolved: nothing is spoken", async () => {
     const h = makeHarness();
     let s!: FlowSession;

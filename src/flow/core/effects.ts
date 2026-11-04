@@ -61,7 +61,7 @@ export interface FlowEffects {
     text: string,
     o: { interruptible: boolean; turnId: string; filler?: boolean },
   ): FlowSpeakHandle;
-  /** A chat-channel reply. `turnId` groups the replies of one turn into one transcript row. */
+  /** A chat-channel reply. `turnId` is the turn's id; the runner stores it on each agent row it writes for this reply. */
   chat?(text: string, o?: { turnId?: string }): void;
   http(req: FlowHttpRequest, signal: AbortSignal): Promise<FlowHttpResponse>;
   tool(

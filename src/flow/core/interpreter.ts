@@ -376,6 +376,11 @@ export class FlowSession {
       }
       const index = this.nodeIndex;
       const node = this.compiled.nodes[index]!;
+      if (this.fx.beforeNode) {
+        const gate = this.stepSeq;
+        await this.fx.beforeNode(node.id);
+        if (this._ended || this.stepSeq !== gate || this.waiting) return;
+      }
       const seq = ++this.stepSeq;
       this.stepsThisTurn++;
       const t0 = this.fx.clock.now();

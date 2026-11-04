@@ -8,6 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Added
 
+- `FlowEffects.beforeNode(nodeId)`: an optional hook the flow interpreter awaits before it enters each node, so a step debugger can pause a run for real. Absent means no await; a rejection ends the session like any effect failure.
 - `recordReply(sessionId, text, {turnId})` records a text-only reply on runners that advertise `chatReplyRecordAvailable`. It returns `false` and sends nothing otherwise.
 
 ### Changed

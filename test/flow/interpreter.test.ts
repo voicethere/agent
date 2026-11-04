@@ -380,3 +380,93 @@ describe("FlowSession", () => {
     expect(Object.hasOwn(s2.variables, "last.language")).toBe(false);
   });
 });
+
+describe("beforeNode gate", () => {
+  const stepFlow = (): any =>
+    doc([
+      { id: "a", type: "speak", text: "Hi", next: "b" },
+      {
+        id: "b",
+        type: "http",
+        method: "GET",
+        url: "https://api.example.com/x",
+        map: {},
+        next: "c",
+        onError: "c",
+      },
+      { id: "c", type: "end", reason: "done" },
+    ]);
+
+  function gated(h: ReturnType<typeof makeHarness>) {
+    const gates = new Map<string, () => void>();
+    const calls: string[] = [];
+    h.effects.beforeNode = (id) => {
+      calls.push(id);
+      return new Promise<void>((resolve) => gates.set(id, resolve));
+    };
+    return { gates, calls };
+  }
+
+  it("beforeNode is awaited once per node in order", async () => {
+    const h = makeHarness();
+    let httpCalls = 0;
+    h.effects.http = async () => {
+      httpCalls++;
+      return { status: 200, headers: {}, body: {} };
+    };
+    const { gates, calls } = gated(h);
+    const s = session(stepFlow(), h);
+    const p = s.start();
+    await flush();
+    expect(calls).toEqual(["a"]);
+    gates.get("a")!();
+    await flush();
+    expect(calls).toEqual(["a", "b"]);
+    expect(httpCalls).toBe(0);
+    gates.get("b")!();
+    await flush();
+    expect(httpCalls).toBe(1);
+    expect(calls).toEqual(["a", "b", "c"]);
+    expect(h.ends).toEqual([]);
+    gates.get("c")!();
+    await p;
+    await flush();
+    expect(h.ends).toEqual(["done"]);
+    expect(calls).toEqual(["a", "b", "c"]);
+  });
+
+  it("stop() while parked: resolving the gate runs nothing", async () => {
+    const h = makeHarness();
+    const { gates } = gated(h);
+    const s = session(stepFlow(), h);
+    const p = s.start();
+    await flush();
+    s.stop();
+    gates.get("a")!();
+    await p;
+    await flush();
+    expect(h.traces.filter((t) => t.phase === "enter")).toEqual([]);
+    expect(h.calls).toEqual([]);
+  });
+
+  it("no beforeNode: runs straight through", async () => {
+    const h = makeHarness();
+    h.effects.http = async () => ({ status: 200, headers: {}, body: {} });
+    await session(stepFlow(), h).start();
+    await flush();
+    expect(h.ends).toEqual(["done"]);
+  });
+
+  it("beforeNode rejecting ends the session through the effect-failure path", async () => {
+    const h = makeHarness();
+    h.effects.beforeNode = () => Promise.reject(new Error("gate broke"));
+    await session(stepFlow(), h).start();
+    await flush();
+    expect(h.ends).toEqual(["error"]);
+    expect(
+      h.traces.some(
+        (t) => t.phase === "exit" && t.error === "FLOW_EFFECT_ERROR",
+      ),
+    ).toBe(true);
+  });
+});

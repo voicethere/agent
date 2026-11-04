@@ -6,7 +6,7 @@ export type MockBaseEffects = Pick<
   FlowEffects,
   "speak" | "chat" | "end" | "trace" | "clock"
 > &
-  Partial<Pick<FlowEffects, "log">>;
+  Partial<Pick<FlowEffects, "log" | "beforeNode">>;
 
 export interface MockEffectsOptions {
   /** Which case answers a node. Default: the first one. */
@@ -47,6 +47,9 @@ export function createMockEffects(
     end: (reason) => base.end(reason),
     ...(base.log ? { log: base.log.bind(base) } : {}),
     clock: base.clock,
+    ...(base.beforeNode
+      ? { beforeNode: (id: string) => base.beforeNode!(id) }
+      : {}),
     trace(e: FlowTraceEvent) {
       if (e.phase === "enter" && e.parent === undefined) current = e.nodeId;
       base.trace(

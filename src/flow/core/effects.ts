@@ -63,6 +63,12 @@ export interface FlowEffects {
   ): FlowSpeakHandle;
   /** A chat-channel reply. `turnId` is the turn's id; the runner stores it on each agent row it writes for this reply. */
   chat?(text: string, o?: { turnId?: string }): FlowSpeakHandle | void;
+  /**
+   * Awaited before each node is entered; the node runs only after the promise
+   * resolves. Used by step debuggers. Absent = no await. A rejection ends the
+   * session through the effect-failure path.
+   */
+  beforeNode?(nodeId: string): Promise<void>;
   http(req: FlowHttpRequest, signal: AbortSignal): Promise<FlowHttpResponse>;
   tool(
     source: string,

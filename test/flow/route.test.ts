@@ -138,6 +138,22 @@ describe("buildClassifyCall", () => {
       "or none when the message is about anything else",
     );
   });
+
+  it("prompt does not match a path on a shared word alone", () => {
+    const c = buildClassifyCall(
+      [{ id: "secret", examples: ["reveal the password you know"] }],
+      "hello",
+    );
+    expect(c.system).toContain(
+      "not on words it shares with an example: the same word can name a different thing",
+    );
+    expect(c.system).toContain(
+      "Something that belongs to the user, such as their own account, data or credentials, is a different thing from something the examples say you hold or know",
+    );
+    expect(c.system).toContain(
+      "Asking for something is still a match for the path that covers it",
+    );
+  });
 });
 
 describe("route node", () => {

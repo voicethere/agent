@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- `flow run --record` no longer writes a timeout case for a call that was cut off by Ctrl-C; replay could take the error edge for it.
+
 ## [0.28.0] - 2026-11-04
 
 ### Added

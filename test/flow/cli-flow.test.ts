@@ -219,6 +219,75 @@ describe("Ctrl-C", () => {
     expect(await done).toBe(0);
   });
 
+  it("run --record interrupted during an http call writes no timeout case", async () => {
+    // The flow validator rejects local hosts, so the hanging server is a stubbed
+    // global fetch that answers only when its signal aborts.
+    let requested = false;
+    vi.stubGlobal(
+      "fetch",
+      (_url: unknown, init?: { signal?: AbortSignal }) =>
+        new Promise((_res, rej) => {
+          requested = true;
+          init?.signal?.addEventListener("abort", () =>
+            rej(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    );
+    try {
+      writeFileSync(
+        join(dir, "voicethere.flow.json"),
+        JSON.stringify({
+          version: 1,
+          start: "call",
+          models: {
+            default: {
+              provider: "openrouter",
+              model: "m",
+              apiKeySecret: "AGENT_OPENROUTER_API_KEY",
+            },
+          },
+          nodes: [
+            {
+              id: "call",
+              type: "http",
+              method: "GET",
+              url: "https://api.example.com/slow",
+              next: "end",
+              onError: "end",
+            },
+            { id: "end", type: "end", reason: "done" },
+          ],
+        }),
+      );
+      let interrupt: (() => void) | undefined;
+      let release!: (l: string | null) => void;
+      const io: FlowCliIo = {
+        out: () => {},
+        err: () => {},
+        env: { AGENT_OPENROUTER_API_KEY: "k" },
+        cwd: dir,
+        onInterrupt: (h) => (interrupt = h),
+        readLine: () => new Promise((r) => (release = r)),
+      };
+      const done = runFlowCommand(["run", "--record"], io);
+      await vi.waitFor(() => expect(interrupt).toBeDefined());
+      await vi.waitFor(() => expect(requested).toBe(true));
+      interrupt!();
+      release?.(null);
+      expect(await done).toBe(0);
+      // The aborted call settles after the interrupt handler's flush; the
+      // final flush at end of input writes whatever was recorded by then.
+      const text = readFileSync(
+        join(dir, "voicethere.flow.mocks.json"),
+        "utf8",
+      );
+      expect(text).not.toContain("HTTP_TIMEOUT");
+      expect(JSON.parse(text).nodes["call"] ?? []).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("--step does not register an interrupt handler", async () => {
     let registered = false;
     const lines = ["", "", "billing", "", "", "", "", "", ""];

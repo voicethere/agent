@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- `recordReply(sessionId, text, {turnId})` records a text-only reply on runners that advertise `chatReplyRecordAvailable`. It returns `false` and sends nothing otherwise.
+
 ### Changed
 
 - Flow chat replies are text only again and are recorded via `record_reply` on runners that support it (no TTS). On older runners the 0.27.2 behaviour (a speak request) stays, and its speech is cancelled when the next chat input arrives.

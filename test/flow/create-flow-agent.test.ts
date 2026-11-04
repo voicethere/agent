@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { recordReply } from "../../src/index.js";
 import { createFlowAgent } from "../../src/flow/create-flow-agent.js";
 import { openai } from "../../src/llm/openai.js";
 import {
@@ -124,6 +125,11 @@ describe("createFlowAgent", () => {
       status: "played",
       playedMs: 100,
     });
+
+  it("package entry exports recordReply", () => {
+    expect(recordReply("unknown-session", "hi")).toBe(false);
+    expect(sent("record_reply")).toHaveLength(0);
+  });
 
   it("an invalid flow throws FLOW_INVALID with the first issues", () => {
     const bad = baseFlow();

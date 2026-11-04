@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-04
+
 ### Fixed
 
 - `wrapRecording` no longer records a call the flow session cancelled (`stop()`) as a `*_TIMEOUT` case. A caller that flushed the recorder after the cancelled call settled got a timeout case that replay could pick. Timeouts are still recorded. `flow run --record` was not affected.

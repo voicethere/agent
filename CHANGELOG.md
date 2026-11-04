@@ -8,7 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Fixed
 
-- `flow run --record` no longer writes a timeout case for a call that was cut off by Ctrl-C; replay could take the error edge for it.
+- `wrapRecording` no longer records a call the flow session cancelled (`stop()`) as a `*_TIMEOUT` case. A caller that flushed the recorder after the cancelled call settled got a timeout case that replay could pick. Timeouts are still recorded. `flow run --record` was not affected.
 
 ## [0.28.0] - 2026-11-04
 

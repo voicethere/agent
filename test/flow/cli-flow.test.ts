@@ -219,6 +219,7 @@ describe("Ctrl-C", () => {
     expect(await done).toBe(0);
   });
 
+  // Regression guard: the CLI writes mocks synchronously on stop, before a cancelled call settles; record.test.ts holds the discriminating cases.
   it("run --record interrupted during an http call writes no timeout case", async () => {
     // The flow validator rejects local hosts, so the hanging server is a stubbed
     // global fetch that answers only when its signal aborts.

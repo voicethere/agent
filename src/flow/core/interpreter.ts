@@ -545,6 +545,10 @@ export class FlowSession {
             else if (outcome.k === "ok") {
               chosen = node.paths.find((x) => x.id === outcome.path);
               tokens = outcome.tokens;
+              // Only an explicit "none" goes to onNone; an id outside the
+              // path list is a classifier failure.
+              if (!chosen && outcome.path !== "none")
+                errCode = "LLM_CLASSIFIER_NO_CALL";
             }
           }
           if (errCode !== undefined) {

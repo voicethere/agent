@@ -112,7 +112,9 @@ export type LlmErrorCode =
   | "LLM_TIMEOUT"
   | "LLM_ABORTED"
   | "LLM_BAD_REQUEST"
-  | "LLM_EMBEDDINGS_UNSUPPORTED";
+  | "LLM_EMBEDDINGS_UNSUPPORTED"
+  /** The flow route classifier got no valid `choose_path` call back. */
+  | "LLM_CLASSIFIER_NO_CALL";
 
 export class LlmProviderError extends Error {
   constructor(

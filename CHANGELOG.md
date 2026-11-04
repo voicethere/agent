@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-04
+
 ### Added
 
 - `FlowEffects.beforeNode(nodeId)`: an optional hook the flow interpreter awaits before it enters each node, so a step debugger can pause a run for real. Absent means no await; a rejection ends the session like any effect failure.

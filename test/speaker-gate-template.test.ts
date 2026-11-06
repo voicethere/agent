@@ -161,6 +161,23 @@ describe("speaker-gate template", () => {
     ]);
   });
 
+  it("logs utteranceId and the unknown reason before text, only when set", async () => {
+    final("my name is Sam", {
+      speaker: "unknown",
+      utteranceId: "u1",
+      speakerUnknownReason: "not_enrolled",
+    });
+    final("plain", { speaker: "caller" });
+    await vi.waitFor(() => expect(logs()).toHaveLength(3));
+    expect(logs()[1]).toBe(
+      'speaker_gate.final n=2 speaker=unknown utteranceId=u1 reason=not_enrolled text="my name is Sam"',
+    );
+    expect(logs()[2]).toBe(
+      'speaker_gate.final n=3 speaker=caller text="plain"',
+    );
+    expect(logs()[2]).not.toContain("reason=");
+  });
+
   it("logs the mode after a command is applied and reset after it resolves", async () => {
     capture.emit({
       type: "data_channel_message",

@@ -42,6 +42,7 @@ export type ParentToChildMessage =
   | VoiceReplayLastResultMessage
   | SetSpeakerGateResultMessage
   | ResetSpeakerEnrollmentResultMessage
+  | SpeakerGateStateMessage
   | SpeakResultMessage
   | BargeInControlAckMessage
   | AgentInterruptedMessage
@@ -978,6 +979,20 @@ export type SetSpeakerGateResultMessage =
       reason: "not_available" | "invalid";
     };
 
+/**
+ * The runner changed the effective speaker gate mode of a live session without
+ * being asked, so the cached mode returned by {@link getSpeakerGate} follows it.
+ * Sent once, when a speaker model fails to load and the gate falls back to
+ * `disabled`.
+ */
+export interface SpeakerGateStateMessage {
+  type: "speaker_gate_state";
+  sessionId: string;
+  mode: SpeakerGateMode;
+  bargeIn?: SpeakerGateBargeInPolicy;
+  reason: "speaker_model_load_failed";
+}
+
 /** Ask the runner to forget the enrolled caller; the next utterance enrolls again. */
 export interface ResetSpeakerEnrollmentMessage {
   type: "resetSpeakerEnrollment";
@@ -1004,12 +1019,15 @@ export type ResetSpeakerEnrollmentResultMessage =
 /** Result returned by {@link setSpeakerGate}. */
 export type SetSpeakerGateResult =
   | { ok: true; mode: SpeakerGateMode; bargeIn: SpeakerGateBargeInPolicy }
-  | { ok: false; reason: "not_available" | "invalid" | "timeout" };
+  | {
+      ok: false;
+      reason: "not_available" | "invalid" | "timeout" | "session_ended";
+    };
 
 /** Result returned by {@link resetSpeakerEnrollment}. */
 export type ResetSpeakerEnrollmentResult = {
   ok: boolean;
-  reason?: "not_available" | "timeout";
+  reason?: "not_available" | "timeout" | "session_ended";
 };
 
 /**

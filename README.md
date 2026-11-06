@@ -203,23 +203,26 @@ On plans that include project Redis, the runner injects **`AGENT_REDIS_URL`** in
 
 For inbound HTTP webhooks, configure **`AGENT_WEBHOOK_SIGNING_SECRET`** in project settings. The runner forwards the exact request bytes on process-wide **`onWebhook`** IPC (not session-queued). Verify HMAC on `ctx.body` before `JSON.parse` — VoiceThere does not verify signatures in the SDK. See [`templates/webhooks/agent.ts`](./templates/webhooks/agent.ts).
 
-| Export                                                                                       | Purpose                                                                                                              |
-| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `defineAgent`                                                                                | Register handlers including `onUserLanguage`, `onVoiceLanguageChanged`, `onSessionStart`, …                          |
-| `SpeechEvent`, `SpeechEventType`                                                             | Re-exported **types** from `@node-webrtc-rust/sdk/voice` (includes `voice_language_changed`, …)                      |
-| `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                                |
-| `speak`                                                                                      | Request parent TTS; `speak(sessionId, text, { interruptible: false })` keeps caller speech from cutting it           |
-| `setVoiceLanguage`                                                                           | Change STT, TTS, or the vendor for one live session (`scope`, VoiceThere catalog ids, cloud vendors).                |
-| `prepareVoiceLanguage`                                                                       | Warm the pools for a language without switching; resolves `{ ok, ready, reason }` (50 s timeout on older runners).   |
-| `replayLastUtterance`                                                                        | Run the caller's last utterance through the current STT again; the final arrives with `replay: true` (10 s timeout). |
-| `getVoiceLanguageSwitchSettings`                                                             | Project wait/ready messages and timing from `session_start`; `undefined` on older runners.                           |
-| `getVoiceLanguage`                                                                           | Last known ISO 639-1 from a successful switch ack or LID / `voice_language_changed` events.                          |
-| `isVoiceLanguageSwitchAvailable`                                                             | `true` when `session_start.voiceLanguageSwitchAvailable` was set (runner supports agent IPC).                        |
-| `isRunnerLidAutoSwitchEnabled`                                                               | `true` when `session_start.env.SHERPA_LID_AUTO_SWITCH` is truthy (runner auto-switch; optional in env).              |
-| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording`                    | Request parent conversation recording control                                                                        |
-| `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Stop or resume conversation history storage for one session                                                          |
-| `agentLog`                                                                                   | Forward structured logs to parent                                                                                    |
-| `ParentToChildMessage` / `ChildToParentMessage`                                              | IPC contract shared with the VoiceThere agent runner                                                                 |
+| Export                                                                                       | Purpose                                                                                                                                                          |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `defineAgent`                                                                                | Register handlers including `onUserLanguage`, `onVoiceLanguageChanged`, `onSessionStart`, …                                                                      |
+| `SpeechEvent`, `SpeechEventType`                                                             | Re-exported **types** from `@node-webrtc-rust/sdk/voice` (includes `voice_language_changed`, …)                                                                  |
+| `SPEECH_EVENT_TYPE`                                                                          | Import from `@node-webrtc-rust/sdk/voice` (runtime constants; not bundled into child)                                                                            |
+| `speak`                                                                                      | Request parent TTS; `speak(sessionId, text, { interruptible: false })` keeps caller speech from cutting it                                                       |
+| `setVoiceLanguage`                                                                           | Change STT, TTS, or the vendor for one live session (`scope`, VoiceThere catalog ids, cloud vendors).                                                            |
+| `prepareVoiceLanguage`                                                                       | Warm the pools for a language without switching; resolves `{ ok, ready, reason }` (50 s timeout on older runners).                                               |
+| `replayLastUtterance`                                                                        | Run the caller's last utterance through the current STT again; the final arrives with `replay: true` (10 s timeout).                                             |
+| `getVoiceLanguageSwitchSettings`                                                             | Project wait/ready messages and timing from `session_start`; `undefined` on older runners.                                                                       |
+| `getVoiceLanguage`                                                                           | Last known ISO 639-1 from a successful switch ack or LID / `voice_language_changed` events.                                                                      |
+| `isVoiceLanguageSwitchAvailable`                                                             | `true` when `session_start.voiceLanguageSwitchAvailable` was set (runner supports agent IPC).                                                                    |
+| `setSpeakerGate`                                                                             | Change the caller speaker gate (`mode`: `disabled`, `auto`, `manual`; `bargeIn`: `caller_only`, `anyone`) for one live session; applies from the next utterance. |
+| `resetSpeakerEnrollment`                                                                     | Forget the enrolled caller; the next utterance enrolls again.                                                                                                    |
+| `getSpeakerGate`                                                                             | `{ available, mode?, bargeIn? }`: whether the runner has a speaker gate for the session and its current mode.                                                    |
+| `isRunnerLidAutoSwitchEnabled`                                                               | `true` when `session_start.env.SHERPA_LID_AUTO_SWITCH` is truthy (runner auto-switch; optional in env).                                                          |
+| `startRecording` / `pauseRecording` / `resumeRecording` / `stopRecording`                    | Request parent conversation recording control                                                                                                                    |
+| `setConversationHistoryEnabled` / `enableConversationHistory` / `disableConversationHistory` | Stop or resume conversation history storage for one session                                                                                                      |
+| `agentLog`                                                                                   | Forward structured logs to parent                                                                                                                                |
+| `ParentToChildMessage` / `ChildToParentMessage`                                              | IPC contract shared with the VoiceThere agent runner                                                                                                             |
 
 ### Runner runtime subpath (minimal shared sandbox API)
 
@@ -358,6 +361,26 @@ onUserLanguage: async ({ sessionId, language }) => {
 `getVoiceLanguageSwitchSettings(sessionId)` returns the project's `waitMessageMode` (`end_of_utterance`, `immediate` or `off`), wait messages, ready messages and `readyMessageMinMs`. `profile` can name other vendors with `sttVendor` / `ttsVendor`. Older runners never answer `prepareVoiceLanguage` or `replayLastUtterance`, so both resolve with `reason: "timeout"` (50 s and 10 s) and `getVoiceLanguageSwitchSettings` returns `undefined`; fall back to your own texts and call `setVoiceLanguage` directly.
 
 See [`templates/language-switch`](./templates/language-switch/README.md) for both modes.
+
+### Speaker gate
+
+With the project's speaker gate on, the runner learns the caller's voice and labels each utterance. In `auto` mode a bystander's utterance never reaches `onUserSpeechFinal`; it arrives as `onUserSpeechIgnored({ sessionId, utteranceId, reason: "speaker_mismatch" })` with no text. In `manual` mode every final reaches `onUserSpeechFinal` with `speaker` (`caller`, `other` or `unknown`) and, when the runner sets them, `speakerUnknownReason`, `speakerCheckWindows` and `speakerRechecked`. With the gate `disabled` none of these fields are present.
+
+```ts
+const gate = await setSpeakerGate(sessionId, {
+  mode: "auto",
+  bargeIn: "caller_only",
+});
+if (!gate.ok)
+  agentLog(
+    "warn",
+    "speaker gate unavailable",
+    { reason: gate.reason },
+    sessionId,
+  );
+```
+
+`setSpeakerGate` resolves `{ ok: true, mode, bargeIn }` or `{ ok: false, reason }` with `reason` `not_available` (older runner, or a node without the speaker model), `invalid` (unknown mode or policy) or `timeout` (no answer in 10 seconds). Read `ctx.speakerGate.available` in `onSessionStart` to find out up front. See [`templates/speaker-gate`](./templates/speaker-gate/README.md) for all three modes, and `/docs/speaker-gate` on the platform for the project settings.
 
 ## Controlling agent speech
 

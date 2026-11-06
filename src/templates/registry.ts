@@ -65,6 +65,19 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     sourceFiles: ["language-switch/agent.ts"],
   },
   {
+    id: "speaker-gate",
+    entry: "speaker-gate/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    title: "Speaker gate",
+    summary:
+      "Listens to the enrolled caller only, or labels every speaker, and switches between the two mid-call.",
+    category: "voice",
+    description:
+      "Shows the three speaker gate modes. In auto mode only the enrolled caller reaches the agent and a bystander is logged as ignored. In manual mode every final carries a speaker verdict (caller, other, unknown) and the agent answers the caller, saying one short line when it hears someone else. A chat command (speaker-gate:auto, manual, disabled, reset) or a spoken phrase switches the mode with setSpeakerGate.",
+    sourceFiles: ["speaker-gate/agent.ts"],
+  },
+  {
     id: "voice-starter",
     entry: "voice-starter/agent.ts",
     kind: "product",

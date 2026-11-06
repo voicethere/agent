@@ -380,7 +380,7 @@ if (!gate.ok)
   );
 ```
 
-`setSpeakerGate` resolves `{ ok: true, mode, bargeIn }` or `{ ok: false, reason }` with `reason` `not_available` (older runner, or a node without the speaker model), `invalid` (unknown mode or policy) or `timeout` (no answer in 10 seconds), or `session_ended` (the session ended while the request was pending). `resetSpeakerEnrollment` resolves the same way. The mode you asked for and the mode in effect can differ: if the speaker model fails to load, the runner falls back to `disabled` and tells the agent, so `getSpeakerGate(sessionId)` returns the mode in effect, not the one last requested. Read `ctx.speakerGate.available` in `onSessionStart` to find out up front. See [`templates/speaker-gate`](./templates/speaker-gate/README.md) for all three modes, and `/docs/speaker-gate` on the platform for the project settings.
+`setSpeakerGate` resolves `{ ok: true, mode, bargeIn }` or `{ ok: false, reason }` with `reason` `not_available` (older runner, or a node without the speaker model), `invalid` (unknown mode or policy), `timeout` (no answer in 10 seconds) or `session_ended` (the session ended while the request was pending). `resetSpeakerEnrollment` resolves the same way. The mode you asked for and the mode in effect can differ: if the speaker model fails to load, the runner falls back to `disabled` and tells the agent, so `getSpeakerGate(sessionId)` returns the mode in effect, not the one last requested. Read `ctx.speakerGate.available` in `onSessionStart` to find out up front. See [`templates/speaker-gate`](./templates/speaker-gate/README.md) for all three modes, and `/docs/speaker-gate` on the platform for the project settings.
 
 ## Controlling agent speech
 

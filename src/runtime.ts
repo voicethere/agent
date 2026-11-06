@@ -429,12 +429,20 @@ function isSpeakerGateStateMessage(
   value: unknown,
 ): value is SpeakerGateStateMessage {
   if (!value || typeof value !== "object") return false;
-  const msg = value as { type?: string; sessionId?: unknown; mode?: unknown };
+  const msg = value as {
+    type?: string;
+    sessionId?: unknown;
+    mode?: unknown;
+    bargeIn?: unknown;
+  };
   return (
     msg.type === "speaker_gate_state" &&
     typeof msg.sessionId === "string" &&
     typeof msg.mode === "string" &&
-    SPEAKER_GATE_MODES.includes(msg.mode as SpeakerGateMode)
+    SPEAKER_GATE_MODES.includes(msg.mode) &&
+    (msg.bargeIn === undefined ||
+      (typeof msg.bargeIn === "string" &&
+        SPEAKER_GATE_BARGE_IN.includes(msg.bargeIn)))
   );
 }
 
@@ -607,6 +615,8 @@ const pendingSpeakerGateAcks = new Map<
 /**
  * A `speaker_gate_state` that arrived before `session_start` cached the session.
  * Applied once when `session_start` caches its `speakerGate`, dropped on `session_end`.
+ * The SDK has no logger, so nothing is logged here; the runner's
+ * `speaker_gate_state_sent` log records the hand-off.
  */
 const pendingSpeakerGateStateBySessionId = new Map<
   string,

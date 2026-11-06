@@ -373,7 +373,12 @@ describe("speaker gate events", () => {
     it("applies a state that arrives before session_start once, over its mode", async () => {
       process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
       const capture = installProcessMessageCapture();
-      defineAgent({});
+      const seen: Array<{ mode?: string; bargeIn?: string } | undefined> = [];
+      defineAgent({
+        onSessionStart(ctx) {
+          seen.push(ctx.speakerGate);
+        },
+      });
       capture.emit(stateMessage);
       expect(getSpeakerGate(SESSION)).toEqual({ available: false });
       await startSession(capture, {
@@ -386,6 +391,11 @@ describe("speaker gate events", () => {
         mode: "disabled",
         bargeIn: "caller_only",
       });
+      expect(seen[0]).toEqual({
+        available: true,
+        mode: "disabled",
+        bargeIn: "caller_only",
+      });
       // Consumed: a later session_start for the same id uses its own mode.
       capture.emit({ type: "session_end", sessionId: SESSION });
       await startSession(capture, {
@@ -394,6 +404,26 @@ describe("speaker gate events", () => {
         bargeIn: "anyone",
       });
       expect(getSpeakerGate(SESSION).mode).toBe("manual");
+      expect(seen[1]?.mode).toBe("manual");
+    });
+
+    it("ignores a speaker_gate_state with an unknown mode or barge-in policy", async () => {
+      process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+      const capture = installProcessMessageCapture();
+      defineAgent({});
+      await startSession(capture, {
+        available: true,
+        mode: "manual",
+        bargeIn: "anyone",
+      });
+      capture.emit({ ...stateMessage, mode: "bogus" });
+      capture.emit({ ...stateMessage, bargeIn: "bogus" });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(getSpeakerGate(SESSION)).toEqual({
+        available: true,
+        mode: "manual",
+        bargeIn: "anyone",
+      });
     });
 
     it("ignores a state for an ended session", async () => {

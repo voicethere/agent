@@ -854,7 +854,9 @@ describe("createLlmAgent", () => {
     say("hello");
     await vi.waitFor(() => expect(summaries).toHaveLength(1));
     const seq = clientPayloads()
-      .filter((p) => p.type === "assistant_delta" || p.type === "assistant_done")
+      .filter(
+        (p) => p.type === "assistant_delta" || p.type === "assistant_done",
+      )
       .map((p) => `${p.type}:${String(p.turnId).startsWith("greet-")}`);
     expect(seq.slice(0, 2)).toEqual([
       "assistant_delta:true",
@@ -1001,7 +1003,27 @@ describe("createLlmAgent", () => {
     expect(payloads).toContainEqual({
       type: "chat_reply",
       text: "Hi. There.",
+      turnId,
     });
+  });
+
+  it("two chat turns send chat_reply with their own assistant_done turnId", async () => {
+    await boot([
+      [delta("One."), done("One.")],
+      [delta("Two."), done("Two.")],
+    ]);
+    chat("first");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    chat("second");
+    await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    const payloads = clientPayloads();
+    const dones = payloads.filter((p) => p.type === "assistant_done");
+    const replies = payloads.filter((p) => p.type === "chat_reply");
+    expect(dones).toHaveLength(2);
+    expect(replies).toHaveLength(2);
+    expect(replies[0].turnId).toBe(dones[0].turnId);
+    expect(replies[1].turnId).toBe(dones[1].turnId);
+    expect(replies[0].turnId).not.toBe(replies[1].turnId);
   });
 
   it("voice turn sends spoken assistant_delta per sentence and one assistant_done", async () => {
@@ -1093,7 +1115,7 @@ describe("createLlmAgent", () => {
     expect(payloads).toEqual([
       { type: "assistant_delta", turnId, text: "Hi." },
       { type: "assistant_done", turnId, text: "Hi." },
-      { type: "chat_reply", text: "Hi." },
+      { type: "chat_reply", text: "Hi.", turnId },
     ]);
   });
 

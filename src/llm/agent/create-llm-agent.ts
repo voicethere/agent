@@ -1262,7 +1262,11 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         turnId: t.turnId,
         text,
       });
-      sendToClient(s.sessionId, { type: "chat_reply", text });
+      sendToClient(s.sessionId, {
+        type: "chat_reply",
+        text,
+        turnId: t.turnId,
+      });
       if (!speakChat && text.trim() !== "")
         recordReply(s.sessionId, text, { turnId: t.turnId });
     }

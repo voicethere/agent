@@ -17,7 +17,6 @@ import type {
   AgentInterruptedContext,
   SessionContext,
   SpeakHandle,
-  SpeakResultStatus,
 } from "../../runtime.js";
 import { resolveModel } from "../catalog.js";
 import {
@@ -495,22 +494,6 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     const h = announce(s.sessionId, text, opts);
     trackAnnouncement(s, h.done);
     return h;
-  }
-
-  function greetingDoneStatus(
-    status: SpeakResultStatus,
-  ): "completed" | "interrupted" | "cancelled" | "failed" {
-    switch (status) {
-      case "played":
-      case "unsupported":
-        return "completed";
-      case "interrupted":
-        return "interrupted";
-      case "cancelled":
-        return "cancelled";
-      case "failed":
-        return "failed";
-    }
   }
 
   // ---- fillers -----------------------------------------------------------
@@ -1525,30 +1508,21 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
           { turnId },
         );
         sendSpokenDelta(s.sessionId, turnId, greeting.text);
-        const handle = speakAnnouncement(
+        // Like every spoken turn, the done goes out when the text is complete,
+        // before the audio. Interruption arrives as barge_in/agent_interrupted.
+        sendToClient(s.sessionId, {
+          type: "assistant_done",
+          turnId,
+          text: greeting.text,
+          spoken: true,
+          status: "completed",
+        });
+        speakAnnouncement(
           s,
           turnId,
           greeting.text,
           greeting.interruptible ?? D.greetingInterruptible,
         );
-        void handle.done.then((result) => {
-          if (s.ended) return;
-          // The runtime cancels pending speaks when the session ends or is
-          // reset; that is teardown, not a greeting outcome.
-          if (
-            result.errorCode === "session_ended" ||
-            result.errorCode === "reset"
-          ) {
-            return;
-          }
-          sendToClient(s.sessionId, {
-            type: "assistant_done",
-            turnId,
-            text: greeting.text,
-            spoken: true,
-            status: greetingDoneStatus(result.status),
-          });
-        });
       }
     },
 

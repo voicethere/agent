@@ -641,6 +641,8 @@ defineAgent(createFlowAgent({ flow, providers: [openai] }));
 
 `createFlowAgent` migrates and validates the file at start and throws `FLOW_INVALID` with the first problems. Secrets are referenced by name only (`apiKeySecret`, `{ "secret": "AGENT_..." }`), and only `AGENT_*` project secrets reach the agent. The JSON schema is at `@voicethere/agent/flow/schema.json`.
 
+A flow reply to a typed message reaches the client as `chat_reply` with the `turnId` of the flow turn that produced it. Pair a reply with its turn by that id, not by arrival order.
+
 Work on a flow from the terminal:
 
 ```bash

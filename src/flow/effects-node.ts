@@ -94,7 +94,11 @@ export function createNodeEffects(o: NodeEffectsOptions): FlowEffects {
       };
     },
     chat(text, co) {
-      sendToClient(sid, { type: "chat_reply", text });
+      sendToClient(sid, {
+        type: "chat_reply",
+        text,
+        ...(co?.turnId ? { turnId: co.turnId } : {}),
+      });
       // Text-only row on runners that support it; otherwise the runner writes the
       // agent row from a speak request (0.27.2 behaviour).
       if (

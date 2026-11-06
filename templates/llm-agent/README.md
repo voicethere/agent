@@ -16,6 +16,10 @@ A voice and chat agent powered by an LLM, with custom tools and MCP servers. Sou
 
 The template starts on OpenRouter with the model `anthropic/claude-haiku-5.5`. Create a key at openrouter.ai, add it as a project secret named `AGENT_OPENROUTER_API_KEY`, then deploy. For production, pick the model from OpenRouter's list yourself, checking cost, latency and tool support. The key is read by name from `apiKeySecret` in `voicethere.llm.json`; it is never stored in the file. Only project secrets whose names start with `AGENT_` reach the agent.
 
+## Greeting
+
+The greeting is sent like every spoken turn: `assistant_delta` and `assistant_done` (`status: "completed"`) go out as soon as its text is complete, before the audio plays. `assistant_done` does not wait for playback. If the caller cuts the greeting off, that arrives as `barge_in` / `agent_interrupted`, the same as for a reply.
+
 ## Filler phrases
 
 The `fillers` block in `voicethere.llm.json` lists short sentences the agent speaks while the caller waits. Each situation has its own phrases; leave a situation out, or give it an empty list, to turn it off. The whole block is off when absent.

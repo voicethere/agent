@@ -819,34 +819,53 @@ describe("createLlmAgent", () => {
     expect(speaks()[0].turnId).toBe(d?.turnId);
   });
 
-  it("greeting sends assistant_done after the speak settles", async () => {
+  it("greeting sends assistant_done before the speak settles", async () => {
     await boot([[delta("Hi."), done("Hi.")]], {
       config: { greeting: { text: "Welcome to the line." } },
       skipSessionAck: true,
     });
     await vi.waitFor(() => expect(speaks()).toHaveLength(1));
     const greet = speaks()[0];
-    await new Promise((r) => setTimeout(r, 10));
-    expect(
-      clientPayloads().filter((p) => p.type === "assistant_done"),
-    ).toHaveLength(0);
-    speakResult(greet.requestId, greet.turnId);
-    await vi.waitFor(() =>
-      expect(
-        clientPayloads().filter((p) => p.type === "assistant_done"),
-      ).toEqual([
-        {
-          type: "assistant_done",
-          turnId: greet.turnId,
-          text: "Welcome to the line.",
-          spoken: true,
-          status: "completed",
-        },
-      ]),
-    );
+    // The speak is never resolved: the done must not wait for playback.
+    const dones = clientPayloads().filter((p) => p.type === "assistant_done");
+    const delta0 = clientPayloads().find((p) => p.type === "assistant_delta");
+    expect(dones).toEqual([
+      {
+        type: "assistant_done",
+        turnId: greet.turnId,
+        text: "Welcome to the line.",
+        spoken: true,
+        status: "completed",
+      },
+    ]);
+    expect(delta0?.turnId).toBe(greet.turnId);
   });
 
-  it("interrupted greeting reports interrupted", async () => {
+  it("greeting delta then done come before a later turn's messages", async () => {
+    await boot([[delta("Hi."), done("Hi.")]], {
+      config: {
+        greeting: { text: "Welcome to the line.", interruptible: true },
+      },
+      skipSessionAck: true,
+    });
+    await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+    const greet = speaks()[0];
+    // A turn starts while the greeting is still playing.
+    say("hello");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    const seq = clientPayloads()
+      .filter((p) => p.type === "assistant_delta" || p.type === "assistant_done")
+      .map((p) => `${p.type}:${String(p.turnId).startsWith("greet-")}`);
+    expect(seq.slice(0, 2)).toEqual([
+      "assistant_delta:true",
+      "assistant_done:true",
+    ]);
+    expect(seq.slice(2).every((x) => x.endsWith(":false"))).toBe(true);
+    expect(seq.length).toBeGreaterThan(2);
+    speakResult(greet.requestId, greet.turnId);
+  });
+
+  it("interrupted greeting sends exactly one assistant_done", async () => {
     await boot([[delta("Hi."), done("Hi.")]], {
       config: {
         greeting: { text: "Welcome to the line.", interruptible: true },
@@ -863,11 +882,13 @@ describe("createLlmAgent", () => {
       status: "interrupted",
       playedMs: 50,
     });
-    await vi.waitFor(() =>
-      expect(
-        clientPayloads().find((p) => p.type === "assistant_done"),
-      ).toMatchObject({ turnId: greet.turnId, status: "interrupted" }),
-    );
+    await new Promise((r) => setTimeout(r, 20));
+    const dones = clientPayloads().filter((p) => p.type === "assistant_done");
+    expect(dones).toHaveLength(1);
+    expect(dones[0]).toMatchObject({
+      turnId: greet.turnId,
+      status: "completed",
+    });
   });
 
   it("no greeting sends nothing", async () => {
@@ -878,7 +899,7 @@ describe("createLlmAgent", () => {
     ).toHaveLength(0);
   });
 
-  it("session ended before the greeting finished sends no done", async () => {
+  it("session ended before the greeting finished sends no extra done", async () => {
     await boot([[delta("Hi."), done("Hi.")]], {
       config: { greeting: { text: "Welcome to the line." } },
       skipSessionAck: true,
@@ -890,7 +911,7 @@ describe("createLlmAgent", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(
       clientPayloads().filter((p) => p.type === "assistant_done"),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
   });
 
   it("discard mode drops a final during an announcement", async () => {

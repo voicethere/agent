@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -303,5 +305,149 @@ describe("speaker gate events", () => {
       reason: "speaker_mismatch",
     });
     expect(finals).toHaveLength(0);
+  });
+
+  describe("speaker_gate_state and session_end", () => {
+    const stateMessage = {
+      type: "speaker_gate_state",
+      sessionId: SESSION,
+      mode: "disabled",
+      bargeIn: "caller_only",
+      reason: "speaker_model_load_failed",
+    };
+
+    it("moves the cached mode to disabled", async () => {
+      process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+      const capture = installProcessMessageCapture();
+      defineAgent({});
+      await startSession(capture, {
+        available: true,
+        mode: "manual",
+        bargeIn: "anyone",
+      });
+      capture.emit(stateMessage);
+      await vi.waitFor(() =>
+        expect(getSpeakerGate(SESSION).mode).toBe("disabled"),
+      );
+      expect(getSpeakerGate(SESSION)).toEqual({
+        available: true,
+        mode: "disabled",
+        bargeIn: "caller_only",
+      });
+    });
+
+    it("parses the shared protocol fixture through the real dispatch", async () => {
+      process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+      const capture = installProcessMessageCapture();
+      defineAgent({});
+      const fixture = JSON.parse(
+        readFileSync(
+          new URL(
+            "./fixtures/protocol/speaker-gate-state.json",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ) as { sessionId: string };
+      capture.emit({
+        type: "session_start",
+        sessionId: fixture.sessionId,
+        env: {},
+        speakerGate: { available: true, mode: "manual", bargeIn: "anyone" },
+      });
+      await vi.waitFor(() =>
+        expect(capture.send.mock.calls.map((c) => c[0].type)).toContain(
+          "session_start_ack",
+        ),
+      );
+      capture.emit(fixture);
+      await vi.waitFor(() =>
+        expect(getSpeakerGate(fixture.sessionId)).toEqual({
+          available: true,
+          mode: "disabled",
+          bargeIn: "caller_only",
+        }),
+      );
+    });
+
+    it("applies a state that arrives before session_start once, over its mode", async () => {
+      process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+      const capture = installProcessMessageCapture();
+      defineAgent({});
+      capture.emit(stateMessage);
+      expect(getSpeakerGate(SESSION)).toEqual({ available: false });
+      await startSession(capture, {
+        available: true,
+        mode: "manual",
+        bargeIn: "anyone",
+      });
+      expect(getSpeakerGate(SESSION)).toEqual({
+        available: true,
+        mode: "disabled",
+        bargeIn: "caller_only",
+      });
+      // Consumed: a later session_start for the same id uses its own mode.
+      capture.emit({ type: "session_end", sessionId: SESSION });
+      await startSession(capture, {
+        available: true,
+        mode: "manual",
+        bargeIn: "anyone",
+      });
+      expect(getSpeakerGate(SESSION).mode).toBe("manual");
+    });
+
+    it("ignores a state for an ended session", async () => {
+      process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+      const capture = installProcessMessageCapture();
+      defineAgent({});
+      await startSession(capture, {
+        available: true,
+        mode: "manual",
+        bargeIn: "anyone",
+      });
+      capture.emit({ type: "session_end", sessionId: SESSION });
+      await vi.waitFor(() =>
+        expect(getSpeakerGate(SESSION)).toEqual({ available: false }),
+      );
+      capture.emit(stateMessage);
+      expect(getSpeakerGate(SESSION)).toEqual({ available: false });
+      await startSession(capture, {
+        available: true,
+        mode: "manual",
+        bargeIn: "anyone",
+      });
+      expect(getSpeakerGate(SESSION).mode).toBe("manual");
+    });
+
+    it("settles pending requests of the ended session at once, not others", async () => {
+      process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+      const capture = installProcessMessageCapture();
+      defineAgent({});
+      const gate = { available: true, mode: "manual", bargeIn: "anyone" };
+      await startSession(capture, gate);
+      capture.emit({
+        type: "session_start",
+        sessionId: "sg-2",
+        env: {},
+        speakerGate: gate,
+      });
+      await vi.waitFor(() =>
+        expect(getSpeakerGate("sg-2").available).toBe(true),
+      );
+      vi.useFakeTimers();
+      const setP = setSpeakerGate(SESSION, { mode: "auto" });
+      const resetP = resetSpeakerEnrollment(SESSION);
+      const otherP = setSpeakerGate("sg-2", { mode: "auto" });
+      let otherSettled = false;
+      void otherP.then(() => {
+        otherSettled = true;
+      });
+      capture.emit({ type: "session_end", sessionId: SESSION });
+      expect(await setP).toEqual({ ok: false, reason: "session_ended" });
+      expect(await resetP).toEqual({ ok: false, reason: "session_ended" });
+      expect(otherSettled).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await otherP).toEqual({ ok: false, reason: "timeout" });
+    });
   });
 });

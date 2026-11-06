@@ -59,6 +59,7 @@ import type {
   SpeakerGateBargeInPolicy,
   SpeakerGateInfo,
   SpeakerGateMode,
+  SpeakerGateStateMessage,
   SpeakerVerdict,
   UserSpeechIgnoredEvent,
 } from "./protocol.js";
@@ -424,6 +425,19 @@ function isSetSpeakerGateResultMessage(
   );
 }
 
+function isSpeakerGateStateMessage(
+  value: unknown,
+): value is SpeakerGateStateMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; sessionId?: unknown; mode?: unknown };
+  return (
+    msg.type === "speaker_gate_state" &&
+    typeof msg.sessionId === "string" &&
+    typeof msg.mode === "string" &&
+    SPEAKER_GATE_MODES.includes(msg.mode as SpeakerGateMode)
+  );
+}
+
 function isResetSpeakerEnrollmentResultMessage(
   value: unknown,
 ): value is ResetSpeakerEnrollmentResultMessage {
@@ -519,6 +533,7 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "voice_replay_last_result" ||
     msg.type === "setSpeakerGateResult" ||
     msg.type === "resetSpeakerEnrollmentResult" ||
+    msg.type === "speaker_gate_state" ||
     msg.type === "speak_result" ||
     msg.type === "barge_in_control_ack" ||
     msg.type === "agent_interrupted" ||
@@ -544,6 +559,7 @@ type SessionScopedParentMessage = Exclude<
   | VoiceReplayLastResultMessage
   | SetSpeakerGateResultMessage
   | ResetSpeakerEnrollmentResultMessage
+  | SpeakerGateStateMessage
   | SpeakResultMessage
   | BargeInControlAckMessage
   | SessionTimeLimitControlAckMessage
@@ -588,9 +604,18 @@ const pendingSpeakerGateAcks = new Map<
     timer: ReturnType<typeof setTimeout>;
   }
 >();
+/**
+ * A `speaker_gate_state` that arrived before `session_start` cached the session.
+ * Applied once when `session_start` caches its `speakerGate`, dropped on `session_end`.
+ */
+const pendingSpeakerGateStateBySessionId = new Map<
+  string,
+  SpeakerGateStateMessage
+>();
 const pendingSpeakerResets = new Map<
   string,
   {
+    sessionId: string;
     resolve: (result: ResetSpeakerEnrollmentResult) => void;
     timer: ReturnType<typeof setTimeout>;
   }
@@ -1128,6 +1153,50 @@ function handleResetSpeakerEnrollmentResult(
   );
 }
 
+function applySpeakerGateState(
+  prev: SpeakerGateInfo,
+  message: SpeakerGateStateMessage,
+): SpeakerGateInfo {
+  return {
+    available: true,
+    mode: message.mode,
+    bargeIn: message.bargeIn ?? prev.bargeIn,
+  };
+}
+
+function handleSpeakerGateState(message: SpeakerGateStateMessage): void {
+  if (endedSessionIds.has(message.sessionId)) return;
+  const prev = speakerGateBySessionId.get(message.sessionId);
+  if (prev) {
+    if (prev.available) {
+      speakerGateBySessionId.set(
+        message.sessionId,
+        applySpeakerGateState(prev, message),
+      );
+    }
+    return;
+  }
+  pendingSpeakerGateStateBySessionId.set(message.sessionId, message);
+}
+
+function clearPendingSpeakerRequestsForSession(
+  sessionId: string,
+  reason: "session_ended",
+): void {
+  for (const [requestId, pending] of pendingSpeakerGateAcks) {
+    if (pending.sessionId !== sessionId) continue;
+    clearTimeout(pending.timer);
+    pendingSpeakerGateAcks.delete(requestId);
+    pending.resolve({ ok: false, reason });
+  }
+  for (const [requestId, pending] of pendingSpeakerResets) {
+    if (pending.sessionId !== sessionId) continue;
+    clearTimeout(pending.timer);
+    pendingSpeakerResets.delete(requestId);
+    pending.resolve({ ok: false, reason });
+  }
+}
+
 function clearPendingSpeakerGateAcks(reason: "not_available"): void {
   for (const [requestId, pending] of pendingSpeakerGateAcks) {
     clearTimeout(pending.timer);
@@ -1579,12 +1648,20 @@ async function handleParentMessage(
         message.sessionId,
         message.sessionTimeLimitAvailable ?? false,
       );
-      speakerGateBySessionId.set(
-        message.sessionId,
-        message.speakerGate?.available === true
-          ? message.speakerGate
-          : { available: false },
-      );
+      {
+        const initial: SpeakerGateInfo =
+          message.speakerGate?.available === true
+            ? message.speakerGate
+            : { available: false };
+        const early = pendingSpeakerGateStateBySessionId.get(message.sessionId);
+        pendingSpeakerGateStateBySessionId.delete(message.sessionId);
+        speakerGateBySessionId.set(
+          message.sessionId,
+          early && initial.available
+            ? applySpeakerGateState(initial, early)
+            : initial,
+        );
+      }
       if (message.voiceLanguageSwitch) {
         voiceLanguageSwitchSettingsBySessionId.set(
           message.sessionId,
@@ -1742,6 +1819,8 @@ async function handleParentMessage(
       mixAvailableBySessionId.delete(message.sessionId);
       voiceLanguageSwitchAvailableBySessionId.delete(message.sessionId);
       speakerGateBySessionId.delete(message.sessionId);
+      pendingSpeakerGateStateBySessionId.delete(message.sessionId);
+      clearPendingSpeakerRequestsForSession(message.sessionId, "session_ended");
       voiceLanguageSwitchSettingsBySessionId.delete(message.sessionId);
       lastVoiceLanguageBySessionId.delete(message.sessionId);
       ttsPoseAvailableBySessionId.delete(message.sessionId);
@@ -1847,6 +1926,10 @@ export function defineAgent(handlers: AgentHandlers): void {
       handleResetSpeakerEnrollmentResult(message);
       return;
     }
+    if (isSpeakerGateStateMessage(message)) {
+      handleSpeakerGateState(message);
+      return;
+    }
     if (isWebhookMessage(message)) {
       void agentStartReady.then(() => handleWebhookMessage(message, handlers));
       return;
@@ -1858,6 +1941,8 @@ export function defineAgent(handlers: AgentHandlers): void {
     // the leave hook only.
     if (message.type === "session_end") {
       endedSessionIds.add(message.sessionId);
+      pendingSpeakerGateStateBySessionId.delete(message.sessionId);
+      clearPendingSpeakerRequestsForSession(message.sessionId, "session_ended");
       clearPendingSpeakForSession(message.sessionId, "session_ended");
       clearPendingRecordingAcksForSession(message.sessionId, "session_ended");
       clearPendingConversationHistoryAcksForSession(
@@ -2128,6 +2213,7 @@ export function resetAgentIpcStateForTests(): void {
   mixAvailableBySessionId.clear();
   voiceLanguageSwitchAvailableBySessionId.clear();
   speakerGateBySessionId.clear();
+  pendingSpeakerGateStateBySessionId.clear();
   voiceLanguageSwitchSettingsBySessionId.clear();
   lastVoiceLanguageBySessionId.clear();
   ttsPoseAvailableBySessionId.clear();
@@ -3040,7 +3126,7 @@ export function resetSpeakerEnrollment(
       pendingSpeakerResets.delete(requestId);
       resolve({ ok: false, reason: "timeout" });
     }, SPEAKER_GATE_ACK_TIMEOUT_MS);
-    pendingSpeakerResets.set(requestId, { resolve, timer });
+    pendingSpeakerResets.set(requestId, { sessionId, resolve, timer });
     sendParentMessage({
       type: "resetSpeakerEnrollment",
       requestId,

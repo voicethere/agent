@@ -119,10 +119,14 @@ defineAgent({
   },
 
   async onUserSpeechFinal(ctx) {
+    const utterance = ctx.utteranceId ? ` utteranceId=${ctx.utteranceId}` : "";
+    const reason = ctx.speakerUnknownReason
+      ? ` reason=${ctx.speakerUnknownReason}`
+      : "";
     logLine(
       ctx.sessionId,
       "final",
-      `speaker=${ctx.speaker ?? "none"} text=${JSON.stringify(ctx.text)}`,
+      `speaker=${ctx.speaker ?? "none"}${utterance}${reason} text=${JSON.stringify(ctx.text)}`,
     );
     const spoken = parseSpokenCommand(ctx.text);
     // A bystander cannot change the mode in manual mode.

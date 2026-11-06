@@ -17,10 +17,10 @@ import {
 
 ## Product vs e2e
 
-| Kind        | Dashboard create                                                                                                                                                                                                                       | Prebuilt seed bundle                 | Typical consumer        |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
-| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `language-switch`, `speaker-gate`, `world-sync`, `world-sync-binary`, `game-sync`, `voice-showcase`, `recording-consent`, `positional-tts`, `spatial-showcase`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
-| **e2e**     | No                                                                                                                                                                                                                                     | No — build from sources at test time | `voicethere/e2e` smokes |
+| Kind        | Dashboard create                                                                                                                                                                                                                       | Prebuilt seed bundle                 | Typical consumer                  |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------- |
+| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `language-switch`, `speaker-gate`, `world-sync`, `world-sync-binary`, `game-sync`, `voice-showcase`, `recording-consent`, `positional-tts`, `spatial-showcase`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create           |
+| **e2e**     | No                                                                                                                                                                                                                                     | No — build from sources at test time | VoiceThere end-to-end smoke tests |
 
 Product templates always set `seedOnCreate: true`. CI fails if a product template is missing its prebuilt bundle after `npm run build`.
 
@@ -82,7 +82,7 @@ Each folder has its own README. Summary:
 
 ## E2e templates
 
-These mirror former `e2e/fixtures/*` sources. E2E resolves entries from the package, builds into ephemeral workdirs, and uploads `dist/agent.js`.
+These were the end-to-end test fixtures; the tests resolve entries from the package, build them into ephemeral workdirs, and upload `dist/agent.js`.
 
 | Id                | Source                                    | Purpose                                                |
 | ----------------- | ----------------------------------------- | ------------------------------------------------------ |

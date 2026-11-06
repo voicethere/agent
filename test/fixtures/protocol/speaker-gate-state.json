@@ -1,0 +1,7 @@
+{
+  "type": "speaker_gate_state",
+  "sessionId": "sess-fixture",
+  "mode": "disabled",
+  "bargeIn": "caller_only",
+  "reason": "speaker_model_load_failed"
+}

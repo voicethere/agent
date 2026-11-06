@@ -11,6 +11,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 ### Fixed
 
 - `chat_reply` now carries the `turnId` of its turn. Typed LLM turns send the same `turnId` as the `assistant_done` before it, and flow replies send the flow turn's `turnId` (the one stored with the reply). A client can pair a reply with its turn by id instead of by arrival order. Messages without a turn keep sending no `turnId`.
+## [0.29.3] - 2026-11-06
+
+### Added
+
+- The runner can send `speaker_gate_state` when a speaker model fails to load and the gate falls back to `disabled`. `getSpeakerGate(sessionId)` then returns the mode in effect (`disabled`), not the last requested one. A state that arrives before `session_start` is applied once when the session starts.
+- `setSpeakerGate` and `resetSpeakerEnrollment` resolve `{ ok: false, reason: "session_ended" }` as soon as the session ends, instead of waiting for the 10 second `timeout`.
+
+### Changed
+
+- The `speaker-gate` template's final log line carries `utteranceId` and, when the runner sets it, `reason` (the speaker unknown reason), before `text`.
+
+### Fixed
+
+- `templates/README.md` no longer names a private repository, and a test fails if one comes back.
 
 ## [0.29.1] - 2026-11-06
 

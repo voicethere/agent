@@ -52,6 +52,15 @@ import type {
   VoiceReplayResult,
   VoiceVendorSelection,
   WebhookMessage,
+  ResetSpeakerEnrollmentResult,
+  ResetSpeakerEnrollmentResultMessage,
+  SetSpeakerGateResult,
+  SetSpeakerGateResultMessage,
+  SpeakerGateBargeInPolicy,
+  SpeakerGateInfo,
+  SpeakerGateMode,
+  SpeakerVerdict,
+  UserSpeechIgnoredEvent,
 } from "./protocol.js";
 import { toPublicProviderId, toWireProviderId } from "./voice-provider-id.js";
 import {
@@ -86,6 +95,12 @@ export interface SessionContext {
   mixAvailable: boolean;
   /** `true` when runner {@link setVoiceLanguage} IPC is available for this session. */
   voiceLanguageSwitchAvailable: boolean;
+  /**
+   * Caller speaker gate of the session. Present only when the runner can switch
+   * it with {@link setSpeakerGate} (`available` is then `true`); `mode` is the
+   * mode it started in. Absent on older runners and on nodes without the speaker model. Use {@link getSpeakerGate} for the current mode after a switch.
+   */
+  speakerGate?: SpeakerGateInfo;
   /** `true` when TTS pose / listener pose APIs are available (voice or Voice+Data). */
   ttsPoseAvailable: boolean;
   /** `true` when the runner reports speak results and accepts speak cancel / barge-in control. */
@@ -104,6 +119,21 @@ export interface SpeechContext {
   replay?: boolean;
   /** Utterance id of the caller's final transcript, when the runner sends one. */
   utteranceId?: string;
+  /** Speaker gate verdict. Set in `manual` mode only. */
+  speaker?: SpeakerVerdict;
+  /** Why the verdict is `unknown` (for example `not_enrolled`, `short`, `timeout`), when the runner sends it. */
+  speakerUnknownReason?: string;
+  /** Number of speech windows the verdict is based on, when the runner sends it. */
+  speakerCheckWindows?: number;
+  /** `true` when the verdict was revised by a later check of the same utterance. */
+  speakerRechecked?: boolean;
+}
+
+/** Context of {@link AgentHandlers.onUserSpeechIgnored}. */
+export interface UserSpeechIgnoredContext {
+  sessionId: string;
+  utteranceId: string;
+  reason: UserSpeechIgnoredEvent["reason"];
 }
 
 /** Spoken-language identification result (`speech.type` is `user_language`). */
@@ -189,6 +219,11 @@ export interface AgentHandlers {
   onUserSpeechFinal?: (ctx: SpeechContext) => void | Promise<void>;
   /** Convenience handler — also invoked when `speech.type` is `user_language`. */
   onUserLanguage?: (ctx: UserLanguageContext) => void | Promise<void>;
+  /**
+   * The speaker gate (`auto` mode) dropped an utterance because it was not the
+   * enrolled caller (`user_speech_ignored`). There is no text.
+   */
+  onUserSpeechIgnored?: (ctx: UserSpeechIgnoredContext) => void | Promise<void>;
   /**
    * Runner finished applying a language switch (`voice_language_changed`). Use with
    * project auto-switch or after your own `setVoiceLanguage` calls.
@@ -379,6 +414,27 @@ function isVoiceLanguagePrepareResultMessage(
   );
 }
 
+function isSetSpeakerGateResultMessage(
+  value: unknown,
+): value is SetSpeakerGateResultMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return (
+    msg.type === "setSpeakerGateResult" && typeof msg.requestId === "string"
+  );
+}
+
+function isResetSpeakerEnrollmentResultMessage(
+  value: unknown,
+): value is ResetSpeakerEnrollmentResultMessage {
+  if (!value || typeof value !== "object") return false;
+  const msg = value as { type?: string; requestId?: unknown };
+  return (
+    msg.type === "resetSpeakerEnrollmentResult" &&
+    typeof msg.requestId === "string"
+  );
+}
+
 function isVoiceReplayLastResultMessage(
   value: unknown,
 ): value is VoiceReplayLastResultMessage {
@@ -461,6 +517,8 @@ function isParentMessage(value: unknown): value is ParentToChildMessage {
     msg.type === "voice_language_control_ack" ||
     msg.type === "voice_language_prepare_result" ||
     msg.type === "voice_replay_last_result" ||
+    msg.type === "setSpeakerGateResult" ||
+    msg.type === "resetSpeakerEnrollmentResult" ||
     msg.type === "speak_result" ||
     msg.type === "barge_in_control_ack" ||
     msg.type === "agent_interrupted" ||
@@ -484,6 +542,8 @@ type SessionScopedParentMessage = Exclude<
   | VoiceLanguageControlAckMessage
   | VoiceLanguagePrepareResultMessage
   | VoiceReplayLastResultMessage
+  | SetSpeakerGateResultMessage
+  | ResetSpeakerEnrollmentResultMessage
   | SpeakResultMessage
   | BargeInControlAckMessage
   | SessionTimeLimitControlAckMessage
@@ -516,6 +576,25 @@ const mixAvailableBySessionId = new Map<string, boolean>();
 const voiceLanguageSwitchAvailableBySessionId = new Map<string, boolean>();
 /** Last known ISO 639-1 per session (setVoiceLanguage ack or speech events). */
 const lastVoiceLanguageBySessionId = new Map<string, string>();
+/** Cached from `session_start.speakerGate`, updated by a successful switch, until `session_end`. */
+const speakerGateBySessionId = new Map<string, SpeakerGateInfo>();
+/** The runner answers within a model load at most; an older one never answers. */
+const SPEAKER_GATE_ACK_TIMEOUT_MS = 10_000;
+const pendingSpeakerGateAcks = new Map<
+  string,
+  {
+    sessionId: string;
+    resolve: (result: SetSpeakerGateResult) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
+const pendingSpeakerResets = new Map<
+  string,
+  {
+    resolve: (result: ResetSpeakerEnrollmentResult) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
 /** Cached from `session_start.ttsPoseAvailable` until `session_end`. */
 const ttsPoseAvailableBySessionId = new Map<string, boolean>();
 /** Cached from `session_start.speakControlAvailable` until `session_end`. */
@@ -1014,6 +1093,54 @@ function handleVoiceLanguagePrepareResult(
   });
 }
 
+function handleSetSpeakerGateResult(
+  message: SetSpeakerGateResultMessage,
+): void {
+  const pending = pendingSpeakerGateAcks.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingSpeakerGateAcks.delete(message.requestId);
+  if (message.ok) {
+    speakerGateBySessionId.set(pending.sessionId, {
+      available: true,
+      mode: message.mode,
+      bargeIn: message.bargeIn,
+    });
+    pending.resolve({
+      ok: true,
+      mode: message.mode,
+      bargeIn: message.bargeIn,
+    });
+    return;
+  }
+  pending.resolve({ ok: false, reason: message.reason });
+}
+
+function handleResetSpeakerEnrollmentResult(
+  message: ResetSpeakerEnrollmentResultMessage,
+): void {
+  const pending = pendingSpeakerResets.get(message.requestId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingSpeakerResets.delete(message.requestId);
+  pending.resolve(
+    message.ok ? { ok: true } : { ok: false, reason: message.reason },
+  );
+}
+
+function clearPendingSpeakerGateAcks(reason: "not_available"): void {
+  for (const [requestId, pending] of pendingSpeakerGateAcks) {
+    clearTimeout(pending.timer);
+    pendingSpeakerGateAcks.delete(requestId);
+    pending.resolve({ ok: false, reason });
+  }
+  for (const [requestId, pending] of pendingSpeakerResets) {
+    clearTimeout(pending.timer);
+    pendingSpeakerResets.delete(requestId);
+    pending.resolve({ ok: false, reason });
+  }
+}
+
 function handleVoiceReplayLastResult(
   message: VoiceReplayLastResultMessage,
 ): void {
@@ -1243,7 +1370,9 @@ function sendParentMessage(message: unknown): void {
     msgType === "stt_control" ||
     msgType === "voice_language_control" ||
     msgType === "voice_language_prepare" ||
-    msgType === "voice_replay_last"
+    msgType === "voice_replay_last" ||
+    msgType === "setSpeakerGate" ||
+    msgType === "resetSpeakerEnrollment"
   ) {
     process.send?.(message as never);
     return;
@@ -1359,6 +1488,41 @@ async function handleWebhookMessage(
   }
 }
 
+/** `{ speakerGate }` for a session context, or nothing when the gate is not available. */
+function speakerGateOf(sessionId: string): { speakerGate?: SpeakerGateInfo } {
+  const gate = speakerGateBySessionId.get(sessionId);
+  return gate?.available ? { speakerGate: gate } : {};
+}
+
+const SPEAKER_VERDICTS: readonly string[] = ["caller", "other", "unknown"];
+
+/** Speaker gate fields of a `user_speech_final`; only well-typed values are copied. */
+function speakerFieldsOf(
+  event: SpeechEvent,
+): Pick<
+  SpeechContext,
+  | "speaker"
+  | "speakerUnknownReason"
+  | "speakerCheckWindows"
+  | "speakerRechecked"
+> {
+  const e = event as unknown as Record<string, unknown>;
+  return {
+    ...(typeof e.speaker === "string" && SPEAKER_VERDICTS.includes(e.speaker)
+      ? { speaker: e.speaker as SpeakerVerdict }
+      : {}),
+    ...(typeof e.speakerUnknownReason === "string"
+      ? { speakerUnknownReason: e.speakerUnknownReason }
+      : {}),
+    ...(typeof e.speakerCheckWindows === "number"
+      ? { speakerCheckWindows: e.speakerCheckWindows }
+      : {}),
+    ...(typeof e.speakerRechecked === "boolean"
+      ? { speakerRechecked: e.speakerRechecked }
+      : {}),
+  };
+}
+
 function resolveUserLanguageCode(event: SpeechEvent): string | undefined {
   const withLanguage = event as SpeechEvent & { language?: unknown };
   const candidates = [withLanguage.language, event.text];
@@ -1415,6 +1579,12 @@ async function handleParentMessage(
         message.sessionId,
         message.sessionTimeLimitAvailable ?? false,
       );
+      speakerGateBySessionId.set(
+        message.sessionId,
+        message.speakerGate?.available === true
+          ? message.speakerGate
+          : { available: false },
+      );
       if (message.voiceLanguageSwitch) {
         voiceLanguageSwitchSettingsBySessionId.set(
           message.sessionId,
@@ -1439,6 +1609,7 @@ async function handleParentMessage(
         mixAvailable: message.mixAvailable ?? false,
         voiceLanguageSwitchAvailable:
           message.voiceLanguageSwitchAvailable ?? false,
+        ...speakerGateOf(message.sessionId),
         ttsPoseAvailable: message.ttsPoseAvailable ?? false,
         speakControlAvailable: message.speakControlAvailable ?? false,
         sessionTimeLimitAvailable: message.sessionTimeLimitAvailable ?? false,
@@ -1465,6 +1636,7 @@ async function handleParentMessage(
         voiceLanguageSwitchAvailable:
           voiceLanguageSwitchAvailableBySessionId.get(message.sessionId) ??
           false,
+        ...speakerGateOf(message.sessionId),
         ttsPoseAvailable:
           ttsPoseAvailableBySessionId.get(message.sessionId) ?? false,
         speakControlAvailable:
@@ -1496,7 +1668,22 @@ async function handleParentMessage(
             ? { replay: true }
             : {}),
           ...(utteranceId ? { utteranceId } : {}),
+          ...speakerFieldsOf(message.event),
         });
+      }
+      if ((message.event.type as string) === "user_speech_ignored") {
+        const ignored =
+          message.event as unknown as Partial<UserSpeechIgnoredEvent>;
+        if (
+          typeof ignored.utteranceId === "string" &&
+          ignored.reason === "speaker_mismatch"
+        ) {
+          await handlers.onUserSpeechIgnored?.({
+            sessionId: message.sessionId,
+            utteranceId: ignored.utteranceId,
+            reason: ignored.reason,
+          });
+        }
       }
       if ((message.event.type as string) === "user_language") {
         const language = resolveUserLanguageCode(message.event);
@@ -1554,6 +1741,7 @@ async function handleParentMessage(
       endUserBySessionId.delete(message.sessionId);
       mixAvailableBySessionId.delete(message.sessionId);
       voiceLanguageSwitchAvailableBySessionId.delete(message.sessionId);
+      speakerGateBySessionId.delete(message.sessionId);
       voiceLanguageSwitchSettingsBySessionId.delete(message.sessionId);
       lastVoiceLanguageBySessionId.delete(message.sessionId);
       ttsPoseAvailableBySessionId.delete(message.sessionId);
@@ -1649,6 +1837,14 @@ export function defineAgent(handlers: AgentHandlers): void {
     }
     if (isVoiceReplayLastResultMessage(message)) {
       handleVoiceReplayLastResult(message);
+      return;
+    }
+    if (isSetSpeakerGateResultMessage(message)) {
+      handleSetSpeakerGateResult(message);
+      return;
+    }
+    if (isResetSpeakerEnrollmentResultMessage(message)) {
+      handleResetSpeakerEnrollmentResult(message);
       return;
     }
     if (isWebhookMessage(message)) {
@@ -1931,6 +2127,7 @@ export function resetAgentIpcStateForTests(): void {
   endUserBySessionId.clear();
   mixAvailableBySessionId.clear();
   voiceLanguageSwitchAvailableBySessionId.clear();
+  speakerGateBySessionId.clear();
   voiceLanguageSwitchSettingsBySessionId.clear();
   lastVoiceLanguageBySessionId.clear();
   ttsPoseAvailableBySessionId.clear();
@@ -1977,6 +2174,7 @@ export function resetAgentIpcStateForTests(): void {
   clearPendingMixAcks("reset");
   clearPendingSttAcks("reset");
   clearPendingVoiceLanguageAcks("reset");
+  clearPendingSpeakerGateAcks("not_available");
 }
 
 export interface SpeakOptions {
@@ -2769,6 +2967,84 @@ export function setVoiceLanguage(
       ...(options.stt?.trim() ? { stt: options.stt.trim() } : {}),
       ...(sttVendor ? { sttVendor } : {}),
       ...(ttsVendor ? { ttsVendor } : {}),
+    });
+  });
+}
+
+const SPEAKER_GATE_MODES: readonly string[] = ["disabled", "auto", "manual"];
+const SPEAKER_GATE_BARGE_IN: readonly string[] = ["caller_only", "anyone"];
+
+/**
+ * Speaker gate state of the session: `available` and the current mode. After a
+ * successful {@link setSpeakerGate} it holds the mode the runner confirmed.
+ * `{ available: false }` on older runners, on nodes without a speaker model and
+ * for unknown sessions.
+ */
+export function getSpeakerGate(sessionId: string): SpeakerGateInfo {
+  return speakerGateBySessionId.get(sessionId) ?? { available: false };
+}
+
+/**
+ * Change the caller speaker gate of one live session. Omitted fields keep their
+ * value. The change applies from the next utterance and the enrolled caller
+ * is kept across mode changes. Resolves `{ ok: false, reason: "not_available" }`
+ * when the runner has no speaker gate for the session (see
+ * {@link SessionContext.speakerGate}), `"invalid"` for an unknown mode or policy
+ * and `"timeout"` when the runner does not answer within 10 seconds.
+ */
+export function setSpeakerGate(
+  sessionId: string,
+  update: { mode?: SpeakerGateMode; bargeIn?: SpeakerGateBargeInPolicy },
+): Promise<SetSpeakerGateResult> {
+  const { mode, bargeIn } = update ?? {};
+  if (
+    (mode !== undefined && !SPEAKER_GATE_MODES.includes(mode)) ||
+    (bargeIn !== undefined && !SPEAKER_GATE_BARGE_IN.includes(bargeIn))
+  ) {
+    return Promise.resolve({ ok: false, reason: "invalid" });
+  }
+  if (!isVoicethereAgentChild() || !getSpeakerGate(sessionId).available) {
+    return Promise.resolve({ ok: false, reason: "not_available" });
+  }
+  const requestId = randomUUID();
+  return new Promise<SetSpeakerGateResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingSpeakerGateAcks.delete(requestId);
+      resolve({ ok: false, reason: "timeout" });
+    }, SPEAKER_GATE_ACK_TIMEOUT_MS);
+    pendingSpeakerGateAcks.set(requestId, { sessionId, resolve, timer });
+    sendParentMessage({
+      type: "setSpeakerGate",
+      requestId,
+      sessionId,
+      ...(mode !== undefined ? { mode } : {}),
+      ...(bargeIn !== undefined ? { bargeIn } : {}),
+    });
+  });
+}
+
+/**
+ * Forget the enrolled caller of one live session. The next utterance enrolls
+ * again. Resolves `{ ok: false, reason: "not_available" }` when the session has
+ * no speaker gate.
+ */
+export function resetSpeakerEnrollment(
+  sessionId: string,
+): Promise<ResetSpeakerEnrollmentResult> {
+  if (!isVoicethereAgentChild() || !getSpeakerGate(sessionId).available) {
+    return Promise.resolve({ ok: false, reason: "not_available" });
+  }
+  const requestId = randomUUID();
+  return new Promise<ResetSpeakerEnrollmentResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingSpeakerResets.delete(requestId);
+      resolve({ ok: false, reason: "timeout" });
+    }, SPEAKER_GATE_ACK_TIMEOUT_MS);
+    pendingSpeakerResets.set(requestId, { resolve, timer });
+    sendParentMessage({
+      type: "resetSpeakerEnrollment",
+      requestId,
+      sessionId,
     });
   });
 }

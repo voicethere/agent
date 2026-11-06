@@ -40,6 +40,8 @@ export type ParentToChildMessage =
   | VoiceLanguageControlAckMessage
   | VoiceLanguagePrepareResultMessage
   | VoiceReplayLastResultMessage
+  | SetSpeakerGateResultMessage
+  | ResetSpeakerEnrollmentResultMessage
   | SpeakResultMessage
   | BargeInControlAckMessage
   | AgentInterruptedMessage
@@ -69,6 +71,8 @@ export type ChildToParentMessage =
   | VoiceLanguageControlMessage
   | VoiceLanguagePrepareMessage
   | VoiceReplayLastMessage
+  | SetSpeakerGateMessage
+  | ResetSpeakerEnrollmentMessage
   | AgentLogMessage
   | AgentErrorMessage
   | NodeWarningMessage
@@ -129,6 +133,12 @@ export interface SessionStartMessage {
    * older runners — use your own defaults then.
    */
   voiceLanguageSwitch?: VoiceLanguageSwitchSettings;
+  /**
+   * Caller speaker gate of the session: whether the runner can switch it
+   * ({@link SetSpeakerGateMessage}) and its current mode. Absent on older runners
+   * and when the node has no speaker model — treat as `{ available: false }`.
+   */
+  speakerGate?: SpeakerGateInfo;
   /**
    * When `true`, TTS pose / listener pose / positional panning APIs are available
    * (voice or Voice+Data). Absent on data-only or older runners — treat as `false`.
@@ -915,6 +925,103 @@ export type VoiceLanguageResult = {
   sttProvider?: string;
   ttsProvider?: string;
 };
+
+/**
+ * Caller speaker gate mode. `disabled`: every final reaches the agent and carries
+ * no speaker fields. `auto`: only the enrolled caller's finals reach the agent;
+ * a bystander's utterance arrives as `user_speech_ignored`. `manual`: every final
+ * reaches the agent with a `speaker` verdict and the agent decides.
+ */
+export type SpeakerGateMode = "disabled" | "auto" | "manual";
+
+/**
+ * Who may interrupt the agent's speech in `auto` and `manual`. `caller_only`: a
+ * bystander cannot (an `unknown` verdict fails open). `anyone`: barge-in ignores
+ * the verdict.
+ */
+export type SpeakerGateBargeInPolicy = "caller_only" | "anyone";
+
+/** Verdict on `user_speech_final.speaker` in `manual` mode. */
+export type SpeakerVerdict = "caller" | "other" | "unknown";
+
+/** Speaker gate state advertised in {@link SessionStartMessage.speakerGate}. */
+export type SpeakerGateInfo = {
+  available: boolean;
+  mode?: SpeakerGateMode;
+  bargeIn?: SpeakerGateBargeInPolicy;
+};
+
+/** Ask the runner to change the speaker gate of one live session. Applies from the next utterance. */
+export interface SetSpeakerGateMessage {
+  type: "setSpeakerGate";
+  requestId: string;
+  sessionId: string;
+  mode?: SpeakerGateMode;
+  bargeIn?: SpeakerGateBargeInPolicy;
+}
+
+/** Runner answer to a {@link SetSpeakerGateMessage}. */
+export type SetSpeakerGateResultMessage =
+  | {
+      type: "setSpeakerGateResult";
+      requestId: string;
+      sessionId?: string;
+      ok: true;
+      mode: SpeakerGateMode;
+      bargeIn: SpeakerGateBargeInPolicy;
+    }
+  | {
+      type: "setSpeakerGateResult";
+      requestId: string;
+      sessionId?: string;
+      ok: false;
+      reason: "not_available" | "invalid";
+    };
+
+/** Ask the runner to forget the enrolled caller; the next utterance enrolls again. */
+export interface ResetSpeakerEnrollmentMessage {
+  type: "resetSpeakerEnrollment";
+  requestId: string;
+  sessionId: string;
+}
+
+/** Runner answer to a {@link ResetSpeakerEnrollmentMessage}. */
+export type ResetSpeakerEnrollmentResultMessage =
+  | {
+      type: "resetSpeakerEnrollmentResult";
+      requestId: string;
+      sessionId?: string;
+      ok: true;
+    }
+  | {
+      type: "resetSpeakerEnrollmentResult";
+      requestId: string;
+      sessionId?: string;
+      ok: false;
+      reason: "not_available";
+    };
+
+/** Result returned by {@link setSpeakerGate}. */
+export type SetSpeakerGateResult =
+  | { ok: true; mode: SpeakerGateMode; bargeIn: SpeakerGateBargeInPolicy }
+  | { ok: false; reason: "not_available" | "invalid" | "timeout" };
+
+/** Result returned by {@link resetSpeakerEnrollment}. */
+export type ResetSpeakerEnrollmentResult = {
+  ok: boolean;
+  reason?: "not_available" | "timeout";
+};
+
+/**
+ * The runner dropped an utterance because the speaker gate (`auto` mode) judged
+ * it not to be the enrolled caller. Carries no text. Sent as a
+ * {@link SpeechEventMessage} with `event.type === "user_speech_ignored"`.
+ */
+export interface UserSpeechIgnoredEvent {
+  type: "user_speech_ignored";
+  utteranceId: string;
+  reason: "speaker_mismatch";
+}
 
 /** Thrown by mix group helpers when {@link SessionStartMessage.mixAvailable} is not `true`. */
 export const MIX_REQUIRES_VOICE_PLUS_DATA =

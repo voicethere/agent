@@ -17,10 +17,10 @@ import {
 
 ## Product vs e2e
 
-| Kind        | Dashboard create                                                                                                                                                                                                       | Prebuilt seed bundle                 | Typical consumer        |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
-| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `language-switch`, `world-sync`, `world-sync-binary`, `game-sync`, `voice-showcase`, `recording-consent`, `positional-tts`, `spatial-showcase`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
-| **e2e**     | No                                                                                                                                                                                                                     | No — build from sources at test time | `voicethere/e2e` smokes |
+| Kind        | Dashboard create                                                                                                                                                                                                                       | Prebuilt seed bundle                 | Typical consumer        |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------- |
+| **product** | Yes (`echo`, `echo-dc`, `voice-starter`, `language-switch`, `speaker-gate`, `world-sync`, `world-sync-binary`, `game-sync`, `voice-showcase`, `recording-consent`, `positional-tts`, `spatial-showcase`, `webhooks`, `webhooks-redis`) | Yes — `dist/templates/<id>/agent.js` | Platform project create |
+| **e2e**     | No                                                                                                                                                                                                                                     | No — build from sources at test time | `voicethere/e2e` smokes |
 
 Product templates always set `seedOnCreate: true`. CI fails if a product template is missing its prebuilt bundle after `npm run build`.
 
@@ -59,25 +59,26 @@ See each folder README for the wire format.
 
 Each folder has its own README. Summary:
 
-| Id                  | Folder               | Summary                                                           |
-| ------------------- | -------------------- | ----------------------------------------------------------------- |
-| `echo`              | `echo/`              | Voice + chat echo                                                 |
-| `echo-dc`           | `echo-dc/`           | Data-channel echo, no TTS                                         |
-| `voice-starter`     | `voice-starter/`     | Every speech event                                                |
-| `language-switch`   | `language-switch/`   | Manual `setVoiceLanguage`, or runner auto-switch with a localized echo of the recognized text |
-| `world-sync`        | `world-sync/`        | JSON pose broadcast                                               |
-| `world-sync-binary` | `world-sync-binary/` | Binary pose `ArrayBuffer`                                         |
-| `game-sync`         | `game-sync/`         | Authoritative sim, Redis + binary snapshots                       |
-| `voice-showcase`    | `voice-showcase/`    | Conversational landing demo                                       |
-| `recording-consent` | `recording-consent/` | Recording consent flow                                            |
-| `positional-tts`    | `positional-tts/`    | Orbiting TTS                                                      |
-| `spatial-showcase`  | `spatial-showcase/`  | Orbit / soundboard / proximity                                    |
-| `webhooks`          | `webhooks/`          | Inbound HMAC webhooks                                             |
-| `webhooks-redis`    | `webhooks-redis/`    | Webhooks plus Redis counter                                       |
-| `llm-agent`         | `llm-agent/`         | LLM voice and chat agent, tools, MCP, optional knowledge (RAG)    |
-| `llm-mcp-service`   | `llm-mcp-service/`   | `llm-agent` plus a project service that serves MCP tools          |
-| `llm-docs-rag`      | `llm-docs-rag/`      | `llm-agent` answering from your docs via the `docs-rag-mcp` image |
-| `llm-support-sticky-user` | `llm-support-sticky-user/` | `llm-agent` for support: verified users get their tickets and earlier conversations |
+| Id                        | Folder                     | Summary                                                                                                                      |
+| ------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `echo`                    | `echo/`                    | Voice + chat echo                                                                                                            |
+| `echo-dc`                 | `echo-dc/`                 | Data-channel echo, no TTS                                                                                                    |
+| `voice-starter`           | `voice-starter/`           | Every speech event                                                                                                           |
+| `language-switch`         | `language-switch/`         | Manual `setVoiceLanguage`, or runner auto-switch with a localized echo of the recognized text                                |
+| `speaker-gate`            | `speaker-gate/`            | Caller speaker gate: `auto` listens to the enrolled caller only, `manual` labels every speaker; switch with `setSpeakerGate` |
+| `world-sync`              | `world-sync/`              | JSON pose broadcast                                                                                                          |
+| `world-sync-binary`       | `world-sync-binary/`       | Binary pose `ArrayBuffer`                                                                                                    |
+| `game-sync`               | `game-sync/`               | Authoritative sim, Redis + binary snapshots                                                                                  |
+| `voice-showcase`          | `voice-showcase/`          | Conversational landing demo                                                                                                  |
+| `recording-consent`       | `recording-consent/`       | Recording consent flow                                                                                                       |
+| `positional-tts`          | `positional-tts/`          | Orbiting TTS                                                                                                                 |
+| `spatial-showcase`        | `spatial-showcase/`        | Orbit / soundboard / proximity                                                                                               |
+| `webhooks`                | `webhooks/`                | Inbound HMAC webhooks                                                                                                        |
+| `webhooks-redis`          | `webhooks-redis/`          | Webhooks plus Redis counter                                                                                                  |
+| `llm-agent`               | `llm-agent/`               | LLM voice and chat agent, tools, MCP, optional knowledge (RAG)                                                               |
+| `llm-mcp-service`         | `llm-mcp-service/`         | `llm-agent` plus a project service that serves MCP tools                                                                     |
+| `llm-docs-rag`            | `llm-docs-rag/`            | `llm-agent` answering from your docs via the `docs-rag-mcp` image                                                            |
+| `llm-support-sticky-user` | `llm-support-sticky-user/` | `llm-agent` for support: verified users get their tickets and earlier conversations                                          |
 
 ## E2e templates
 

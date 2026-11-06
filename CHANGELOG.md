@@ -6,6 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-06
+
+### Added
+
+- `setSpeakerGate(sessionId, { mode?, bargeIn? })`, `resetSpeakerEnrollment(sessionId)` and `getSpeakerGate(sessionId)` control the caller speaker gate of a live session. Modes are `disabled`, `auto` and `manual`; the barge-in policy is `caller_only` or `anyone`. The change applies from the next utterance and the enrolled caller is kept. Both calls resolve `{ ok: false, reason: "not_available" }` on runners or nodes without a speaker gate. `SessionContext.speakerGate` reports availability and the starting mode.
+- `onUserSpeechFinal` contexts carry `speaker` (`caller`, `other`, `unknown`), `speakerUnknownReason`, `speakerCheckWindows` and `speakerRechecked` when the runner sends them (`manual` mode).
+- `onUserSpeechIgnored({ sessionId, utteranceId, reason })` fires when the gate in `auto` mode drops a bystander's utterance. It carries no text.
+- Template `speaker-gate`: shows the three modes with chat commands (`speaker-gate:auto|manual|disabled|reset`) and spoken switches.
+
 ## [0.28.1] - 2026-11-04
 
 ### Fixed

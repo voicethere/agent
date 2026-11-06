@@ -133,21 +133,33 @@ describe("createRedactor", () => {
     );
   });
 
-  it("adversarial 50 000-character inputs finish quickly", () => {
+  // ReDoS guard: CPU-time (not wall clock, which flakes under load) ratio of a 10x larger input; linear ~10x, quadratic ~100x, so < 40 separates them.
+  it("adversarial inputs redact in linear time (CPU-time ratio, not wall clock)", () => {
     const r = red();
-    for (const input of [
-      "%".repeat(50_000),
-      "1 ".repeat(25_000),
-      "a@".repeat(25_000),
-      "DE12".repeat(12_500),
-      "1-".repeat(25_000),
-      "4111 ".repeat(10_000),
-      "+".repeat(50_000),
-      `${"a".repeat(30_000)}@${"b.".repeat(10_000)}`,
-    ]) {
-      const t0 = performance.now();
-      r.redact(input);
-      expect(performance.now() - t0).toBeLessThan(200);
+    const cases: Array<(n: number) => string> = [
+      (n) => "%".repeat(n),
+      (n) => "1 ".repeat(n / 2),
+      (n) => "a@".repeat(n / 2),
+      (n) => "DE12".repeat(n / 4),
+      (n) => "1-".repeat(n / 2),
+      (n) => "4111 ".repeat(n / 5),
+      (n) => "+".repeat(n),
+      (n) => `${"a".repeat((n * 3) / 5)}@${"b.".repeat(n / 5)}`,
+    ];
+    const cpuMs = (input: string): number => {
+      let best = Infinity;
+      for (let i = 0; i < 5; i++) {
+        const t0 = process.cpuUsage();
+        r.redact(input);
+        const d = process.cpuUsage(t0);
+        best = Math.min(best, (d.user + d.system) / 1000);
+      }
+      return best;
+    };
+    for (const make of cases) {
+      const small = Math.max(cpuMs(make(5_000)), 1);
+      const large = cpuMs(make(50_000));
+      expect(large / small).toBeLessThan(40);
     }
   });
 

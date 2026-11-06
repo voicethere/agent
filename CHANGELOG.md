@@ -10,7 +10,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ### Fixed
 
-- The greeting's `assistant_done` is now sent as soon as the greeting text is complete, before the audio plays, like every other spoken turn. It used to arrive after playback, so it could come after the `assistant_done` of a turn the caller started during the greeting. It always carries `status: "completed"`; a caller cutting the greeting off arrives as `barge_in` / `agent_interrupted`, as for a reply.
+- The greeting's `assistant_done` is now sent as soon as the greeting text is complete, before the audio plays, like every other spoken turn. It used to arrive after playback, so it could come after the `assistant_done` of a turn the caller started during the greeting. It always carries `status: "completed"`; a caller cutting the greeting off is reported as `barge_in` / `agent_interrupted`, as for a reply.
 
 ## [0.29.0] - 2026-11-06
 

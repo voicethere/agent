@@ -843,12 +843,14 @@ describe("createLlmAgent", () => {
 
   it("greeting delta then done come before a later turn's messages", async () => {
     await boot([[delta("Hi."), done("Hi.")]], {
-      config: { greeting: { text: "Welcome to the line." } },
+      config: {
+        greeting: { text: "Welcome to the line.", interruptible: true },
+      },
       skipSessionAck: true,
     });
     await vi.waitFor(() => expect(speaks()).toHaveLength(1));
     const greet = speaks()[0];
-    speakResult(greet.requestId, greet.turnId);
+    // A turn starts while the greeting is still playing.
     say("hello");
     await vi.waitFor(() => expect(summaries).toHaveLength(1));
     const seq = clientPayloads()
@@ -860,6 +862,7 @@ describe("createLlmAgent", () => {
     ]);
     expect(seq.slice(2).every((x) => x.endsWith(":false"))).toBe(true);
     expect(seq.length).toBeGreaterThan(2);
+    speakResult(greet.requestId, greet.turnId);
   });
 
   it("interrupted greeting sends exactly one assistant_done", async () => {

@@ -11,6 +11,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 ### Fixed
 
 - `chat_reply` now carries the `turnId` of its turn. Typed LLM turns send the same `turnId` as the `assistant_done` before it, and flow replies send the flow turn's `turnId` (the one stored with the reply). A client can pair a reply with its turn by id instead of by arrival order. Messages without a turn keep sending no `turnId`.
+
 ## [0.29.3] - 2026-11-06
 
 ### Added

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { checkSync } from "recheck";
 import { describe, expect, it } from "vitest";
 import {
@@ -5,6 +6,10 @@ import {
   REDACT_PATTERNS,
   secretValuesFromEnv,
 } from "../../../src/llm/agent/redact.js";
+
+// Pure-JS sync backend: no JVM or native binary at check time. See
+// https://makenowjust-labs.github.io/recheck/docs/usage/as-javascript-library/
+process.env.RECHECK_SYNC_BACKEND = "pure";
 
 const SECRET = "sk-live-abcdef123456";
 
@@ -141,13 +146,26 @@ describe("createRedactor", () => {
   // flaked under host load).
   const RECHECK_PARAMS = {
     checker: "automaton",
-    maxRepeatCount: 100,
     timeout: null,
   } as const;
-  const complexity = (re: RegExp): string => {
-    process.env.RECHECK_SYNC_BACKEND = "pure";
-    return checkSync(re.source, re.flags, RECHECK_PARAMS).status;
-  };
+  const complexity = (re: RegExp): string =>
+    checkSync(re.source, re.flags, RECHECK_PARAMS).status;
+
+  it("REDACT_PATTERNS lists every regex in redact.ts", () => {
+    const src = readFileSync(
+      new URL("../../../src/llm/agent/redact.ts", import.meta.url),
+      "utf8",
+    );
+    expect(src).not.toMatch(/\bRegExp\(/);
+    const declared = [...src.matchAll(/^const (\w+)\s*=\s*\/(?!\/)/gm)]
+      .map((m) => m[1])
+      .sort();
+    expect(declared).toEqual(Object.keys(REDACT_PATTERNS).sort());
+    expect(src).not.toMatch(
+      /\.(?:replace|replaceAll|match|matchAll|search|split|test|exec)\(\s*\//,
+    );
+    expect(src).not.toMatch(/\/[dgimsuyv]*\.(?:test|exec|source)\b/);
+  });
 
   it("every redactor pattern is safe (no super-linear backtracking)", () => {
     for (const [name, re] of Object.entries(REDACT_PATTERNS)) {

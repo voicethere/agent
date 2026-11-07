@@ -1,6 +1,8 @@
+import { checkSync } from "recheck";
 import { describe, expect, it } from "vitest";
 import {
   createRedactor,
+  REDACT_PATTERNS,
   secretValuesFromEnv,
 } from "../../../src/llm/agent/redact.js";
 
@@ -133,34 +135,90 @@ describe("createRedactor", () => {
     );
   });
 
-  // ReDoS guard: CPU-time (not wall clock, which flakes under load) ratio of a 10x larger input; linear ~10x, quadratic ~100x, so < 40 separates them.
-  it("adversarial inputs redact in linear time (CPU-time ratio, not wall clock)", () => {
-    const r = red();
-    const cases: Array<(n: number) => string> = [
-      (n) => "%".repeat(n),
-      (n) => "1 ".repeat(n / 2),
-      (n) => "a@".repeat(n / 2),
-      (n) => "DE12".repeat(n / 4),
-      (n) => "1-".repeat(n / 2),
-      (n) => "4111 ".repeat(n / 5),
-      (n) => "+".repeat(n),
-      (n) => `${"a".repeat((n * 3) / 5)}@${"b.".repeat(n / 5)}`,
-    ];
-    const cpuMs = (input: string): number => {
-      let best = Infinity;
-      for (let i = 0; i < 5; i++) {
-        const t0 = process.cpuUsage();
-        r.redact(input);
-        const d = process.cpuUsage(t0);
-        best = Math.min(best, (d.user + d.system) / 1000);
-      }
-      return best;
-    };
-    for (const make of cases) {
-      const small = Math.max(cpuMs(make(5_000)), 1);
-      const large = cpuMs(make(50_000));
-      expect(large / small).toBeLessThan(40);
+  // ReDoS guard, static: recheck's automaton checker decides each pattern's
+  // complexity from the regex itself. No time limit and no fuzzing, so the
+  // verdict does not depend on how much CPU the test gets (a CPU-time ratio
+  // flaked under host load).
+  const RECHECK_PARAMS = {
+    checker: "automaton",
+    maxRepeatCount: 100,
+    timeout: null,
+  } as const;
+  const complexity = (re: RegExp): string => {
+    process.env.RECHECK_SYNC_BACKEND = "pure";
+    return checkSync(re.source, re.flags, RECHECK_PARAMS).status;
+  };
+
+  it("every redactor pattern is safe (no super-linear backtracking)", () => {
+    for (const [name, re] of Object.entries(REDACT_PATTERNS)) {
+      expect({ name, status: complexity(re) }).toEqual({
+        name,
+        status: "safe",
+      });
     }
+  });
+
+  it("the ReDoS checker flags super-linear mutants", () => {
+    expect(complexity(/(a+)+@/)).toBe("vulnerable");
+    expect(complexity(/\s*\d+\s*x/)).toBe("vulnerable");
+  });
+
+  // isPhone, luhn and redactIbanCandidate only run on a match of these
+  // patterns, so their loops are bounded by the longest possible match.
+  it("hand-written helpers only see candidates the patterns cap", () => {
+    const n = 50_000;
+    const caps: Array<[RegExp, number, string[]]> = [
+      // \b[A-Z]{2}\d{2}[A-Za-z0-9 ]{11,40}: 2 + 2 + 40
+      [
+        REDACT_PATTERNS.IBAN_CANDIDATE_RE,
+        44,
+        [
+          "DE12".repeat(n / 4),
+          `DE12${"A".repeat(n)}`,
+          `DE12${"1 ".repeat(n / 2)}`,
+        ],
+      ],
+      // \b\d(?:[ -]?\d){14,18}\b: 1 + 2 * 18
+      [
+        REDACT_PATTERNS.CARD_RE,
+        37,
+        ["1".repeat(n), "1-".repeat(n / 2), "4111 ".repeat(n / 5)],
+      ],
+      // (?:\+|\()?\d[\d ().-]{6,22}\d: 1 + 1 + 22 + 1
+      [
+        REDACT_PATTERNS.PHONE_RE,
+        25,
+        ["1 ".repeat(n / 2), `+1${"2".repeat(n)}`, `(1${" 2".repeat(n / 2)}`],
+      ],
+    ];
+    for (const [re, cap, inputs] of caps) {
+      for (const input of inputs) {
+        const longest = Math.max(
+          0,
+          ...[...input.matchAll(re)].map((m) => m[0].length),
+        );
+        expect(longest).toBeLessThanOrEqual(cap);
+      }
+    }
+  });
+
+  it("adversarial inputs redact correctly", () => {
+    const r = red();
+    const n = 50_000;
+    const unchanged = [
+      "%".repeat(n),
+      "a@".repeat(n / 2),
+      "DE12".repeat(n / 4),
+      "1-".repeat(n / 2),
+      "4111 ".repeat(n / 5),
+      "+".repeat(n),
+      `${"a".repeat((n * 3) / 5)}@${"b.".repeat(n / 5)}`,
+    ];
+    for (const input of unchanged) expect(r.redact(input)).toBe(input);
+    const spaced = r.redact("1 ".repeat(n / 2));
+    expect(typeof spaced).toBe("string");
+    expect(spaced).toContain("[redacted:phone]");
+    expect(String(spaced).replace(/\[redacted:phone\]|[ 1]/g, "")).toBe("");
   });
 
   it("an IBAN followed by words is redacted without eating the words", () => {

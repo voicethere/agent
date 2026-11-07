@@ -176,9 +176,17 @@ describe("createRedactor", () => {
     }
   });
 
+  // The mutants are source strings, never compiled, so no slow regex exists in the test.
   it("the ReDoS checker flags super-linear mutants", () => {
-    expect(complexity(/(a+)+@/)).toBe("vulnerable");
-    expect(complexity(/\s*\d+\s*x/)).toBe("vulnerable");
+    for (const source of ["(a+)+@", "\\s*\\d+\\s*x"]) {
+      expect({
+        source,
+        status: checkSync(source, "", RECHECK_PARAMS).status,
+      }).toEqual({
+        source,
+        status: "vulnerable",
+      });
+    }
   });
 
   // isPhone, luhn and redactIbanCandidate only run on a match of these

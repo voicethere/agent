@@ -18,13 +18,36 @@ const PHONE_RE = /(?<![\w.:/+-])(?:\+|\()?\d[\d ().-]{6,22}\d(?![\w.:/-])/g;
 const MAX_PII_CHARS = 65_536;
 const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const NON_DIGIT_RE = /\D/g;
+const PHONE_SEP_RE = /[ .-]/g;
+const SPACE_RE = / /g;
+const DIGITS_RE = /^[0-9]+$/;
+const IBAN_HEAD_RE = /[A-Z]{2}\d{2}/;
+const CARD_SEP_RE = /[ -]/g;
+
+/** Every regex the redactor runs, for the static ReDoS check in its test. */
+export const REDACT_PATTERNS = {
+  SENSITIVE_KEY_RE,
+  EMAIL_RE,
+  IBAN_CANDIDATE_RE,
+  CARD_RE,
+  PHONE_RE,
+  IPV4_RE,
+  ISO_DATE_RE,
+  NON_DIGIT_RE,
+  PHONE_SEP_RE,
+  SPACE_RE,
+  DIGITS_RE,
+  IBAN_HEAD_RE,
+  CARD_SEP_RE,
+} as const satisfies Record<string, RegExp>;
 
 function isPhone(m: string): boolean {
-  const d = m.replace(/\D/g, "");
+  const d = m.replace(NON_DIGIT_RE, "");
   if (d.length < 8 || d.length > 15) return false;
   if (IPV4_RE.test(m) || ISO_DATE_RE.test(m)) return false;
   if (m.startsWith("+") || m.includes("(")) return true;
-  return (m.match(/[ .-]/g) ?? []).length >= 2;
+  return (m.match(PHONE_SEP_RE) ?? []).length >= 2;
 }
 
 const NON_SECRET_AGENT_KEYS = new Set([
@@ -63,14 +86,14 @@ function luhn(digits: string): boolean {
 }
 
 function ibanValid(raw: string): boolean {
-  const s = raw.replace(/ /g, "").toUpperCase();
+  const s = raw.replace(SPACE_RE, "").toUpperCase();
   if (s.length < 15 || s.length > 34) return false;
   const rearranged = s.slice(4) + s.slice(0, 4);
   let rem = 0;
   for (const ch of rearranged) {
     const code = ch.charCodeAt(0);
     const v = code >= 65 && code <= 90 ? String(code - 55) : ch;
-    if (!/^[0-9]+$/.test(v)) return false;
+    if (!DIGITS_RE.test(v)) return false;
     for (const digit of v) rem = (rem * 10 + (digit.charCodeAt(0) - 48)) % 97;
   }
   return rem === 1;
@@ -84,7 +107,7 @@ function redactIbanCandidate(m: string): string {
     if (ibanValid(head)) return `[redacted:iban]${m.slice(end)}`;
   }
   // An IBAN-shaped word may hide a real IBAN later in the candidate.
-  const next = m.slice(1).search(/[A-Z]{2}\d{2}/);
+  const next = m.slice(1).search(IBAN_HEAD_RE);
   if (next >= 0) {
     const at = next + 1;
     return m.slice(0, at) + redactIbanCandidate(m.slice(at));
@@ -101,7 +124,7 @@ function redactPii(input: string): string {
     .replace(EMAIL_RE, "[redacted:email]")
     .replace(IBAN_CANDIDATE_RE, redactIbanCandidate)
     .replace(CARD_RE, (m) => {
-      const digits = m.replace(/[ -]/g, "");
+      const digits = m.replace(CARD_SEP_RE, "");
       return [15, 16, 19].includes(digits.length) &&
         "3456".includes(digits[0]) &&
         luhn(digits)

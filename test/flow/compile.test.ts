@@ -67,9 +67,9 @@ describe("compileFlow", () => {
   });
 
   it("normalizes long punctuation runs in linear time", () => {
-    const s = "!".repeat(200_000) + "x";
-    // The old /[.!?]+$/ backtracked for seconds here; a regression hangs and
-    // fails on the vitest testTimeout instead of on a wall-clock assertion.
+    const s = "!".repeat(500_000) + "x";
+    // The old /[.!?]+$/ is quadratic: at this size a regression takes minutes
+    // and fails on the vitest testTimeout, not on a wall-clock assertion.
     expect(normalizeUtterance(s)).toBe(s);
   });
 

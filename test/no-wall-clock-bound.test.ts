@@ -22,6 +22,8 @@ const ORDERING_MATCHERS = new Set([
   "toBeCloseTo",
 ]);
 
+const EXPECT_CALLEES = new Set(["expect", "expect.soft", "expect.poll"]);
+
 const TIMING_CALLEES = new Set([
   "Date.now",
   "performance.now",
@@ -31,7 +33,9 @@ const TIMING_CALLEES = new Set([
 ]);
 
 function isTimingCall(node: ts.Node): boolean {
-  return ts.isCallExpression(node) && TIMING_CALLEES.has(node.expression.getText());
+  return (
+    ts.isCallExpression(node) && TIMING_CALLEES.has(node.expression.getText())
+  );
 }
 
 /** True when `node` contains a timing source or a tainted identifier. */
@@ -68,8 +72,16 @@ function bindingNames(name: ts.BindingName, out: string[]): void {
   }
 }
 
-export function findWallClockBounds(source: string, fileName: string): number[] {
-  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+export function findWallClockBounds(
+  source: string,
+  fileName: string,
+): number[] {
+  const sf = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+  );
   const tainted = new Set<string>();
 
   const taintPass = (): boolean => {
@@ -113,9 +125,12 @@ export function findWallClockBounds(source: string, fileName: string): number[] 
   const expectArg = (expr: ts.Expression): ts.Expression | undefined => {
     let e: ts.Expression = expr;
     for (;;) {
-      if (ts.isPropertyAccessExpression(e)) e = e.expression; // .not, .resolves
+      if (ts.isPropertyAccessExpression(e))
+        e = e.expression; // .not, .resolves
       else if (ts.isCallExpression(e)) {
-        return e.expression.getText() === "expect" ? e.arguments[0] : undefined;
+        return EXPECT_CALLEES.has(e.expression.getText())
+          ? e.arguments[0]
+          : undefined;
       } else return undefined;
     }
   };
@@ -136,7 +151,7 @@ export function findWallClockBounds(source: string, fileName: string): number[] 
     ts.forEachChild(n, visit);
   };
   visit(sf);
-  return lines;
+  return [...new Set(lines)].sort((a, b) => a - b);
 }
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -147,12 +162,14 @@ describe("findWallClockBounds", () => {
       join(here, "fixtures/wall-clock/pre-agent-176-redact.ts.txt"),
       "utf8",
     );
-    const lineOf = src.split("\n").findIndex((l) => l.includes("expect(large / small)")) + 1;
+    const lineOf =
+      src.split("\n").findIndex((l) => l.includes("expect(large / small)")) + 1;
     expect(findWallClockBounds(src, "x.test.ts")).toEqual([lineOf]);
   });
 
   it.each([
     ["expect(Date.now() - t0).toBeLessThan(100);"],
+    ["expect.soft(Date.now() - t0).toBeLessThan(100);"],
     ["const e = performance.now() - t; expect(e).toBeGreaterThan(5);"],
     ["const [s] = process.hrtime(start); expect(s).toBeLessThan(1);"],
     ["expect(process.hrtime.bigint() - t).toBeLessThan(10n);"],
@@ -170,15 +187,62 @@ describe("findWallClockBounds", () => {
   });
 });
 
-// File-level allowlist; every entry needs a concrete reason. A stale entry
-// (file no longer has a hit) fails the scan.
-const ALLOWLIST: { file: string; reason: string }[] = [
-  {
-    file: "test/llm-agent-template.test.ts",
-    reason:
-      "false positive: `base` is tainted only because its options hold a Date.now()-derived Redis namespace; the flagged expect asserts an indexed chunk count, not time",
-  },
-];
+// Allowlist entries are pinned to the trimmed text of the flagged `expect`
+// line, so an entry cannot hide a second bound in the same file. Every entry
+// needs a concrete reason. An entry with no matching hit is stale and fails.
+export type AllowEntry = { file: string; expect: string; reason: string };
+export type Hit = { file: string; line: number; text: string };
+
+export function applyAllowlist(
+  hits: Hit[],
+  allowlist: AllowEntry[],
+): { violations: string[]; stale: string[] } {
+  const key = (file: string, text: string): string => `${file}|${text.trim()}`;
+  const allowed = new Set(allowlist.map((a) => key(a.file, a.expect)));
+  const seen = new Set(hits.map((h) => key(h.file, h.text)));
+  return {
+    violations: hits
+      .filter((h) => !allowed.has(key(h.file, h.text)))
+      .map((h) => `${h.file}:${h.line} ${h.text.trim()}`),
+    stale: allowlist
+      .filter((a) => !seen.has(key(a.file, a.expect)))
+      .map((a) => `${a.file}|${a.expect.trim()}`),
+  };
+}
+
+const ALLOWLIST: AllowEntry[] = [];
+
+describe("applyAllowlist", () => {
+  const A = "expect(Date.now() - t).toBeLessThan(50);";
+  const entry: AllowEntry = {
+    file: "test/a.test.ts",
+    expect: A,
+    reason: "fake clock",
+  };
+
+  it("a second bound in an allowlisted file is still a violation", () => {
+    const r = applyAllowlist(
+      [
+        { file: "test/a.test.ts", line: 3, text: `  ${A}` },
+        {
+          file: "test/a.test.ts",
+          line: 9,
+          text: "expect(Date.now() - t0).toBeLessThan(5);",
+        },
+      ],
+      [entry],
+    );
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]).toContain("test/a.test.ts:9");
+    expect(r.stale).toEqual([]);
+  });
+
+  it("an entry with no matching hit is stale", () => {
+    const r = applyAllowlist([], [entry]);
+    expect(r.violations).toEqual([]);
+    expect(r.stale).toHaveLength(1);
+  });
+});
 
 function listTests(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -193,22 +257,27 @@ function listTests(dir: string, out: string[] = []): string[] {
 
 describe("repo scan: no wall-clock or CPU-time bounds in test assertions", () => {
   const self = fileURLToPath(import.meta.url);
-  const hits = new Map<string, number[]>();
+  const hits: Hit[] = [];
   for (const file of listTests(here)) {
     if (file === self) continue;
-    const lines = findWallClockBounds(readFileSync(file, "utf8"), file);
-    if (lines.length > 0) hits.set(relative(join(here, ".."), file), lines);
+    const source = readFileSync(file, "utf8");
+    const srcLines = source.split("\n");
+    for (const line of findWallClockBounds(source, file)) {
+      hits.push({
+        file: relative(join(here, ".."), file),
+        line,
+        text: srcLines[line - 1] ?? "",
+      });
+    }
   }
-  const allowed = new Set(ALLOWLIST.map((a) => a.file));
+  const result = applyAllowlist(hits, ALLOWLIST);
 
   it("has no unallowlisted hits", () => {
-    const bad = [...hits].filter(([f]) => !allowed.has(f)).map(([f, l]) => `${f}:${l.join(",")}`);
-    expect(bad).toEqual([]);
+    expect(result.violations).toEqual([]);
   });
 
   it("has no stale allowlist entries and every entry has a reason", () => {
-    const stale = ALLOWLIST.filter((a) => !hits.has(a.file)).map((a) => a.file);
-    expect(stale).toEqual([]);
+    expect(result.stale).toEqual([]);
     expect(ALLOWLIST.filter((a) => a.reason.trim() === "")).toEqual([]);
   });
 });

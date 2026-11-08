@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -225,7 +225,7 @@ describe.skipIf(!queryEngine)(
           return { vectors, model: "fake", dims: d };
         },
       };
-      const namespace = `tpl${process.pid}x${Date.now()}`;
+      const namespace = `tpl${randomUUID().replaceAll("-", "")}`;
       const base = createRedisKnowledgeBase({
         redisUrl: kbUrl,
         namespace,

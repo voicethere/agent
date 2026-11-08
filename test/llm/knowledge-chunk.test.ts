@@ -84,10 +84,10 @@ describe("chunkMarkdown", () => {
   });
 
   it("stays linear on long runs of spaces and hashes", () => {
-    // A quadratic regression hangs and fails on the vitest testTimeout.
+    // A quadratic regression takes minutes here and fails on the vitest testTimeout.
     expect(() => {
-      chunkMarkdown({ id: "x", text: `# a${" ".repeat(200_000)}b` });
-      chunkMarkdown({ id: "y", text: `## ${"#".repeat(200_000)}x` });
+      chunkMarkdown({ id: "x", text: `# a${" ".repeat(500_000)}b` });
+      chunkMarkdown({ id: "y", text: `## ${"#".repeat(500_000)}x` });
     }).not.toThrow();
   });
 

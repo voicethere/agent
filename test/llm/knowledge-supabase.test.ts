@@ -163,12 +163,11 @@ describe("createSupabaseKnowledgeBase", () => {
       { status: 200, hang: true },
     ];
     const { kb } = make({ timeoutMs: 100 });
-    const started = Date.now();
+    // Without the 100 ms bound each attempt waits the 8 s default and the test fails on its 3 s timeout.
     await expect(kb.search("q")).rejects.toMatchObject({
       code: "KB_SUPABASE_ERROR",
     });
-    expect(Date.now() - started).toBeLessThan(3000);
-  });
+  }, 3_000);
 
   it("rejects a bad rpc name before any request", () => {
     expect(() => make({ rpc: "match_documents/../admin" })).toThrow(/rpc name/);

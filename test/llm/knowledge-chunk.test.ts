@@ -84,10 +84,11 @@ describe("chunkMarkdown", () => {
   });
 
   it("stays linear on long runs of spaces and hashes", () => {
-    const start = Date.now();
-    chunkMarkdown({ id: "x", text: `# a${" ".repeat(200_000)}b` });
-    chunkMarkdown({ id: "y", text: `## ${"#".repeat(200_000)}x` });
-    expect(Date.now() - start).toBeLessThan(1000);
+    // A quadratic regression takes minutes here and fails on the vitest testTimeout.
+    expect(() => {
+      chunkMarkdown({ id: "x", text: `# a${" ".repeat(500_000)}b` });
+      chunkMarkdown({ id: "y", text: `## ${"#".repeat(500_000)}x` });
+    }).not.toThrow();
   });
 
   it("rejects an overlap that is not smaller than the window", () => {

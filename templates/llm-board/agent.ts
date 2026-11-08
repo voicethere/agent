@@ -25,7 +25,25 @@ const boards = new Map<string, Board>();
 const roomOf = new Map<string, string>();
 const members = new Map<string, Set<string>>();
 
-function roomFor(sessionId: string): string {
+// Ids of sessions that ended, newest last, capped. A tool call or data message
+// that arrives after the session ended must not bring its private room back,
+// or the board would leak for the life of the process.
+const MAX_ENDED = 1000;
+const ended = new Set<string>();
+
+function markEnded(sessionId: string): void {
+  ended.delete(sessionId);
+  ended.add(sessionId);
+  if (ended.size > MAX_ENDED) {
+    const oldest = ended.values().next().value;
+    if (oldest !== undefined) ended.delete(oldest);
+  }
+}
+
+const SESSION_ENDED = "The session has ended.";
+
+function roomFor(sessionId: string): string | null {
+  if (ended.has(sessionId)) return null;
   let room = roomOf.get(sessionId);
   if (!room) {
     room = `s:${sessionId}`;
@@ -56,8 +74,9 @@ function leave(sessionId: string): void {
   }
 }
 
-function boardFor(sessionId: string): Board {
+function boardFor(sessionId: string): Board | null {
   const room = roomFor(sessionId);
+  if (!room) return null;
   let board = boards.get(room);
   if (!board) {
     board = new Board();
@@ -69,13 +88,18 @@ function boardFor(sessionId: string): Board {
 /** Sends the room's board to every session in it. */
 function broadcast(sessionId: string): void {
   const room = roomFor(sessionId);
-  const payload = { type: "board", notes: boardFor(sessionId).list() };
+  const board = boardFor(sessionId);
+  if (!room || !board) return;
+  const payload = { type: "board", notes: board.list() };
   for (const member of members.get(room) ?? []) {
     sendToClient(member, payload);
   }
 }
 
 function apply(sessionId: string, m: BoardMessage): void {
+  if (ended.has(sessionId)) return;
+  const board = boardFor(sessionId);
+  if (!board) return;
   switch (m.type) {
     case "board.join": {
       if (roomOf.get(sessionId) !== m.room) {
@@ -85,21 +109,21 @@ function apply(sessionId: string, m: BoardMessage): void {
       break;
     }
     case "note.add":
-      boardFor(sessionId).add({ ...m, author: "user" });
+      board.add({ ...m, author: "user" });
       break;
     case "note.update": {
       const { type: _type, id, ...patch } = m;
-      boardFor(sessionId).update(id, patch);
+      board.update(id, patch);
       break;
     }
     case "note.remove":
-      boardFor(sessionId).remove(m.id);
+      board.remove(m.id);
       break;
     case "board.sync":
       // Only the requester gets the board.
       sendToClient(sessionId, {
         type: "board",
-        notes: boardFor(sessionId).list(),
+        notes: board.list(),
       });
       return;
   }
@@ -113,7 +137,9 @@ const listNotes = defineTool({
   description: "List every note on the shared board.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: (_args, ctx) => {
-    const notes = boardFor(ctx.sessionId).list();
+    const board = boardFor(ctx.sessionId);
+    if (!board) return SESSION_ENDED;
+    const notes = board.list();
     if (notes.length === 0) return "The board is empty.";
     return notes
       .map((n) => `${n.id}: ${n.text} (${n.color}, ${n.author})`)
@@ -131,7 +157,9 @@ const addNote = defineTool<{ text: string; color?: NoteColor }>({
     additionalProperties: false,
   },
   handler: ({ text, color }, ctx) => {
-    const res = boardFor(ctx.sessionId).add({ text, color, author: "ai" });
+    const board = boardFor(ctx.sessionId);
+    if (!board) return SESSION_ENDED;
+    const res = board.add({ text, color, author: "ai" });
     if (!res.ok) return res.error;
     broadcast(ctx.sessionId);
     return `Added note ${res.value.id}.`;
@@ -161,18 +189,22 @@ const updateNote = defineTool<{
     additionalProperties: false,
   },
   handler: ({ id, ...patch }, ctx) => {
-    const res = boardFor(ctx.sessionId).update(id, patch);
+    const board = boardFor(ctx.sessionId);
+    if (!board) return SESSION_ENDED;
+    const res = board.update(id, patch);
     if (!res.ok) return res.error;
     broadcast(ctx.sessionId);
     return `Updated note ${id}.`;
   },
 });
 
+export const boardTools = [listNotes, addNote, updateNote];
+
 export function createBoardAgent(over: Partial<CreateLlmAgentOptions> = {}) {
   const llm = createLlmAgent({
     config,
     systemPrompt,
-    tools: [listNotes, addNote, updateNote],
+    tools: boardTools,
     providers: [openai],
     ...over,
   });
@@ -188,8 +220,13 @@ export function createBoardAgent(over: Partial<CreateLlmAgentOptions> = {}) {
       }
       return llm.onDataChannelMessage?.(ctx);
     },
+    onSessionStart(ctx: Parameters<NonNullable<typeof llm.onSessionStart>>[0]) {
+      ended.delete(ctx.sessionId);
+      return llm.onSessionStart?.(ctx);
+    },
     onSessionEnd(ctx: { sessionId: string }) {
       leave(ctx.sessionId);
+      markEnded(ctx.sessionId);
       return llm.onSessionEnd?.(ctx);
     },
   };

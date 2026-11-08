@@ -296,7 +296,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
       "Shared sticky-note board over the data channel with an LLM facilitator that reads and edits notes.",
     category: "voice-data",
     description:
-      "Clients add, move and remove notes with data channel messages; an LLM facilitator reads the board with list_notes and adds or changes notes with add_note and update_note. State lives in the agent process for the session.",
+      "Clients add, move and remove notes with data channel messages; an LLM facilitator reads the board with list_notes and adds or changes notes with add_note and update_note. Boards are scoped to rooms: a session has a private board until it sends `board.join` with a room id (`a-z`, `0-9`, `-`, 6 to 40 characters). Sessions in the same room share one board, which is deleted when the last of them ends.",
     sourceFiles: [
       "llm-board/agent.ts",
       "llm-board/board.ts",

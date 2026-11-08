@@ -11,7 +11,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 ### Added
 
 - New template `llm-language-tutor`: an English practice partner built on `llm-agent`, with `knowledge.store: "redis"` over `knowledge/lessons.md`.
-- New template `llm-board`: a shared sticky-note board over the data channel with an LLM facilitator. Clients add, move and remove notes with `note.add`, `note.update`, `note.remove` and `board.sync`; the model reads and edits the board with `list_notes`, `add_note` and `update_note`. State lives in the agent process for the session.
+- New template `llm-board`: a shared sticky-note board over the data channel with an LLM facilitator. Clients add, move and remove notes with `note.add`, `note.update`, `note.remove`, `board.join` and `board.sync`; the model reads and edits the board with `list_notes`, `add_note` and `update_note`. Boards are scoped to rooms: a session has a private board until it sends `board.join` with a room id (`a-z`, `0-9`, `-`, 6 to 40 characters). Sessions in the same room share one board, which is deleted when the last of them ends.
 
 ## [0.29.2] - 2026-11-06
 

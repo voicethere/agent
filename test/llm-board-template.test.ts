@@ -79,6 +79,25 @@ describe("llm-board board.ts", () => {
     expect(b.add({ text: "", author: "user" }).ok).toBe(false);
   });
 
+  it("rejects coordinates outside 0..1 and unknown colors", () => {
+    const b = new Board();
+    const seed = b.add({ text: "Seed", author: "user" });
+    const id = seed.ok ? seed.value.id : "";
+    const before = b.list();
+    expect(b.add({ text: "x", x: 1.5, author: "user" })).toEqual({
+      ok: false,
+      error: "x must be between 0 and 1",
+    });
+    expect(b.add({ text: "x", color: "red" as never, author: "user" })).toEqual(
+      { ok: false, error: "unknown color" },
+    );
+    expect(b.update(id, { y: -0.1 })).toEqual({
+      ok: false,
+      error: "y must be between 0 and 1",
+    });
+    expect(b.list()).toEqual(before);
+  });
+
   it("places new notes on different free slots", () => {
     const b = new Board();
     const p = b.add({ text: "a", author: "ai" });
@@ -205,6 +224,13 @@ describe("llm-board agent wiring", () => {
   let createBoardAgent: (
     over: Record<string, unknown>,
   ) => Parameters<typeof defineAgent>[0];
+  let boardTools: {
+    name: string;
+    handler: (
+      args: unknown,
+      ctx: { sessionId: string; timeoutMs: number },
+    ) => Promise<string>;
+  }[];
 
   // The template calls defineAgent when imported. Import it with process.on
   // captured and thrown away, so only the agent each test defines is live.
@@ -213,7 +239,9 @@ describe("llm-board agent wiring", () => {
     // Variable specifier: the template's own imports (extensionless, .md, .json)
     // are bundler-style and not for the test tsconfig to resolve.
     const agentPath = "../templates/llm-board/agent.js";
-    ({ createBoardAgent } = await import(/* @vite-ignore */ agentPath));
+    ({ createBoardAgent, boardTools } = await import(
+      /* @vite-ignore */ agentPath
+    ));
     importCapture.restore();
   });
 
@@ -442,6 +470,60 @@ describe("llm-board agent wiring", () => {
     dc(A, { type: "note.add", text: "Moved on" });
     await vi.waitFor(() => expect(boardsFor(A)).toHaveLength(1));
     expect(boardsFor(B)).toHaveLength(0);
+  });
+
+  it("sessions that never join have separate private boards", async () => {
+    await boot([], [A, B]);
+    dc(A, { type: "note.add", text: "Private A" });
+    await vi.waitFor(() => expect(boardsFor(A)).toHaveLength(1));
+    expect(boardsFor(B)).toHaveLength(0);
+    expect(boardsFor(A)[0]?.notes.map((n) => n.text)).toEqual(["Private A"]);
+
+    dc(B, { type: "board.sync" });
+    await vi.waitFor(() => expect(boardsFor(B)).toHaveLength(1));
+    expect(boardsFor(B)[0]?.notes).toEqual([]);
+  });
+
+  it("a tool call or data message after the session ended creates no state", async () => {
+    const fake = fakeProvider([]);
+    const agent = createBoardAgent({
+      provider: fake.provider,
+      env: () => ({ AGENT_OPENROUTER_API_KEY: "unused" }),
+    });
+    const GONE = "peer-gone";
+    // Never started through the runtime: end it, then send late traffic.
+    await agent.onSessionEnd?.({ sessionId: GONE });
+    capture.send.mockClear();
+    await agent.onDataChannelMessage?.({
+      sessionId: GONE,
+      message: { type: "note.add", text: "late" },
+    } as never);
+    await agent.onDataChannelMessage?.({
+      sessionId: GONE,
+      message: { type: "board.sync" },
+    } as never);
+    expect(sentToClients()).toEqual([]);
+
+    const call = (name: string, args: unknown) =>
+      boardTools
+        .find((t) => t.name === name)
+        ?.handler(args, { sessionId: GONE, timeoutMs: 1000 });
+    expect(await call("list_notes", {})).toBe("The session has ended.");
+    expect(await call("add_note", { text: "late" })).toBe(
+      "The session has ended.",
+    );
+    expect(await call("update_note", { id: "n1", text: "late" })).toBe(
+      "The session has ended.",
+    );
+
+    // The same id can start again (the runtime may reuse it) and begins empty.
+    defineAgent(agent);
+    await startSession(GONE);
+    capture.send.mockClear();
+    dc(GONE, { type: "board.sync" });
+    await vi.waitFor(() => expect(boardsFor(GONE)).toHaveLength(1));
+    expect(boardsFor(GONE)[0]?.notes).toEqual([]);
+    expect(await call("list_notes", {})).toBe("The board is empty.");
   });
 
   it("after both sessions end the room's board is gone and a new join starts empty", async () => {

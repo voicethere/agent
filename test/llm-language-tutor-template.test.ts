@@ -42,6 +42,11 @@ describe("llm-language-tutor template", () => {
     }
   });
 
+  it("prompt requires searching before saying anything", () => {
+    const prompt = readFileSync(join(templateDir, "prompt.md"), "utf8");
+    expect(prompt).toContain("before you say anything");
+  });
+
   it("config validates with Redis knowledge on and openrouter embeddings", () => {
     const config = readConfig();
     const result = validateLlmAgentConfig(config);

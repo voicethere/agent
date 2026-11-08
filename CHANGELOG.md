@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- llm-language-tutor: the tutor looks up an idiom before it answers, instead of guessing first.
+
 ## [0.30.0] - 2026-11-08
 
 ### Added

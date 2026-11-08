@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- New template `llm-language-tutor`: an English practice partner built on `llm-agent`, with `knowledge.store: "redis"` over `knowledge/lessons.md`.
+
 ## [0.29.2] - 2026-11-06
 
 ### Fixed

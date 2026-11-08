@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/@voicethere/agent/schema/voicethere.llm.schema.json",
+  "version": 1,
+  "provider": "openrouter",
+  "model": "amazon/nova-micro-v1",
+  "apiKeySecret": "AGENT_OPENROUTER_API_KEY",
+  "maxOutputTokens": 512,
+  "greeting": {
+    "text": "Hi! I'm your English practice partner. What would you like to talk about today?",
+    "interruptible": true
+  },
+  "bargeIn": { "mode": "project" },
+  "history": { "turns": 20, "interruptionNote": true },
+  "fillers": {
+    "thinking": {
+      "phrases": ["Okay.", "Right.", "Let me think."],
+      "afterMs": 1500
+    },
+    "toolCall": {
+      "phrases": ["Let me check my lessons.", "One moment."]
+    },
+    "interruptible": true
+  },
+  "tools": {
+    "maxRounds": 3,
+    "timeoutMs": 15000
+  },
+  "toolSources": [],
+  "knowledge": {
+    "store": "redis",
+    "topK": 3,
+    "embeddings": {
+      "provider": "openrouter",
+      "model": "openai/text-embedding-3-small"
+    },
+    "redis": { "namespace": "tutor" }
+  },
+  "interruptPolicy": "cancel"
+}

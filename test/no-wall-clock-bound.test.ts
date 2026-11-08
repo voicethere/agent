@@ -178,10 +178,22 @@ describe("findWallClockBounds", () => {
   });
 
   it.each([
+    ["let t;\nt = performance.now();\nexpect(t).toBeGreaterThan(0);", [3]],
+    [
+      "let total = 0;\ntotal += performance.now() - t0;\nexpect(total).toBeLessThan(5);",
+      [3],
+    ],
+    ["expect.poll(() => Date.now() - t0).toBeLessThan(100);", [1]],
+  ])("flags %j", (src, lines) => {
+    expect(findWallClockBounds(src, "x.test.ts")).toEqual(lines);
+  });
+
+  it.each([
     ["expect(calls.length).toBeLessThan(3);"],
     ["expect(Date.now()).toBe(1000);"],
     ["const ts = Date.now(); expect(payload.ts).toBe(ts);"],
     ["expect(a - b).toBeLessThan(2);"],
+    ["const ts = Date.now();\nexpect(payload.ts).toBeLessThan(5);"],
   ])("does not flag %s", (src) => {
     expect(findWallClockBounds(src, "x.test.ts")).toEqual([]);
   });

@@ -2,6 +2,9 @@ export const NOTE_COLORS = ["yellow", "blue", "green", "pink"] as const;
 export type NoteColor = (typeof NOTE_COLORS)[number];
 
 export const MAX_NOTES = 60;
+
+/** Room ids a client may join. A session that never joins has a private room. */
+export const ROOM_RE = /^[a-z0-9-]{6,40}$/;
 export const MAX_NOTE_TEXT = 200;
 
 export type Note = {
@@ -49,7 +52,8 @@ export type BoardMessage =
       color?: NoteColor;
     }
   | { type: "note.remove"; id: string }
-  | { type: "board.sync" };
+  | { type: "board.sync" }
+  | { type: "board.join"; room: string };
 
 export type BoardResult<T> =
   { ok: true; value: T } | { ok: false; error: string };
@@ -157,6 +161,10 @@ export function parseBoardMessage(msg: unknown): BoardMessage | null {
   switch (m.type) {
     case "board.sync":
       return { type: "board.sync" };
+    case "board.join":
+      return typeof m.room === "string" && ROOM_RE.test(m.room)
+        ? { type: "board.join", room: m.room }
+        : null;
     case "note.remove":
       return typeof m.id === "string" && m.id
         ? { type: "note.remove", id: m.id }

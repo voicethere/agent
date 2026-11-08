@@ -15,40 +15,93 @@ import {
   type NoteColor,
 } from "./board";
 
-// One board per session, kept in the agent process. Clients send board
-// messages on the data channel (see README.md); everything else goes to the
-// LLM as chat. The board is dropped when the session ends.
+// Boards are room-scoped. A client joins a room with { type: "board.join",
+// room }; every session in the room sees the same board. A session that never
+// joins has a private room of its own ("s:" + sessionId; clients cannot name
+// it because room ids match /^[a-z0-9-]{6,40}$/). One agent process serves
+// many sessions, so a single process-wide board would show visitors each
+// other's notes. A room's board is deleted when its last session leaves.
 const boards = new Map<string, Board>();
+const roomOf = new Map<string, string>();
+const members = new Map<string, Set<string>>();
+
+function roomFor(sessionId: string): string {
+  let room = roomOf.get(sessionId);
+  if (!room) {
+    room = `s:${sessionId}`;
+    enter(sessionId, room);
+  }
+  return room;
+}
+
+function enter(sessionId: string, room: string): void {
+  roomOf.set(sessionId, room);
+  let set = members.get(room);
+  if (!set) {
+    set = new Set();
+    members.set(room, set);
+  }
+  set.add(sessionId);
+}
+
+function leave(sessionId: string): void {
+  const room = roomOf.get(sessionId);
+  if (!room) return;
+  roomOf.delete(sessionId);
+  const set = members.get(room);
+  set?.delete(sessionId);
+  if (!set || set.size === 0) {
+    members.delete(room);
+    boards.delete(room);
+  }
+}
 
 function boardFor(sessionId: string): Board {
-  let board = boards.get(sessionId);
+  const room = roomFor(sessionId);
+  let board = boards.get(room);
   if (!board) {
     board = new Board();
-    boards.set(sessionId, board);
+    boards.set(room, board);
   }
   return board;
 }
 
+/** Sends the room's board to every session in it. */
 function broadcast(sessionId: string): void {
-  sendToClient(sessionId, { type: "board", notes: boardFor(sessionId).list() });
+  const room = roomFor(sessionId);
+  const payload = { type: "board", notes: boardFor(sessionId).list() };
+  for (const member of members.get(room) ?? []) {
+    sendToClient(member, payload);
+  }
 }
 
 function apply(sessionId: string, m: BoardMessage): void {
-  const board = boardFor(sessionId);
   switch (m.type) {
+    case "board.join": {
+      if (roomOf.get(sessionId) !== m.room) {
+        leave(sessionId);
+        enter(sessionId, m.room);
+      }
+      break;
+    }
     case "note.add":
-      board.add({ ...m, author: "user" });
+      boardFor(sessionId).add({ ...m, author: "user" });
       break;
     case "note.update": {
       const { type: _type, id, ...patch } = m;
-      board.update(id, patch);
+      boardFor(sessionId).update(id, patch);
       break;
     }
     case "note.remove":
-      board.remove(m.id);
+      boardFor(sessionId).remove(m.id);
       break;
     case "board.sync":
-      break;
+      // Only the requester gets the board.
+      sendToClient(sessionId, {
+        type: "board",
+        notes: boardFor(sessionId).list(),
+      });
+      return;
   }
   broadcast(sessionId);
 }
@@ -136,7 +189,7 @@ export function createBoardAgent(over: Partial<CreateLlmAgentOptions> = {}) {
       return llm.onDataChannelMessage?.(ctx);
     },
     onSessionEnd(ctx: { sessionId: string }) {
-      boards.delete(ctx.sessionId);
+      leave(ctx.sessionId);
       return llm.onSessionEnd?.(ctx);
     },
   };

@@ -4,7 +4,7 @@ A shared brainstorming board with an LLM facilitator. People add sticky notes fr
 
 ## What you need
 
-A project secret named `AGENT_OPENROUTER_API_KEY` (a key from openrouter.ai). No Redis: the board lives in the agent process for the length of the session and is dropped when the session ends.
+A project secret named `AGENT_OPENROUTER_API_KEY` (a key from openrouter.ai). No Redis: boards live in the agent process and are deleted when the last session in the room ends.
 
 ## Files
 
@@ -18,14 +18,17 @@ A project secret named `AGENT_OPENROUTER_API_KEY` (a key from openrouter.ai). No
 
 Data channel messages from the client:
 
-| Message                                                          | Effect                         |
-| ---------------------------------------------------------------- | ------------------------------ |
-| `{ "type": "note.add", "text", "x"?, "y"?, "color"? }`           | Adds a note with author `user` |
-| `{ "type": "note.update", "id", "text"?, "x"?, "y"?, "color"? }` | Changes the given fields       |
-| `{ "type": "note.remove", "id" }`                                | Deletes the note               |
-| `{ "type": "board.sync" }`                                       | Sends the current board        |
+| Message                                                          | Effect                                                                      |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `{ "type": "note.add", "text", "x"?, "y"?, "color"? }`           | Adds a note with author `user`                                              |
+| `{ "type": "note.update", "id", "text"?, "x"?, "y"?, "color"? }` | Changes the given fields                                                    |
+| `{ "type": "note.remove", "id" }`                                | Deletes the note                                                            |
+| `{ "type": "board.join", "room" }`                               | Joins a room (`a-z`, `0-9`, `-`, 6 to 40 characters) and leaves the old one |
+| `{ "type": "board.sync" }`                                       | Sends the current board to the requester only                               |
 
-The agent answers every change, and every `board.sync`, with `{ "type": "board", "notes": Note[] }` to the session.
+One agent process serves many sessions, so boards are scoped to rooms. A session that never sends `board.join` has a private board. Sessions that join the same room share one board and one set of notes, and the facilitator's tools read and change the board of the room the session is in. Anyone who knows a room id can join it, so use a long random id for a private room.
+
+The agent answers every change with `{ "type": "board", "notes": Note[] }` to every session in the room. A `board.sync` is answered to the requester only.
 
 A note is `{ id, text, x, y, color, author }`:
 

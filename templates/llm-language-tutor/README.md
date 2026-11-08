@@ -19,7 +19,7 @@ Without Project Redis or the key the agent still answers, but `search_knowledge`
 
 ## Embeddings model
 
-The template uses `openai/text-embedding-3-small`. OpenRouter's embeddings guide names it (https://openrouter.ai/docs/api/reference/embeddings) and its embeddings request reference uses it as the `model` example (https://openrouter.ai/docs/api-reference/embeddings/create-embeddings). Those pages do not say which models accept the `dimensions` field, so `dimensions` is left out and the agent uses its default of 512.
+The template uses `openai/text-embedding-3-small`. OpenRouter's embeddings guide names it (https://openrouter.ai/docs/api/reference/embeddings) and its embeddings request reference uses it as the `model` example (https://openrouter.ai/docs/api-reference/embeddings/create-embeddings). That reference documents `dimensions` as a request field (the number of dimensions of the output embeddings) but does not list which models accept it. `knowledge.embeddings.dimensions` is not set in `voicethere.llm.json`, so the agent uses its default of 512 and sends `dimensions: 512` with every embeddings request. Set the field to another value between 64 and 3072 to change it.
 
 ## Edit the lessons
 

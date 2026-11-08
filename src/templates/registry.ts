@@ -287,6 +287,33 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     },
   },
   {
+    id: "llm-board",
+    entry: "llm-board/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    title: "Collaborative board + AI",
+    summary:
+      "Shared sticky-note board over the data channel with an LLM facilitator that reads and edits notes.",
+    category: "voice-data",
+    description:
+      "Clients add, move and remove notes with data channel messages; an LLM facilitator reads the board with list_notes and adds or changes notes with add_note and update_note. State lives in the agent process for the session.",
+    sourceFiles: [
+      "llm-board/agent.ts",
+      "llm-board/board.ts",
+      "llm-board/voicethere.llm.json",
+      "llm-board/prompt.md",
+      "llm-board/md.d.ts",
+      "llm-board/README.md",
+    ],
+    npmDependencies: {
+      openai: "^7.43.0",
+      "@anthropic-ai/sdk": "^1.3.0",
+      "@google/genai": "^2.31.0",
+      "@modelcontextprotocol/sdk": "^1.32.2",
+      ioredis: "^5.11.1",
+    },
+  },
+  {
     id: "llm-mcp-service",
     entry: "llm-mcp-service/agent.ts",
     kind: "product",

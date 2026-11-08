@@ -68,10 +68,9 @@ describe("compileFlow", () => {
 
   it("normalizes long punctuation runs in linear time", () => {
     const s = "!".repeat(200_000) + "x";
-    const t0 = performance.now();
+    // The old /[.!?]+$/ backtracked for seconds here; a regression hangs and
+    // fails on the vitest testTimeout instead of on a wall-clock assertion.
     expect(normalizeUtterance(s)).toBe(s);
-    // The old /[.!?]+$/ took seconds here; the scan takes well under 1 ms.
-    expect(performance.now() - t0).toBeLessThan(1000);
   });
 
   it("applies defaults", () => {

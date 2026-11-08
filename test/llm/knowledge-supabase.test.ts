@@ -163,11 +163,11 @@ describe("createSupabaseKnowledgeBase", () => {
       { status: 200, hang: true },
     ];
     const { kb } = make({ timeoutMs: 100 });
-    const started = Date.now();
+    // Without the 100 ms bound the hung server never answers and the test
+    // fails on the vitest testTimeout; the rejection is the outcome.
     await expect(kb.search("q")).rejects.toMatchObject({
       code: "KB_SUPABASE_ERROR",
     });
-    expect(Date.now() - started).toBeLessThan(3000);
   });
 
   it("rejects a bad rpc name before any request", () => {

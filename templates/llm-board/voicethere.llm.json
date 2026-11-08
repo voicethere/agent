@@ -1,0 +1,49 @@
+{
+  "$schema": "./node_modules/@voicethere/agent/schema/voicethere.llm.schema.json",
+  "version": 1,
+  "provider": "openrouter",
+  "model": "amazon/nova-micro-v1",
+  "apiKeySecret": "AGENT_OPENROUTER_API_KEY",
+  "maxOutputTokens": 512,
+  "greeting": {
+    "text": "Hi! I'm your board facilitator. Add some notes, or ask me to group or summarise them.",
+    "interruptible": true
+  },
+  "bargeIn": {
+    "mode": "project"
+  },
+  "history": {
+    "turns": 20,
+    "interruptionNote": true
+  },
+  "fillers": {
+    "thinking": {
+      "phrases": ["Okay.", "Right.", "Sure.", "Let me see."],
+      "afterMs": 1500
+    },
+    "toolCall": {
+      "phrases": ["Let me look at the board.", "One moment."]
+    },
+    "toolWait": {
+      "phrases": ["Still checking, one moment.", "Almost there."],
+      "afterMs": 4000
+    },
+    "interruptible": true
+  },
+  "tools": {
+    "maxRounds": 5,
+    "timeoutMs": 15000
+  },
+  "toolSources": [],
+  "knowledge": {
+    "store": "off",
+    "topK": 4,
+    "embeddings": {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "dimensions": 512,
+      "apiKeySecret": "AGENT_OPENAI_API_KEY"
+    }
+  },
+  "interruptPolicy": "cancel"
+}

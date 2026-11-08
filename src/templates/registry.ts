@@ -1,11 +1,7 @@
 export type TemplateKind = "product" | "e2e";
 
 export type TemplateCategory =
-  | "voice"
-  | "data"
-  | "voice-data"
-  | "integration"
-  | "debug";
+  "voice" | "data" | "voice-data" | "integration" | "debug";
 
 export interface AgentTemplateDefinition {
   id: string;
@@ -58,7 +54,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     title: "Language switch",
-    summary: "Detects the caller's language and switches speech recognition and voice mid-call, with a holding message and an unavailable notice.",
+    summary:
+      "Detects the caller's language and switches speech recognition and voice mid-call, with a holding message and an unavailable notice.",
     category: "voice",
     description:
       "Switches STT and TTS independently from onUserLanguage, and can change one vendor mid-conversation. With project auto-switch on, the runner switches and replays the utterance, and the agent answers the recognized text in the new language. With auto-switch off, detection does not change either side until this agent calls setVoiceLanguage.",
@@ -95,7 +92,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     title: "World sync (JSON)",
-    summary: "Data-only pose broadcast over onDataChannelMessage. One agent, no Redis.",
+    summary:
+      "Data-only pose broadcast over onDataChannelMessage. One agent, no Redis.",
     category: "data",
     description:
       "Single-agent JSON world sync — onDataChannelMessage pose updates, in-memory, no Redis.",
@@ -107,7 +105,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     title: "World sync (binary)",
-    summary: "Data-only ArrayBuffer poses with onDataChannelBinary. One agent, no Redis.",
+    summary:
+      "Data-only ArrayBuffer poses with onDataChannelBinary. One agent, no Redis.",
     category: "data",
     description:
       "Single-agent binary world sync — onDataChannelBinary + sendBinaryToClient ArrayBuffer poses, no Redis.",
@@ -141,7 +140,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     title: "Voice showcase",
-    summary: "Conversational demo: greeting, name, menu (weather, count, recipes, fun facts).",
+    summary:
+      "Conversational demo: greeting, name, menu (weather, count, recipes, fun facts).",
     category: "voice",
     description:
       "Conversational voice showcase — greeting, name, menu (weather, count, recipe, fun fact).",
@@ -160,7 +160,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     title: "Recording consent",
-    summary: "Asks recording consent on connect, pauses for name and birthdate, resumes only if allowed.",
+    summary:
+      "Asks recording consent on connect, pauses for name and birthdate, resumes only if allowed.",
     category: "voice",
     description:
       "Recording consent flow — ask consent, pause capture for PII, resume when allowed.",
@@ -175,7 +176,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     title: "Orbiting TTS",
-    summary: "Voice+Data demo: a TTS speaker circles each listener with per-client poses.",
+    summary:
+      "Voice+Data demo: a TTS speaker circles each listener with per-client poses.",
     category: "voice-data",
     description:
       "Voice+Data demo — TTS speaker orbits each listener with per-client setTtsPose.",
@@ -187,7 +189,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     title: "Spatial audio showcase",
-    summary: "Voice+Data demo: orbiting sine tone and TTS, positional soundboard, and a proximity room via DataChannel join.",
+    summary:
+      "Voice+Data demo: orbiting sine tone and TTS, positional soundboard, and a proximity room via DataChannel join.",
     category: "voice-data",
     description:
       "Spatial audio showcase — orbiting sine + TTS, positional clip soundboard, proximity room via DataChannel commands.",
@@ -207,7 +210,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     title: "Inbound webhooks",
-    summary: "Verifies inbound webhooks with HMAC, then fans out over DataChannel and speech.",
+    summary:
+      "Verifies inbound webhooks with HMAC, then fans out over DataChannel and speech.",
     category: "integration",
     description:
       "Inbound webhook handler — HMAC verify on raw body, then DataChannel + speak fan-out.",
@@ -219,7 +223,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "product",
     seedOnCreate: true,
     title: "Inbound webhooks (Redis)",
-    summary: "Webhook handler with a Redis shared counter and DataChannel fan-out.",
+    summary:
+      "Webhook handler with a Redis shared counter and DataChannel fan-out.",
     category: "integration",
     description:
       "Webhook handler with Redis atomic shared counter plus DataChannel fan-out.",
@@ -245,6 +250,60 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
       "llm-agent/hooks.ts",
       "llm-agent/md.d.ts",
       "llm-agent/knowledge/about.md",
+    ],
+    npmDependencies: {
+      openai: "^7.43.0",
+      "@anthropic-ai/sdk": "^1.3.0",
+      "@google/genai": "^2.31.0",
+      "@modelcontextprotocol/sdk": "^1.32.2",
+      ioredis: "^5.11.1",
+    },
+  },
+  {
+    id: "llm-language-tutor",
+    entry: "llm-language-tutor/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    title: "Language tutor (LLM + knowledge)",
+    summary:
+      "English practice partner that looks up phrases and idioms in a lessons knowledge base.",
+    category: "voice-data",
+    description:
+      "An LLM tutor that corrects one mistake per turn and answers questions about phrases and idioms from knowledge/lessons.md through search_knowledge. Needs Project Redis and the AGENT_OPENROUTER_API_KEY secret.",
+    sourceFiles: [
+      "llm-language-tutor/agent.ts",
+      "llm-language-tutor/voicethere.llm.json",
+      "llm-language-tutor/prompt.md",
+      "llm-language-tutor/md.d.ts",
+      "llm-language-tutor/README.md",
+      "llm-language-tutor/knowledge/lessons.md",
+    ],
+    npmDependencies: {
+      openai: "^7.43.0",
+      "@anthropic-ai/sdk": "^1.3.0",
+      "@google/genai": "^2.31.0",
+      "@modelcontextprotocol/sdk": "^1.32.2",
+      ioredis: "^5.11.1",
+    },
+  },
+  {
+    id: "llm-board",
+    entry: "llm-board/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    title: "Collaborative board + AI",
+    summary:
+      "Shared sticky-note board over the data channel with an LLM facilitator that reads and edits notes.",
+    category: "voice-data",
+    description:
+      "Clients add, move and remove notes with data channel messages; an LLM facilitator reads the board with list_notes and adds or changes notes with add_note and update_note. Boards are scoped to rooms: a session has a private board until it sends `board.join` with a room id (`a-z`, `0-9`, `-`, 6 to 40 characters). Sessions in the same room share one board, which is deleted when the last of them ends.",
+    sourceFiles: [
+      "llm-board/agent.ts",
+      "llm-board/board.ts",
+      "llm-board/voicethere.llm.json",
+      "llm-board/prompt.md",
+      "llm-board/md.d.ts",
+      "llm-board/README.md",
     ],
     npmDependencies: {
       openai: "^7.43.0",
@@ -368,7 +427,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "e2e",
     seedOnCreate: false,
     title: "Echo smoke",
-    summary: "Minimal echo agent for e2e voice-smoke, agent-smoke, and cli-smoke uploads.",
+    summary:
+      "Minimal echo agent for e2e voice-smoke, agent-smoke, and cli-smoke uploads.",
     category: "debug",
     description:
       "Minimal echo agent for e2e voice-smoke, agent-smoke, and cli-smoke uploads.",
@@ -380,7 +440,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "e2e",
     seedOnCreate: false,
     title: "Crash test",
-    summary: "Crash / echo agent for session-errors-smoke and agent-crash-policy smokes.",
+    summary:
+      "Crash / echo agent for session-errors-smoke and agent-crash-policy smokes.",
     category: "debug",
     description:
       "Crash / echo agent for session-errors-smoke and agent-crash-policy smokes.",
@@ -392,7 +453,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "e2e",
     seedOnCreate: false,
     title: "Game sync smoke",
-    summary: "Minimal data-channel agent for deploy-smoke, shared-child, and idle smokes.",
+    summary:
+      "Minimal data-channel agent for deploy-smoke, shared-child, and idle smokes.",
     category: "debug",
     description:
       "Minimal data-channel agent for deploy-smoke, shared-child, and idle smokes.",
@@ -417,7 +479,8 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     kind: "e2e",
     seedOnCreate: false,
     title: "Mix smoke",
-    summary: "Positional mix DC commands for voice-data-mix-smoke (Voice+Data, shared child).",
+    summary:
+      "Positional mix DC commands for voice-data-mix-smoke (Voice+Data, shared child).",
     category: "debug",
     description:
       "Positional mix DC commands for voice-data-mix-smoke (Voice+Data, shared child).",

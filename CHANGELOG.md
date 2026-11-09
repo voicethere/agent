@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-09
+
+### Fixed
+
+- llm-board: renaming or rewording a note now changes that note with update_note instead of adding a second one. The prompt and the add_note and update_note descriptions say which tool does what, and the template uses anthropic/claude-haiku-5.5 on OpenRouter (same AGENT_OPENROUTER_API_KEY secret).
+
 ## [0.31.0] - 2026-11-09
 
 ### Added

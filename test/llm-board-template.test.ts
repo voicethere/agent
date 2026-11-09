@@ -27,6 +27,7 @@ import {
   MAX_NOTES,
   parseBoardMessage,
 } from "../templates/llm-board/board.js";
+import { BOARD_TOOL_SPECS } from "../templates/llm-board/tool-specs.js";
 
 // Vitest's alias maps only the package root; point the subpaths at src.
 vi.mock("@voicethere/agent/llm", () => import("../src/llm/index.js"));
@@ -215,6 +216,40 @@ describe("llm-board template", () => {
   }, 30_000);
 });
 
+describe("llm-board tool choice guidance", () => {
+  const prompt = readFileSync(join(templateDir, "prompt.md"), "utf8");
+
+  it("prompt tells the model to rename with update_note", () => {
+    expect(prompt).toContain("use update_note with that note's id");
+    expect(prompt).toContain("Never use add_note to change a note");
+  });
+
+  it("prompt does not ask for a name on summaries", () => {
+    expect(prompt).toContain("do not ask anyone to name or word it");
+    expect(prompt).not.toContain("What should I call");
+  });
+
+  it("add_note is for new notes only", () => {
+    expect(BOARD_TOOL_SPECS.add_note.description).toContain("update_note");
+    expect(BOARD_TOOL_SPECS.add_note.description).toContain(
+      "not on the board yet",
+    );
+  });
+
+  it("update_note covers rename", () => {
+    expect(BOARD_TOOL_SPECS.update_note.description).toContain("rename");
+  });
+
+  it("config uses anthropic/claude-haiku-5.5 on openrouter", () => {
+    const cfg = JSON.parse(
+      readFileSync(join(templateDir, "voicethere.llm.json"), "utf8"),
+    ) as { provider: string; model: string; apiKeySecret: string };
+    expect(cfg.provider).toBe("openrouter");
+    expect(cfg.model).toBe("anthropic/claude-haiku-5.5");
+    expect(cfg.apiKeySecret).toBe("AGENT_OPENROUTER_API_KEY");
+  });
+});
+
 describe("llm-board agent wiring", () => {
   const A = "peer-a";
   const B = "peer-b";
@@ -392,6 +427,28 @@ describe("llm-board agent wiring", () => {
       ["Write the docs", "user"],
       ["Ship the beta", "ai"],
     ]);
+  });
+
+  it("update_note from the model renames the client's note and adds none", async () => {
+    await boot([
+      [
+        {
+          id: "c1",
+          name: "update_note",
+          input: { id: "n1", text: "Basic note" },
+        },
+      ],
+    ]);
+    dc(A, { type: "note.add", text: "Example note" });
+    await vi.waitFor(() => expect(boardsFor(A)).toHaveLength(1));
+
+    dc(A, { type: "chat", text: "call it Basic note" });
+    await vi.waitFor(() =>
+      expect(boardsFor(A).at(-1)?.notes[0]?.text).toBe("Basic note"),
+    );
+    const notes = boardsFor(A).at(-1)?.notes ?? [];
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ id: "n1", text: "Basic note" });
   });
 
   it("a chat message still reaches the LLM with the user's text", async () => {

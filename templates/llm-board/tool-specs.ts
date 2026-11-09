@@ -1,4 +1,4 @@
-import { NOTE_COLORS } from "./board";
+import { NOTE_COLORS } from "./board.js";
 
 const colorSchema = { type: "string", enum: [...NOTE_COLORS] };
 
@@ -14,7 +14,8 @@ export const BOARD_TOOL_SPECS = {
   },
   add_note: {
     name: "add_note",
-    description: "Add a note to the shared board. Text is 1 to 200 characters.",
+    description:
+      "Add a new note to the shared board. Only for a note that is not on the board yet; to rename, reword, recolor or move an existing note use update_note. Text is 1 to 200 characters.",
     inputSchema: {
       type: "object",
       properties: { text: { type: "string" }, color: colorSchema },
@@ -25,7 +26,7 @@ export const BOARD_TOOL_SPECS = {
   update_note: {
     name: "update_note",
     description:
-      "Change a note's text, color or position (x and y between 0 and 1).",
+      "Change an existing note by id: its text (also to rename or reword it), color or position (x and y between 0 and 1). Get the id from list_notes.",
     inputSchema: {
       type: "object",
       properties: {

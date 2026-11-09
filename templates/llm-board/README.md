@@ -10,7 +10,7 @@ A project secret named `AGENT_OPENROUTER_API_KEY` (a key from openrouter.ai). No
 
 - `agent.ts` routes board messages first and passes everything else to the LLM as chat. It also defines the tools `list_notes`, `add_note` and `update_note`.
 - `board.ts` is the board itself and the message parser, with no VoiceThere imports.
-- `voicethere.llm.json` holds the model (`amazon/nova-micro-v1` on OpenRouter), greeting and settings. Knowledge is off.
+- `voicethere.llm.json` holds the model (`anthropic/claude-haiku-5.5` on OpenRouter), greeting and settings. Knowledge is off.
 - `prompt.md` is the facilitator's system prompt.
 - `md.d.ts` lets TypeScript accept `import x from "./x.md"`.
 

@@ -1613,7 +1613,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     async onSessionStart(ctx: SessionContext) {
       const s: SessionState = {
         sessionId: ctx.sessionId,
-        history: new ConversationHistory(historyTurns),
+        history: new ConversationHistory(historyTurns, (fields) =>
+          agentLog("info", "history late write dropped", fields, ctx.sessionId),
+        ),
         speech: [],
         announcing: 0,
         chain: Promise.resolve(),

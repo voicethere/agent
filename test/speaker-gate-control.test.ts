@@ -307,6 +307,121 @@ describe("speaker gate events", () => {
     expect(finals).toHaveLength(0);
   });
 
+  describe("speaker split", () => {
+    it("passes user_utterance_split to onUserUtteranceSplit with exact fields", async () => {
+      process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+      const capture = installProcessMessageCapture();
+      const splits: unknown[] = [];
+      defineAgent({ onUserUtteranceSplit: (ctx) => void splits.push(ctx) });
+      await startSession(capture);
+      capture.emit({
+        type: "speech_event",
+        sessionId: SESSION,
+        event: {
+          type: "user_utterance_split",
+          fromUtteranceId: "u1",
+          toUtteranceId: "u2",
+          splitAtMs: 1840,
+          from: "caller",
+          to: "other",
+        },
+      });
+      await vi.waitFor(() => expect(splits).toHaveLength(1));
+      expect(splits[0]).toEqual({
+        sessionId: SESSION,
+        fromUtteranceId: "u1",
+        toUtteranceId: "u2",
+        splitAtMs: 1840,
+        from: "caller",
+        to: "other",
+      });
+    });
+
+    it("ignores a split event with a missing id", async () => {
+      process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+      const capture = installProcessMessageCapture();
+      const splits: unknown[] = [];
+      const finals: unknown[] = [];
+      defineAgent({
+        onUserUtteranceSplit: (ctx) => void splits.push(ctx),
+        onUserSpeechFinal: (ctx) => void finals.push(ctx),
+      });
+      await startSession(capture);
+      capture.emit({
+        type: "speech_event",
+        sessionId: SESSION,
+        event: { type: "user_utterance_split", fromUtteranceId: "u1" },
+      });
+      capture.emit({
+        type: "speech_event",
+        sessionId: SESSION,
+        event: {
+          type: "user_utterance_split",
+          fromUtteranceId: "",
+          toUtteranceId: "u2",
+        },
+      });
+      // a later final proves both split events were processed before the check
+      capture.emit({
+        type: "speech_event",
+        sessionId: SESSION,
+        event: { type: "user_speech_final", text: "marker" },
+      });
+      await vi.waitFor(() => expect(finals).toHaveLength(1));
+      expect(splits).toHaveLength(0);
+    });
+
+    it("passes reason speaker_split on a final and keeps the speaker fields", async () => {
+      process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+      const capture = installProcessMessageCapture();
+      const finals: Record<string, unknown>[] = [];
+      defineAgent({ onUserSpeechFinal: (ctx) => void finals.push({ ...ctx }) });
+      await startSession(capture);
+      capture.emit({
+        type: "speech_event",
+        sessionId: SESSION,
+        event: {
+          type: "user_speech_final",
+          text: "hello there",
+          utteranceId: "u1",
+          speaker: "caller",
+          speakerCheckWindows: 2,
+          reason: "speaker_split",
+        },
+      });
+      await vi.waitFor(() => expect(finals).toHaveLength(1));
+      expect(finals[0]).toEqual({
+        sessionId: SESSION,
+        text: "hello there",
+        utteranceId: "u1",
+        speaker: "caller",
+        speakerCheckWindows: 2,
+        reason: "speaker_split",
+      });
+    });
+
+    it("passes reason speaker_split_redecode_timeout and omits an unknown reason", async () => {
+      process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+      const capture = installProcessMessageCapture();
+      const finals: Record<string, unknown>[] = [];
+      defineAgent({ onUserSpeechFinal: (ctx) => void finals.push({ ...ctx }) });
+      await startSession(capture);
+      for (const reason of ["speaker_split_redecode_timeout", "no_partial"]) {
+        capture.emit({
+          type: "speech_event",
+          sessionId: SESSION,
+          event: { type: "user_speech_final", text: "hi", reason },
+        });
+      }
+      await vi.waitFor(() => expect(finals).toHaveLength(2));
+      expect(finals[0]).toHaveProperty(
+        "reason",
+        "speaker_split_redecode_timeout",
+      );
+      expect(finals[1]).not.toHaveProperty("reason");
+    });
+  });
+
   describe("speaker_gate_state and session_end", () => {
     const stateMessage = {
       type: "speaker_gate_state",

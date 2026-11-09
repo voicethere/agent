@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- createLlmAgent: a typed chat message now cuts off the agent's earlier speech that is still queued or playing, the same way caller speech does (speech sent with `interruptible: false` keeps playing), so the new reply no longer waits behind the old one.
+
 ## [0.31.1] - 2026-11-09
 
 ### Fixed

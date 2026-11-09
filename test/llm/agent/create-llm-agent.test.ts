@@ -1014,8 +1014,11 @@ describe("createLlmAgent", () => {
     ]);
     chat("first");
     await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    speakResult(speaks()[0].requestId, speaks()[0].turnId);
+    await new Promise((r) => setTimeout(r, 0));
     chat("second");
     await vi.waitFor(() => expect(summaries).toHaveLength(2));
+    expect(sent("speak_cancel")).toHaveLength(0);
     const payloads = clientPayloads();
     const dones = payloads.filter((p) => p.type === "assistant_done");
     const replies = payloads.filter((p) => p.type === "chat_reply");
@@ -1365,6 +1368,209 @@ describe("createLlmAgent", () => {
       reason: "applied",
     });
     await vi.waitFor(() => expect(sent("session_start_ack")).toHaveLength(1));
+  });
+
+  describe("a typed message barges in", () => {
+    const settle = (m: Msg, status: string, playedMs = 0) =>
+      capture.emit({
+        type: "speak_result",
+        sessionId: SESSION,
+        requestId: m.requestId,
+        turnId: m.turnId,
+        status,
+        playedMs,
+      });
+
+    it("chat after the reply finished generating flushes its pending speech and notes the interruption", async () => {
+      const { requests } = await boot([
+        [delta("First part. Second part."), done("First part. Second part.")],
+        [delta("Sure."), done("Sure.")],
+      ]);
+      say("tell me");
+      await vi.waitFor(() => expect(speaks()).toHaveLength(2));
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      const [first, second] = speaks();
+      settle(first, "played", 500);
+      await new Promise((r) => setTimeout(r, 0));
+      chat("actually, something else");
+      await vi.waitFor(() => expect(sent("speak_cancel")).toHaveLength(1));
+      expect(sent("speak_cancel")[0]).toEqual({
+        type: "speak_cancel",
+        sessionId: SESSION,
+        requestId: second.requestId,
+      });
+      settle(second, "interrupted", 200);
+      await vi.waitFor(() => expect(summaries).toHaveLength(2));
+      const all = sent();
+      const cancelAt = all.findIndex((m) => m.type === "speak_cancel");
+      const newSpeakAt = all.findIndex(
+        (m) => m.type === "speak" && m.text === "Sure.",
+      );
+      expect(cancelAt).toBeGreaterThanOrEqual(0);
+      expect(cancelAt).toBeLessThan(newSpeakAt);
+      const msgs = requests[1].messages;
+      expect(msgs[1]).toEqual({ role: "assistant", text: "First part." });
+      expect(msgs[2]).toEqual({
+        role: "user",
+        text: '(The caller interrupted your previous reply after: "First part.". They did not hear: "Second part.".)\nactually, something else',
+      });
+      expect(sent("speak_cancel")).toHaveLength(1);
+    });
+
+    it("default speech coalescing: chat after generation flushes the coalesced reply", async () => {
+      const { requests } = await boot(
+        [
+          [delta("First part. Second part."), done("First part. Second part.")],
+          [delta("Sure."), done("Sure.")],
+        ],
+        { config: { speech: { coalesceMs: 150 } } },
+      );
+      say("tell me");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+      const coalesced = speaks()[0];
+      chat("next");
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      expect(sent("speak_cancel")).toEqual([
+        {
+          type: "speak_cancel",
+          sessionId: SESSION,
+          requestId: coalesced.requestId,
+        },
+      ]);
+      const users = requests[1].messages.filter((m) => m.role === "user");
+      const last = users.at(-1) as { text: string };
+      expect(
+        last.text.startsWith(
+          '(The caller interrupted your previous reply after: "". They did not hear: "First part. Second part.".)',
+        ),
+      ).toBe(true);
+    });
+
+    it("a second chat before the runner settles the flush does not re-cancel or re-note", async () => {
+      const gate = deferred();
+      const { requests } = await boot([
+        [delta("First part. Second part."), done("First part. Second part.")],
+        [{ gate: gate.promise }, done("Ok.")],
+        [delta("Done."), done("Done.")],
+      ]);
+      say("tell me");
+      await vi.waitFor(() => expect(speaks()).toHaveLength(2));
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      settle(speaks()[0], "played", 500);
+      await new Promise((r) => setTimeout(r, 0));
+      chat("one");
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      chat("two");
+      await vi.waitFor(() => expect(requests).toHaveLength(3));
+      const byRequest = sent("speak_cancel").filter(
+        (m) => m.requestId !== undefined,
+      );
+      expect(byRequest).toHaveLength(1);
+      const users = requests[2].messages.filter((m) => m.role === "user");
+      expect((users.at(-1) as { text: string }).text).toBe("two");
+    });
+
+    it("chat during generation cancels the running turn once, by turnId", async () => {
+      const gate = deferred();
+      const { requests } = await boot([
+        [delta("One. Two"), { gate: gate.promise }, done("One. Two")],
+        [delta("Answer."), done("Answer.")],
+      ]);
+      say("first");
+      await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+      const firstTurn = speaks()[0].turnId;
+      chat("second");
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      await vi.waitFor(() => expect(summaries).toHaveLength(2));
+      expect(sent("speak_cancel")).toEqual([
+        { type: "speak_cancel", sessionId: SESSION, turnId: firstTurn },
+      ]);
+      expect(summaries[0].status).toBe("cancelled");
+    });
+
+    it("finish policy does not flush earlier speech on chat", async () => {
+      await boot(
+        [
+          [delta("First part. Second part."), done("First part. Second part.")],
+          [delta("Sure."), done("Sure.")],
+        ],
+        { config: { interruptPolicy: "finish" } },
+      );
+      say("tell me");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      chat("next");
+      await vi.waitFor(() => expect(summaries).toHaveLength(2));
+      expect(sent("speak_cancel")).toHaveLength(0);
+    });
+
+    it("a voice final does not flush earlier speech (the runner's barge-in does)", async () => {
+      await boot([
+        [delta("First part. Second part."), done("First part. Second part.")],
+        [delta("Sure."), done("Sure.")],
+      ]);
+      say("tell me");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      say("next");
+      await vi.waitFor(() => expect(summaries).toHaveLength(2));
+      expect(sent("speak_cancel")).toHaveLength(0);
+    });
+
+    it("speech sent with interruptible:false keeps playing", async () => {
+      await boot([[delta("Sure."), done("Sure.")]], {
+        config: { greeting: { text: "Welcome.", interruptible: false } },
+        skipSessionAck: true,
+      });
+      await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+      chat("hi");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(sent("speak_cancel")).toHaveLength(0);
+    });
+
+    it("an interruptible greeting is flushed by chat", async () => {
+      await boot([[delta("Sure."), done("Sure.")]], {
+        config: { greeting: { text: "Welcome.", interruptible: true } },
+        skipSessionAck: true,
+      });
+      await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+      const greet = speaks()[0];
+      chat("hi");
+      await vi.waitFor(() =>
+        expect(sent("speak_cancel")).toEqual([
+          {
+            type: "speak_cancel",
+            sessionId: SESSION,
+            requestId: greet.requestId,
+          },
+        ]),
+      );
+      settle(greet, "cancelled");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    });
+
+    it("bargeIn mode off: chat does not flush earlier speech", async () => {
+      await boot([[delta("Sure."), done("Sure.")]], {
+        config: {
+          bargeIn: { mode: "off" },
+          greeting: { text: "Welcome.", interruptible: true },
+        },
+        skipSessionAck: true,
+      });
+      await vi.waitFor(() => expect(sent("barge_in_control")).toHaveLength(1));
+      const req = sent("barge_in_control")[0];
+      capture.emit({
+        type: "barge_in_control_ack",
+        sessionId: SESSION,
+        requestId: req.requestId,
+        enabled: false,
+        ok: true,
+        reason: "applied",
+      });
+      await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+      chat("hi");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(sent("speak_cancel")).toHaveLength(0);
+    });
   });
 
   describe("toolChoice", () => {

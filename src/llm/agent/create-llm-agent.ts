@@ -169,8 +169,24 @@ interface ActiveTurn {
   promise: Promise<void>;
 }
 
+/**
+ * Interruptible speech sent to the runner and not settled yet. A typed message
+ * flushes these like a voice barge-in does (`flushSpeechForChat`).
+ */
+interface PendingSpeech {
+  requestId: string;
+  turnId: string;
+  text: string;
+  /** Reply sentences of the turn, in order; undefined for fillers. */
+  sentences?: string[];
+  /** Indexes in `sentences` of the sentences `text` holds (coalesced speech holds several). */
+  indexes?: number[];
+}
+
 interface SessionState {
   sessionId: string;
+  /** Interruptible speech still pending at the runner, oldest first. */
+  speech: PendingSpeech[];
   history: ConversationHistory;
   active?: ActiveTurn;
   queued?: { text: string; source: Source; utteranceId?: string };
@@ -444,6 +460,78 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     });
   }
 
+  /** Remembers interruptible speech until the runner settles it. */
+  function trackSpeech(
+    s: SessionState,
+    h: SpeakHandle,
+    meta: {
+      turnId: string;
+      text: string;
+      sentences?: string[];
+      indexes?: number[];
+    },
+  ): SpeakHandle {
+    const entry: PendingSpeech = {
+      requestId: h.requestId,
+      ...meta,
+    };
+    s.speech.push(entry);
+    void h.done.then(() => {
+      const i = s.speech.indexOf(entry);
+      if (i >= 0) s.speech.splice(i, 1);
+    });
+    return h;
+  }
+
+  /**
+   * A typed message barges in like caller speech: interruptible speech of
+   * earlier turns is cancelled (speech the agent sent with
+   * `interruptible: false` keeps playing, as on a voice barge-in). Speech of
+   * `keepTurnId` (the running turn, cancelled by its own path) is left alone.
+   * The runner reports no played text for a cancel, so the history keeps the
+   * reply sentences already settled and gets the same interruption note as a
+   * voice barge-in, at sentence granularity: a sentence still pending (queued
+   * or playing) counts as not heard. Nothing waits for the runner, so the new
+   * reply starts at once.
+   */
+  function flushSpeechForChat(
+    s: SessionState,
+    keepTurnId: string | undefined,
+  ): void {
+    const targets = s.speech.filter((e) => e.turnId !== keepTurnId);
+    if (targets.length === 0) return;
+    for (const e of targets) {
+      cancelSpeech(s.sessionId, { requestId: e.requestId });
+    }
+    s.speech = s.speech.filter((e) => !targets.includes(e));
+    agentLog(
+      "info",
+      `chat message flushed ${targets.length} pending speech item(s)`,
+      s.sessionId,
+    );
+    const byTurn = new Map<string, PendingSpeech[]>();
+    for (const e of targets) {
+      if (!e.sentences) continue;
+      const list = byTurn.get(e.turnId) ?? [];
+      list.push(e);
+      byTurn.set(e.turnId, list);
+    }
+    for (const [turnId, cut] of byTurn) {
+      const sentences = cut[0].sentences as string[];
+      const cutIndexes = new Set(cut.flatMap((e) => e.indexes ?? []));
+      const playedText = sentences
+        .filter((_, i) => !cutIndexes.has(i))
+        .join(" ");
+      const unplayedText = cut.map((e) => e.text).join(" ");
+      s.lastInterruption = { turnId, playedText, unplayedText };
+      s.history.replaceAssistantText(
+        turnId,
+        playedText,
+        useNote ? interruptionNote(playedText, unplayedText) : undefined,
+      );
+    }
+  }
+
   /** The one place where a sentence of a reply leaves the agent. */
   function deliver(
     s: SessionState,
@@ -457,7 +545,12 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     sendReplyDelta(s, t, text);
     if (t.source === "voice" || speakChat) {
       if (interruptible) {
-        speak(s.sessionId, text, replyOpts(t));
+        trackSpeech(s, speak(s.sessionId, text, replyOpts(t)), {
+          turnId: t.turnId,
+          text,
+          sentences: t.spoken,
+          indexes: [t.spoken.length - 1],
+        });
       } else {
         const h = announce(s.sessionId, text, replyOpts(t));
         trackAnnouncement(s, h.done);
@@ -489,7 +582,11 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       ? { turnId, kind: "filler" as const, fillerKind }
       : { turnId };
     if (interruptible) {
-      return speak(s.sessionId, text, opts);
+      return trackSpeech(s, speak(s.sessionId, text, opts), {
+        turnId,
+        text,
+        ...(fillerKind ? {} : { sentences: [text], indexes: [0] }),
+      });
     }
     const h = announce(s.sessionId, text, opts);
     trackAnnouncement(s, h.done);
@@ -595,10 +692,17 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     t.coalesceTimer = undefined;
     if (t.pending.length === 0) return;
     const text = t.pending.join(" ");
+    const base = t.spoken.length - t.pending.length;
+    const indexes = t.pending.map((_, i) => base + i);
     t.pending = [];
     t.pendingChars = 0;
     if (t.controller.signal.aborted || s.ended) return;
-    speak(s.sessionId, text, replyOpts(t));
+    trackSpeech(s, speak(s.sessionId, text, replyOpts(t)), {
+      turnId: t.turnId,
+      text,
+      sentences: t.spoken,
+      indexes,
+    });
   }
 
   /** A sentence of the model's reply: chat delta now, speech coalesced. */
@@ -1421,12 +1525,20 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       return;
     }
     const active = s.active;
+    if (
+      source === "chat" &&
+      policy === "cancel" &&
+      config.bargeIn?.mode !== "off"
+    ) {
+      flushSpeechForChat(s, active?.turnId);
+    }
     if (active) {
       if (policy === "finish") {
         s.queued = { text, source, utteranceId };
         return;
       }
       cancelSpeech(s.sessionId, { turnId: active.turnId });
+      s.speech = s.speech.filter((e) => e.turnId !== active.turnId);
       active.state.abortStatus = "cancelled";
       active.state.controller.abort();
       clearFillerTimer(active.state);
@@ -1495,6 +1607,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       const s: SessionState = {
         sessionId: ctx.sessionId,
         history: new ConversationHistory(historyTurns),
+        speech: [],
         announcing: 0,
         chain: Promise.resolve(),
         ended: false,
@@ -1575,6 +1688,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       if (!s) return;
       s.ended = true;
       s.queued = undefined;
+      s.speech.length = 0;
       if (s.active) {
         s.active.state.abortStatus = "cancelled";
         s.active.state.controller.abort();

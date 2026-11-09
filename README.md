@@ -366,6 +366,8 @@ See [`templates/language-switch`](./templates/language-switch/README.md) for bot
 
 With the project's speaker gate on, the runner learns the caller's voice and labels each utterance. In `auto` mode a bystander's utterance never reaches `onUserSpeechFinal`; it arrives as `onUserSpeechIgnored({ sessionId, utteranceId, reason: "speaker_mismatch" })` with no text. In `manual` mode every final reaches `onUserSpeechFinal` with `speaker` (`caller`, `other` or `unknown`) and, when the runner sets them, `speakerUnknownReason`, `speakerCheckWindows` and `speakerRechecked`. With the gate `disabled` none of these fields are present.
 
+When the project turns on the split on speaker change, a caller's speech that runs straight into a bystander's is cut at the change. `onUserUtteranceSplit({ sessionId, fromUtteranceId, toUtteranceId, splitAtMs, from, to })` fires once per split, with no text. The final of `fromUtteranceId` carries `reason: "speaker_split"` (or `"speaker_split_redecode_timeout"` when re-decoding the first part timed out), and the rest of the audio arrives as the utterance `toUtteranceId`. Pair the events by those ids. Other `reason` values are not passed on.
+
 ```ts
 const gate = await setSpeakerGate(sessionId, {
   mode: "auto",

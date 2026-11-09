@@ -1041,6 +1041,30 @@ export interface UserSpeechIgnoredEvent {
   reason: "speaker_mismatch";
 }
 
+/**
+ * The runner split one utterance in two because the speaker changed from the
+ * caller to someone else without a pause. Carries no text. Sent as a
+ * {@link SpeechEventMessage} with `event.type === "user_utterance_split"`.
+ */
+export interface UserUtteranceSplitEvent {
+  type: "user_utterance_split";
+  /** Id of the utterance that ends at the split. */
+  fromUtteranceId: string;
+  /** Id of the utterance that starts at the split. */
+  toUtteranceId: string;
+  /** Milliseconds into the audio of `fromUtteranceId` where the speaker changed. */
+  splitAtMs?: number;
+  /** Speaker label before the split. */
+  from?: SpeakerVerdict;
+  /** Speaker label after the split. */
+  to?: SpeakerVerdict;
+}
+
+/** Why a final was cut short by a speaker split (`reason` on `user_speech_final`). */
+export type UserSpeechFinalReason =
+  | "speaker_split"
+  | "speaker_split_redecode_timeout";
+
 /** Thrown by mix group helpers when {@link SessionStartMessage.mixAvailable} is not `true`. */
 export const MIX_REQUIRES_VOICE_PLUS_DATA =
   "Mix APIs require sessionMode 'voice+data' (voice tracks and a sync data channel)";

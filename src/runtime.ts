@@ -62,6 +62,8 @@ import type {
   SpeakerGateStateMessage,
   SpeakerVerdict,
   UserSpeechIgnoredEvent,
+  UserSpeechFinalReason,
+  UserUtteranceSplitEvent,
 } from "./protocol.js";
 import { toPublicProviderId, toWireProviderId } from "./voice-provider-id.js";
 import {
@@ -128,6 +130,12 @@ export interface SpeechContext {
   speakerCheckWindows?: number;
   /** `true` when the verdict was revised by a later check of the same utterance. */
   speakerRechecked?: boolean;
+  /**
+   * Set only when the runner ended this utterance at a speaker change:
+   * `speaker_split`, or `speaker_split_redecode_timeout` when the re-decode of
+   * the first part timed out. Other values are not passed on.
+   */
+  reason?: UserSpeechFinalReason;
 }
 
 /** Context of {@link AgentHandlers.onUserSpeechIgnored}. */
@@ -135,6 +143,19 @@ export interface UserSpeechIgnoredContext {
   sessionId: string;
   utteranceId: string;
   reason: UserSpeechIgnoredEvent["reason"];
+}
+
+/** Context of {@link AgentHandlers.onUserUtteranceSplit}. */
+export interface UserUtteranceSplitContext {
+  sessionId: string;
+  /** Id of the utterance that ends at the split. */
+  fromUtteranceId: string;
+  /** Id of the utterance that starts at the split. */
+  toUtteranceId: string;
+  /** Milliseconds into the audio of `fromUtteranceId` where the speaker changed. */
+  splitAtMs?: number;
+  from?: SpeakerVerdict;
+  to?: SpeakerVerdict;
 }
 
 /** Spoken-language identification result (`speech.type` is `user_language`). */
@@ -225,6 +246,15 @@ export interface AgentHandlers {
    * enrolled caller (`user_speech_ignored`). There is no text.
    */
   onUserSpeechIgnored?: (ctx: UserSpeechIgnoredContext) => void | Promise<void>;
+  /**
+   * The runner split one utterance in two because the speaker changed from the
+   * caller to someone else without a pause (`user_utterance_split`). The final
+   * of `fromUtteranceId` carries `reason: "speaker_split"`; the rest of the
+   * audio becomes `toUtteranceId`. There is no text.
+   */
+  onUserUtteranceSplit?: (
+    ctx: UserUtteranceSplitContext,
+  ) => void | Promise<void>;
   /**
    * Runner finished applying a language switch (`voice_language_changed`). Use with
    * project auto-switch or after your own `setVoiceLanguage` calls.
@@ -1584,6 +1614,7 @@ function speakerFieldsOf(
   | "speakerUnknownReason"
   | "speakerCheckWindows"
   | "speakerRechecked"
+  | "reason"
 > {
   const e = event as unknown as Record<string, unknown>;
   return {
@@ -1598,6 +1629,10 @@ function speakerFieldsOf(
       : {}),
     ...(typeof e.speakerRechecked === "boolean"
       ? { speakerRechecked: e.speakerRechecked }
+      : {}),
+    ...(e.reason === "speaker_split" ||
+    e.reason === "speaker_split_redecode_timeout"
+      ? { reason: e.reason }
       : {}),
   };
 }
@@ -1769,6 +1804,33 @@ async function handleParentMessage(
             sessionId: message.sessionId,
             utteranceId: ignored.utteranceId,
             reason: ignored.reason,
+          });
+        }
+      }
+      if ((message.event.type as string) === "user_utterance_split") {
+        const split =
+          message.event as unknown as Partial<UserUtteranceSplitEvent>;
+        if (
+          typeof split.fromUtteranceId === "string" &&
+          split.fromUtteranceId &&
+          typeof split.toUtteranceId === "string" &&
+          split.toUtteranceId
+        ) {
+          await handlers.onUserUtteranceSplit?.({
+            sessionId: message.sessionId,
+            fromUtteranceId: split.fromUtteranceId,
+            toUtteranceId: split.toUtteranceId,
+            ...(typeof split.splitAtMs === "number"
+              ? { splitAtMs: split.splitAtMs }
+              : {}),
+            ...(typeof split.from === "string" &&
+            SPEAKER_VERDICTS.includes(split.from)
+              ? { from: split.from }
+              : {}),
+            ...(typeof split.to === "string" &&
+            SPEAKER_VERDICTS.includes(split.to)
+              ? { to: split.to }
+              : {}),
           });
         }
       }

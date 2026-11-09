@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- `onUserSpeechFinal` contexts carry `reason` when the runner ended the utterance at a speaker change: `speaker_split`, or `speaker_split_redecode_timeout` when re-decoding the first part timed out. Any other value is not passed on.
+- New handler `onUserUtteranceSplit({ sessionId, fromUtteranceId, toUtteranceId, splitAtMs, from, to })`, called when the runner splits one utterance in two because the speaker changed from the caller to someone else without a pause. Events without both ids are ignored. New types `UserUtteranceSplitEvent`, `UserUtteranceSplitContext` and `UserSpeechFinalReason`.
+
 ### Fixed
 
 - llm-language-tutor: the tutor looks up an idiom before it answers, instead of guessing first.

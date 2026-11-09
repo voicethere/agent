@@ -79,7 +79,7 @@ describe("localWorkerLimit", () => {
   });
 
   it("takes the configured want and a second call reuses the same grant", async () => {
-    const env = { VITEST_HOST_WORKERS: "6", VITEST_MAX_WORKERS: "4" };
+    const env = { VITEST_HOST_WORKERS: "6", VITEST_LOCAL_MAX_WORKERS: "4" };
     expect(await localWorkerLimit({ env, dir, log: quiet })).toEqual({
       maxWorkers: 4,
     });
@@ -104,7 +104,7 @@ describe("localWorkerLimit", () => {
     }
     resetLocalGrantForTests();
     const capped = await localWorkerLimit({
-      env: { VITEST_HOST_WORKERS: "6", VITEST_MAX_WORKERS: "10" },
+      env: { VITEST_HOST_WORKERS: "6", VITEST_LOCAL_MAX_WORKERS: "10" },
       dir,
       log: quiet,
     });
@@ -128,7 +128,7 @@ describe("localWorkerLimit grant sharing and fallback", () => {
     const warnings: string[] = [];
     try {
       const result = await localWorkerLimit({
-        env: { VITEST_MAX_WORKERS: "3" },
+        env: { VITEST_LOCAL_MAX_WORKERS: "3" },
         dir: join(parent, "sub", "slots"),
         log: (m) => warnings.push(m),
       });

@@ -3,9 +3,10 @@
 // user share a budget of slot directories under /tmp (default 6 workers in
 // total); a run that finds none free waits. In CI (CI set) nothing changes.
 //
-// Env: VITEST_HOST_WORKERS (budget, default 6), VITEST_MAX_WORKERS (workers
+// Env: VITEST_HOST_WORKERS (budget, default 6), VITEST_LOCAL_MAX_WORKERS (workers
 // wanted by one run, default 6, capped by the budget). `--maxWorkers` on the
 // vitest command line still overrides the config.
+// Not VITEST_MAX_WORKERS: vitest 4 reads that itself and would bypass the host budget.
 //
 // Keep this file free of TypeScript-only runtime syntax (enums, parameter
 // properties): the cross-process test loads it with Node's type stripping.
@@ -216,7 +217,7 @@ export async function localWorkerLimit(
   if (env.CI) return {};
   const budget = positiveInt(env.VITEST_HOST_WORKERS, DEFAULT_BUDGET);
   const want = Math.min(
-    positiveInt(env.VITEST_MAX_WORKERS, DEFAULT_BUDGET),
+    positiveInt(env.VITEST_LOCAL_MAX_WORKERS, DEFAULT_BUDGET),
     budget,
   );
   const g = globalThis as WithGrant;

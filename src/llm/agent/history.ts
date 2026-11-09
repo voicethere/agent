@@ -53,7 +53,12 @@ export class ConversationHistory {
         if (m.toolCalls && m.toolCalls.length > 0) {
           m.text = playedText;
         } else if (playedText.length === 0) {
-          turn.messages.splice(i, 1);
+          // After a tool result the answer stays: without it the next user
+          // message follows the tool result directly, and Amazon Nova (via
+          // OpenRouter) fails that request mid-stream with 424 "Model produced
+          // invalid sequence as part of ToolUse". The interruption note tells
+          // the model the caller did not hear it.
+          if (turn.messages[i - 1]?.role !== "tool") turn.messages.splice(i, 1);
         } else {
           // providerState carries the full original text, so rebuild from text.
           m.text = playedText;

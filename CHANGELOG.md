@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-09
+
 ### Added
 
 - `onUserSpeechFinal` contexts carry `reason` when the runner ended the utterance at a speaker change: `speaker_split`, or `speaker_split_redecode_timeout` when re-decoding the first part timed out. Any other value is not passed on.

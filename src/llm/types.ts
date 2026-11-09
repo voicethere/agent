@@ -116,14 +116,27 @@ export type LlmErrorCode =
   /** The flow route classifier got no valid `choose_path` call back. */
   | "LLM_CLASSIFIER_NO_CALL";
 
+/** Safe metadata about a provider failure. Never the vendor's error message. */
+export interface LlmProviderErrorDetail {
+  /** `error.code` the provider sent (HTTP body or a streamed error chunk). */
+  vendorCode?: string | number;
+  /** True when the error arrived inside a 200 stream (no HTTP status). */
+  stream?: boolean;
+}
+
 export class LlmProviderError extends Error {
+  readonly vendorCode?: string | number;
+  readonly stream?: boolean;
   constructor(
     readonly code: LlmErrorCode,
     message: string,
     readonly status?: number,
+    detail: LlmProviderErrorDetail = {},
   ) {
     super(message);
     this.name = "LlmProviderError";
+    if (detail.vendorCode !== undefined) this.vendorCode = detail.vendorCode;
+    if (detail.stream) this.stream = true;
   }
 }
 

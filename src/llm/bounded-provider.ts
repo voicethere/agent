@@ -8,22 +8,45 @@ export interface StreamBounds {
   retryDelayMs?: number;
 }
 
-/** Maps an SDK error to a coded error. Reads `status` only, never the body. */
+/**
+ * The provider's `error.code`, if any. The OpenAI SDK's `APIError` keeps the
+ * parsed body `error` object on `.error`, both for an HTTP error and for an
+ * error chunk inside a 200 stream (OpenRouter: Streaming › Handling errors
+ * during streaming › Errors after the response is committed). Only `code` is
+ * read: the vendor `message` can quote customer input, so it is never kept.
+ */
+function vendorCodeOf(err: unknown): string | number | undefined {
+  const body = (err as { error?: unknown } | null)?.error;
+  if (!body || typeof body !== "object") return undefined;
+  const code = (body as { code?: unknown }).code;
+  if (typeof code === "number" && Number.isFinite(code)) return code;
+  if (typeof code === "string" && code.length > 0) return code.slice(0, 64);
+  return undefined;
+}
+
+/** Maps an SDK error to a coded error. Reads `status` and `error.code` only, never the message or body. */
 export function toLlmError(err: unknown, providerId: string): LlmProviderError {
   if (err instanceof LlmProviderError) return err;
   const raw = (err as { status?: unknown } | null)?.status;
   const status = typeof raw === "number" ? raw : undefined;
-  const message = `${providerId} ${status ?? "network error"}`;
+  const vendorCode = vendorCodeOf(err);
+  // An error object with no HTTP status came from a streamed error chunk.
+  const stream = status === undefined && vendorCode !== undefined;
+  const detail = {
+    ...(vendorCode !== undefined ? { vendorCode } : {}),
+    ...(stream ? { stream } : {}),
+  };
+  const message = `${providerId} ${status ?? (stream ? "stream error" : "network error")}`;
   if (status === 401 || status === 403) {
-    return new LlmProviderError("LLM_AUTH_FAILED", message, status);
+    return new LlmProviderError("LLM_AUTH_FAILED", message, status, detail);
   }
   if (status === 429) {
-    return new LlmProviderError("LLM_RATE_LIMITED", message, status);
+    return new LlmProviderError("LLM_RATE_LIMITED", message, status, detail);
   }
   if (status === 400 || status === 404 || status === 422) {
-    return new LlmProviderError("LLM_BAD_REQUEST", message, status);
+    return new LlmProviderError("LLM_BAD_REQUEST", message, status, detail);
   }
-  return new LlmProviderError("LLM_PROVIDER_ERROR", message, status);
+  return new LlmProviderError("LLM_PROVIDER_ERROR", message, status, detail);
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

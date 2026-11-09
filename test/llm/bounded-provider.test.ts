@@ -95,4 +95,55 @@ describe("withStreamBounds", () => {
     expect(err.message).not.toContain("SECRET-BODY");
     expect(mock.requests).toHaveLength(1);
   });
+
+  it("an in-stream error chunk keeps only its code: vendorCode, stream, no message", async () => {
+    // OpenRouter Streaming > Handling errors during streaming > Errors after
+    // the response is committed: top-level `error` plus finish_reason "error".
+    mock = await startMock([
+      {
+        sse:
+          sseData({
+            id: "x",
+            object: "chat.completion.chunk",
+            error: { code: 424, message: "SECRET-BODY" },
+            choices: [
+              { index: 0, delta: { content: "" }, finish_reason: "error" },
+            ],
+          }) + "data: [DONE]\n\n",
+      },
+    ]);
+    let err: any;
+    try {
+      await collect(make({ retries: 0 }).stream(req));
+    } catch (e) {
+      err = e;
+    }
+    expect(err.code).toBe("LLM_PROVIDER_ERROR");
+    expect(err.status).toBeUndefined();
+    expect(err.vendorCode).toBe(424);
+    expect(err.stream).toBe(true);
+    expect(err.message).toBe("openai stream error");
+    expect(err.message).not.toContain("SECRET-BODY");
+  });
+
+  it("an HTTP 503 keeps its status and the body code, not the message", async () => {
+    mock = await startMock([
+      {
+        status: 503,
+        json: { error: { code: "server_error", message: "SECRET-BODY" } },
+      },
+    ]);
+    let err: any;
+    try {
+      await collect(make({ retries: 0 }).stream(req));
+    } catch (e) {
+      err = e;
+    }
+    expect(err.code).toBe("LLM_PROVIDER_ERROR");
+    expect(err.status).toBe(503);
+    expect(err.vendorCode).toBe("server_error");
+    expect(err.stream).toBeUndefined();
+    expect(err.message).toBe("openai 503");
+    expect(err.message).not.toContain("SECRET-BODY");
+  });
 });

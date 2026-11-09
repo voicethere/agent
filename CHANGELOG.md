@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- A chat message sent while the agent was still about to speak its answer after a tool call dropped that answer from history, so the next request put the caller's message straight after the tool result. Amazon Nova (through OpenRouter) fails that request mid-stream with 424 "Model produced invalid sequence as part of ToolUse", and the caller heard "Sorry, something went wrong". An answer that follows a tool result now stays in history; the interruption note still tells the model the caller did not hear it.
+- The `llm turn failed` agent log row now carries safe error metadata: the HTTP `status`, the provider's `error.code` as `vendorCode`, and `stream: true` when the error arrived inside a streamed response. The provider's error message is still never logged.
+
 ## [0.33.1] - 2026-11-10
 
 ### Fixed

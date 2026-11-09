@@ -432,6 +432,27 @@ describe("createLlmAgent", () => {
     expect(logs).toContain("llm turn failed: LLM_RATE_LIMITED");
   });
 
+  it("the llm turn failed row carries status, vendorCode and stream, never the vendor message", async () => {
+    await boot([
+      [
+        {
+          fail: new LlmProviderError(
+            "LLM_PROVIDER_ERROR",
+            "openrouter stream error",
+            undefined,
+            { vendorCode: 424, stream: true },
+          ),
+        },
+      ],
+    ]);
+    say("hi");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    const row = sent("log").find(
+      (m) => m.message === "llm turn failed: LLM_PROVIDER_ERROR",
+    );
+    expect(row?.fields).toEqual({ vendorCode: 424, stream: true });
+  });
+
   describe("output cap (max_tokens)", () => {
     const truncated = (
       text: string,

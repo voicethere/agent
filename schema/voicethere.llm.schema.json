@@ -71,6 +71,11 @@
       "properties": {
         "mode": {
           "enum": ["project", "on", "off"]
+        },
+        "typedMessages": {
+          "type": "boolean",
+          "default": true,
+          "description": "A typed chat message cuts off the agent's earlier speech that is still queued or playing. Set false to let it finish. Mode off disables this too."
         }
       },
       "default": {

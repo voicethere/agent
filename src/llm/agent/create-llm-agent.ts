@@ -171,7 +171,8 @@ interface ActiveTurn {
 
 /**
  * Interruptible speech sent to the runner and not settled yet. A typed message
- * flushes these like a voice barge-in does (`flushSpeechForChat`).
+ * flushes these like a voice barge-in does (`flushSpeechForChat`), unless
+ * `bargeIn.typedMessages` is `false` or `bargeIn.mode` is `off`.
  */
 interface PendingSpeech {
   requestId: string;
@@ -1528,7 +1529,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     if (
       source === "chat" &&
       policy === "cancel" &&
-      config.bargeIn?.mode !== "off"
+      config.bargeIn?.mode !== "off" &&
+      config.bargeIn?.typedMessages !== false
     ) {
       flushSpeechForChat(s, active?.turnId);
     }

@@ -1548,6 +1548,20 @@ describe("createLlmAgent", () => {
       await vi.waitFor(() => expect(summaries).toHaveLength(1));
     });
 
+    it("bargeIn.typedMessages false: chat does not flush earlier speech", async () => {
+      await boot([[delta("Sure."), done("Sure.")]], {
+        config: {
+          bargeIn: { mode: "project", typedMessages: false },
+          greeting: { text: "Welcome.", interruptible: true },
+        },
+        skipSessionAck: true,
+      });
+      await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+      chat("hi");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(sent("speak_cancel")).toHaveLength(0);
+    });
+
     it("bargeIn mode off: chat does not flush earlier speech", async () => {
       await boot([[delta("Sure."), done("Sure.")]], {
         config: {

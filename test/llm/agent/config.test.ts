@@ -76,6 +76,34 @@ describe("validateLlmAgentConfig", () => {
     expect(paths.length).toBeGreaterThanOrEqual(4);
   });
 
+  it("accepts bargeIn.typedMessages booleans and rejects other values", () => {
+    for (const typedMessages of [true, false]) {
+      const r = validateLlmAgentConfig({
+        ...base,
+        bargeIn: { mode: "project", typedMessages },
+      });
+      expect(r.ok && r.config.bargeIn).toEqual({
+        mode: "project",
+        typedMessages,
+      });
+    }
+    for (const typedMessages of ["no", 1]) {
+      expect(
+        errorsOf({ ...base, bargeIn: { mode: "project", typedMessages } }),
+      ).toEqual([expect.objectContaining({ path: "bargeIn.typedMessages" })]);
+    }
+    const omitted = validateLlmAgentConfig({
+      ...base,
+      bargeIn: { mode: "on" },
+    });
+    expect(omitted.ok && omitted.config.bargeIn).toEqual({ mode: "on" });
+  });
+
+  it("the JSON schema defaults bargeIn.typedMessages to true", () => {
+    const props = LLM_AGENT_CONFIG_JSON_SCHEMA.properties.bargeIn.properties;
+    expect(props.typedMessages.default).toBe(true);
+  });
+
   it("accepts a minimal config", () => {
     const r = validateLlmAgentConfig(base);
     expect(r.ok).toBe(true);

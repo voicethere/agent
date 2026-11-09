@@ -1417,6 +1417,60 @@ describe("createLlmAgent", () => {
       expect(sent("speak_cancel")).toHaveLength(1);
     });
 
+    it("default speech coalescing: chat after generation flushes the coalesced reply", async () => {
+      const { requests } = await boot(
+        [
+          [delta("First part. Second part."), done("First part. Second part.")],
+          [delta("Sure."), done("Sure.")],
+        ],
+        { config: { speech: { coalesceMs: 150 } } },
+      );
+      say("tell me");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+      const coalesced = speaks()[0];
+      chat("next");
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      expect(sent("speak_cancel")).toEqual([
+        {
+          type: "speak_cancel",
+          sessionId: SESSION,
+          requestId: coalesced.requestId,
+        },
+      ]);
+      const users = requests[1].messages.filter((m) => m.role === "user");
+      const last = users.at(-1) as { text: string };
+      expect(
+        last.text.startsWith(
+          '(The caller interrupted your previous reply after: "". They did not hear: "First part. Second part.".)',
+        ),
+      ).toBe(true);
+    });
+
+    it("a second chat before the runner settles the flush does not re-cancel or re-note", async () => {
+      const gate = deferred();
+      const { requests } = await boot([
+        [delta("First part. Second part."), done("First part. Second part.")],
+        [{ gate: gate.promise }, done("Ok.")],
+        [delta("Done."), done("Done.")],
+      ]);
+      say("tell me");
+      await vi.waitFor(() => expect(speaks()).toHaveLength(2));
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      settle(speaks()[0], "played", 500);
+      await new Promise((r) => setTimeout(r, 0));
+      chat("one");
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      chat("two");
+      await vi.waitFor(() => expect(requests).toHaveLength(3));
+      const byRequest = sent("speak_cancel").filter(
+        (m) => m.requestId !== undefined,
+      );
+      expect(byRequest).toHaveLength(1);
+      const users = requests[2].messages.filter((m) => m.role === "user");
+      expect((users.at(-1) as { text: string }).text).toBe("two");
+    });
+
     it("chat during generation cancels the running turn once, by turnId", async () => {
       const gate = deferred();
       const { requests } = await boot([

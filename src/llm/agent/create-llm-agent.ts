@@ -179,8 +179,8 @@ interface PendingSpeech {
   text: string;
   /** Reply sentences of the turn, in order; undefined for fillers. */
   sentences?: string[];
-  /** Index of `text` in `sentences`. */
-  index?: number;
+  /** Indexes in `sentences` of the sentences `text` holds (coalesced speech holds several). */
+  indexes?: number[];
 }
 
 interface SessionState {
@@ -468,7 +468,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       turnId: string;
       text: string;
       sentences?: string[];
-      index?: number;
+      indexes?: number[];
     },
   ): SpeakHandle {
     const entry: PendingSpeech = {
@@ -503,6 +503,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     for (const e of targets) {
       cancelSpeech(s.sessionId, { requestId: e.requestId });
     }
+    s.speech = s.speech.filter((e) => !targets.includes(e));
     agentLog(
       "info",
       `chat message flushed ${targets.length} pending speech item(s)`,
@@ -517,7 +518,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     }
     for (const [turnId, cut] of byTurn) {
       const sentences = cut[0].sentences as string[];
-      const cutIndexes = new Set(cut.map((e) => e.index));
+      const cutIndexes = new Set(cut.flatMap((e) => e.indexes ?? []));
       const playedText = sentences
         .filter((_, i) => !cutIndexes.has(i))
         .join(" ");
@@ -548,7 +549,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
           turnId: t.turnId,
           text,
           sentences: t.spoken,
-          index: t.spoken.length - 1,
+          indexes: [t.spoken.length - 1],
         });
       } else {
         const h = announce(s.sessionId, text, replyOpts(t));
@@ -584,7 +585,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       return trackSpeech(s, speak(s.sessionId, text, opts), {
         turnId,
         text,
-        ...(fillerKind ? {} : { sentences: [text], index: 0 }),
+        ...(fillerKind ? {} : { sentences: [text], indexes: [0] }),
       });
     }
     const h = announce(s.sessionId, text, opts);
@@ -691,10 +692,17 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     t.coalesceTimer = undefined;
     if (t.pending.length === 0) return;
     const text = t.pending.join(" ");
+    const base = t.spoken.length - t.pending.length;
+    const indexes = t.pending.map((_, i) => base + i);
     t.pending = [];
     t.pendingChars = 0;
     if (t.controller.signal.aborted || s.ended) return;
-    speak(s.sessionId, text, replyOpts(t));
+    trackSpeech(s, speak(s.sessionId, text, replyOpts(t)), {
+      turnId: t.turnId,
+      text,
+      sentences: t.spoken,
+      indexes,
+    });
   }
 
   /** A sentence of the model's reply: chat delta now, speech coalesced. */
@@ -1530,6 +1538,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         return;
       }
       cancelSpeech(s.sessionId, { turnId: active.turnId });
+      s.speech = s.speech.filter((e) => e.turnId !== active.turnId);
       active.state.abortStatus = "cancelled";
       active.state.controller.abort();
       clearFillerTimer(active.state);

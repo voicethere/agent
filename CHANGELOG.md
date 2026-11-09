@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-11-10
+
+### Fixed
+
+- The example MCP service image crashed on start: `server.ts` used a TypeScript parameter property, which Node's strip-only type stripping rejects (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). The image is now covered by a boot test and an `erasableSyntaxOnly` typecheck.
+
 ## [0.33.0] - 2026-11-10
 
 ### Added

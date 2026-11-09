@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "erasableSyntaxOnly": true
+  },
+  "include": ["services/mcp-example/server.ts"]
+}

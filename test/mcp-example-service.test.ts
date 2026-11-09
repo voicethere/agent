@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { McpToolSource } from "../src/llm/mcp/mcp-tool-source.js";
 import {
+  findProduct,
   startMcpExample,
   type McpExampleHandle,
 } from "../services/mcp-example/server.js";
@@ -75,6 +76,32 @@ describe("mcp example service", () => {
     expect(JSON.parse(byName.content)).toMatchObject({
       id: "ember-stove",
       priceUsd: 59,
+    });
+  });
+
+  it("findProduct matches a unique partial name and rejects an ambiguous one", () => {
+    expect(findProduct("Ridgeline")).toMatchObject({
+      id: "ridgeline-2",
+      priceUsd: 349,
+    });
+    expect(findProduct("talus")).toMatchObject({ id: "talus-mid" });
+    expect(findProduct("tent")).toBeUndefined();
+    expect(findProduct("  ")).toBeUndefined();
+  });
+
+  it("get_product_price finds a product by a partial name", async () => {
+    const { handle } = await start();
+    const src = source(handle.url);
+    expect(await src.ready(5_000)).toBe(true);
+    const res = await src.callTool(
+      "get_product_price",
+      { product: "beacon" },
+      { timeoutMs: 5_000 },
+    );
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.content)).toMatchObject({
+      id: "beacon-headlamp",
+      priceUsd: 45,
     });
   });
 

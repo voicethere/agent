@@ -2,7 +2,7 @@
 
 ## Return window
 
-You can return unused gear within 60 days of delivery for a refund to the original payment method. Items must be clean, unworn and in the original packaging, with tags attached. Tents must not have been pitched on dirt.
+You can return unused gear within 60 days of delivery for a refund to the original payment method. Items must be clean, unworn and in the original packaging, with tags attached. Tents must be clean and dry.
 
 ## How to start a return
 

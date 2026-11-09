@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-10
+
+### Added
+
+- `llm-store-support` template: a phone support assistant for a sample outdoor store. It answers shipping, returns, warranty, sizing and store questions from Markdown files in `knowledge/` (Redis) and looks up every price with `get_product_price` on a project service. It runs on `amazon/nova-micro-v1` with `toolChoice: "required-first-round"`.
+- `mcp-example-service` image: new tools `list_products` and `get_product_price` over a sample eight-product catalog (sample data, not real prices). `get_plan_price` and `get_server_time` are unchanged.
+
 ## [0.32.0] - 2026-11-09
 
 ### Added

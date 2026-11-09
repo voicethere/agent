@@ -1,9 +1,11 @@
 # mcp-example-service
 
-A small MCP server for the `llm-mcp-service` template. It speaks streamable HTTP (stateless) at `/mcp`, answers `GET /healthz` with 200 and offers two tools:
+A small MCP server for the `llm-mcp-service` template. It speaks streamable HTTP (stateless) at `/mcp`, answers `GET /healthz` with 200 and offers four tools:
 
 - `get_plan_price({ plan })`: monthly price of `free`, `starter` or `team`. The table is sample data, not real prices.
 - `get_server_time()`: current UTC time of the service.
+- `list_products()`: ids and names of the eight products of the sample Kestrel Outdoor store, for the `llm-store-support` template.
+- `get_product_price({ product })`: price in US dollars of a product, by id or name. The catalog is sample data, not real prices. An unknown product returns a text message that lists the known ids.
 
 Log lines carry the tool name, success and duration, never the arguments.
 

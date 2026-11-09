@@ -222,11 +222,21 @@ describe("llm-board tool choice guidance", () => {
   it("prompt tells the model to rename with update_note", () => {
     expect(prompt).toContain("use update_note with that note's id");
     expect(prompt).toContain("Never use add_note to change a note");
+    // An answer to a question about a note goes on that note, even mid-summary (the staging
+    // report: summarise → "What should I call it?" → answer → a second note was added).
+    expect(prompt).toContain(
+      "the answer is meant for that note, even in the middle of a summary",
+    );
   });
 
   it("prompt does not ask for a name on summaries", () => {
     expect(prompt).toContain("do not ask anyone to name or word it");
-    expect(prompt).not.toContain("What should I call");
+    // The summary paragraph itself asks no question (the rename rule elsewhere may quote one).
+    const summary = prompt
+      .split(/\n\s*\n/)
+      .find((p) => p.startsWith("Use add_note only"));
+    expect(summary).toBeDefined();
+    expect(summary).not.toContain("?");
   });
 
   it("add_note is for new notes only", () => {

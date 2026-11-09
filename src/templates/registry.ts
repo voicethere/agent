@@ -300,6 +300,7 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     sourceFiles: [
       "llm-board/agent.ts",
       "llm-board/board.ts",
+      "llm-board/tool-specs.ts",
       "llm-board/voicethere.llm.json",
       "llm-board/prompt.md",
       "llm-board/md.d.ts",

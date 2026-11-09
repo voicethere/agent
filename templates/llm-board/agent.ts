@@ -9,11 +9,11 @@ import config from "./voicethere.llm.json";
 import systemPrompt from "./prompt.md";
 import {
   Board,
-  NOTE_COLORS,
   parseBoardMessage,
   type BoardMessage,
   type NoteColor,
 } from "./board";
+import { BOARD_TOOL_SPECS } from "./tool-specs";
 
 // Boards are room-scoped. A client joins a room with { type: "board.join",
 // room }; every session in the room sees the same board. A session that never
@@ -130,12 +130,8 @@ function apply(sessionId: string, m: BoardMessage): void {
   broadcast(sessionId);
 }
 
-const colorSchema = { type: "string", enum: [...NOTE_COLORS] };
-
 const listNotes = defineTool({
-  name: "list_notes",
-  description: "List every note on the shared board.",
-  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  ...BOARD_TOOL_SPECS.list_notes,
   handler: (_args, ctx) => {
     const board = boardFor(ctx.sessionId);
     if (!board) return SESSION_ENDED;
@@ -148,14 +144,7 @@ const listNotes = defineTool({
 });
 
 const addNote = defineTool<{ text: string; color?: NoteColor }>({
-  name: "add_note",
-  description: "Add a note to the shared board. Text is 1 to 200 characters.",
-  inputSchema: {
-    type: "object",
-    properties: { text: { type: "string" }, color: colorSchema },
-    required: ["text"],
-    additionalProperties: false,
-  },
+  ...BOARD_TOOL_SPECS.add_note,
   handler: ({ text, color }, ctx) => {
     const board = boardFor(ctx.sessionId);
     if (!board) return SESSION_ENDED;
@@ -173,21 +162,7 @@ const updateNote = defineTool<{
   x?: number;
   y?: number;
 }>({
-  name: "update_note",
-  description:
-    "Change a note's text, color or position (x and y between 0 and 1).",
-  inputSchema: {
-    type: "object",
-    properties: {
-      id: { type: "string" },
-      text: { type: "string" },
-      color: colorSchema,
-      x: { type: "number" },
-      y: { type: "number" },
-    },
-    required: ["id"],
-    additionalProperties: false,
-  },
+  ...BOARD_TOOL_SPECS.update_note,
   handler: ({ id, ...patch }, ctx) => {
     const board = boardFor(ctx.sessionId);
     if (!board) return SESSION_ENDED;

@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Added
+
+- `bargeIn.typedMessages` in `voicethere.llm.json` (default `true`): set it to `false` to let the agent finish its earlier speech when a typed message arrives.
+
 ## [0.31.2] - 2026-11-09
 
 ### Fixed

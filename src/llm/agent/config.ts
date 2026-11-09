@@ -108,7 +108,11 @@ export interface LlmAgentConfig {
    */
   toolChoice?: "auto" | "required-first-round";
   greeting?: LlmAgentGreeting;
-  bargeIn?: { mode: "project" | "on" | "off" };
+  bargeIn?: {
+    mode: "project" | "on" | "off";
+    /** A typed chat message cuts off earlier speech. Default `true`. */
+    typedMessages?: boolean;
+  };
   speechDuringNonInterruptible?: "answer_after" | "discard";
   history?: { turns?: number; interruptionNote?: boolean };
   tools?: LlmAgentToolsConfig;
@@ -731,9 +735,16 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
   if (root.bargeIn !== undefined) {
     const b = c.object(root.bargeIn, "bargeIn");
     if (b) {
-      c.unknownKeys(b, ["mode"], "bargeIn");
+      c.unknownKeys(b, ["mode", "typedMessages"], "bargeIn");
       if (b.mode === "project" || b.mode === "on" || b.mode === "off") {
         config.bargeIn = { mode: b.mode };
+        if (b.typedMessages !== undefined) {
+          if (typeof b.typedMessages === "boolean") {
+            config.bargeIn.typedMessages = b.typedMessages;
+          } else {
+            c.err("bargeIn.typedMessages", "must be a boolean");
+          }
+        }
       } else {
         c.err("bargeIn.mode", 'must be one of "project", "on", "off"');
       }
@@ -1061,7 +1072,15 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
       type: "object",
       additionalProperties: false,
       required: ["mode"],
-      properties: { mode: { enum: ["project", "on", "off"] } },
+      properties: {
+        mode: { enum: ["project", "on", "off"] },
+        typedMessages: {
+          type: "boolean",
+          default: true,
+          description:
+            "A typed chat message cuts off the agent's earlier speech that is still queued or playing. Set false to let it finish. Mode off disables this too.",
+        },
+      },
       default: { mode: "project" },
     },
     speechDuringNonInterruptible: {

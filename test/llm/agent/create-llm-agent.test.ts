@@ -1548,6 +1548,42 @@ describe("createLlmAgent", () => {
       await vi.waitFor(() => expect(summaries).toHaveLength(1));
     });
 
+    it("bargeIn.typedMessages false: chat after generation keeps speech and writes no interruption note", async () => {
+      const { requests } = await boot(
+        [
+          [delta("First part. Second part."), done("First part. Second part.")],
+          [delta("Sure."), done("Sure.")],
+        ],
+        { config: { bargeIn: { mode: "project", typedMessages: false } } },
+      );
+      say("tell me");
+      await vi.waitFor(() => expect(speaks()).toHaveLength(2));
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      settle(speaks()[0], "played", 500);
+      await new Promise((r) => setTimeout(r, 0));
+      chat("actually, something else");
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      expect(sent("speak_cancel")).toHaveLength(0);
+      const users = requests[1].messages.filter((m) => m.role === "user");
+      const last = users.at(-1) as { text: string };
+      expect(last.text).toBe("actually, something else");
+      expect(last.text).not.toContain("The caller interrupted");
+    });
+
+    it("bargeIn.typedMessages false: chat does not flush earlier speech", async () => {
+      await boot([[delta("Sure."), done("Sure.")]], {
+        config: {
+          bargeIn: { mode: "project", typedMessages: false },
+          greeting: { text: "Welcome.", interruptible: true },
+        },
+        skipSessionAck: true,
+      });
+      await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+      chat("hi");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(sent("speak_cancel")).toHaveLength(0);
+    });
+
     it("bargeIn mode off: chat does not flush earlier speech", async () => {
       await boot([[delta("Sure."), done("Sure.")]], {
         config: {

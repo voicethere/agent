@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { McpToolSource } from "../src/llm/mcp/mcp-tool-source.js";
 import {
+  findProduct,
   startMcpExample,
   type McpExampleHandle,
 } from "../services/mcp-example/server.js";
@@ -41,6 +42,83 @@ function source(url: string, headers?: Record<string, string>): McpToolSource {
 }
 
 describe("mcp example service", () => {
+  it("list_products returns eight sample products and no prices", async () => {
+    const { handle } = await start();
+    const src = source(handle.url);
+    expect(await src.ready(5_000)).toBe(true);
+    const res = await src.callTool("list_products", {}, { timeoutMs: 5_000 });
+    expect(res.isError).toBe(false);
+    const rows = JSON.parse(res.content) as { id: string; name: string }[];
+    expect(rows).toHaveLength(8);
+    expect(rows.map((r) => r.id)).toContain("ridgeline-2");
+    expect(res.content).not.toContain("priceUsd");
+  });
+
+  it("get_product_price finds a product by id and by name", async () => {
+    const { handle } = await start();
+    const src = source(handle.url);
+    expect(await src.ready(5_000)).toBe(true);
+    const byId = await src.callTool(
+      "get_product_price",
+      { product: "ridgeline-2" },
+      { timeoutMs: 5_000 },
+    );
+    expect(byId.isError).toBe(false);
+    expect(JSON.parse(byId.content)).toMatchObject({
+      id: "ridgeline-2",
+      priceUsd: 349,
+    });
+    const byName = await src.callTool(
+      "get_product_price",
+      { product: "Ember Stove" },
+      { timeoutMs: 5_000 },
+    );
+    expect(JSON.parse(byName.content)).toMatchObject({
+      id: "ember-stove",
+      priceUsd: 59,
+    });
+  });
+
+  it("findProduct matches a unique partial name and rejects an ambiguous one", () => {
+    expect(findProduct("Ridgeline")).toMatchObject({
+      id: "ridgeline-2",
+      priceUsd: 349,
+    });
+    expect(findProduct("talus")).toMatchObject({ id: "talus-mid" });
+    expect(findProduct("tent")).toBeUndefined();
+    expect(findProduct("  ")).toBeUndefined();
+  });
+
+  it("get_product_price finds a product by a partial name", async () => {
+    const { handle } = await start();
+    const src = source(handle.url);
+    expect(await src.ready(5_000)).toBe(true);
+    const res = await src.callTool(
+      "get_product_price",
+      { product: "beacon" },
+      { timeoutMs: 5_000 },
+    );
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.content)).toMatchObject({
+      id: "beacon-headlamp",
+      priceUsd: 45,
+    });
+  });
+
+  it("get_product_price answers an unknown product with text, not an error", async () => {
+    const { handle } = await start();
+    const src = source(handle.url);
+    expect(await src.ready(5_000)).toBe(true);
+    const res = await src.callTool(
+      "get_product_price",
+      { product: "jetpack" },
+      { timeoutMs: 5_000 },
+    );
+    expect(res.isError).toBe(false);
+    expect(res.content).toContain("Unknown product");
+    expect(res.content).toContain("ridgeline-2");
+  });
+
   it("answers /healthz with 200", async () => {
     const { handle } = await start();
     const res = await fetch(`http://127.0.0.1:${handle.port}/healthz`);
@@ -56,7 +134,12 @@ describe("mcp example service", () => {
         .tools()
         .map((t) => t.name)
         .sort(),
-    ).toEqual(["get_plan_price", "get_server_time"]);
+    ).toEqual([
+      "get_plan_price",
+      "get_product_price",
+      "get_server_time",
+      "list_products",
+    ]);
     const res = await src.callTool(
       "get_plan_price",
       { plan: "Starter" },

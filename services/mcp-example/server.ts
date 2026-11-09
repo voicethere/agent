@@ -21,6 +21,47 @@ export const SAMPLE_PLANS: Record<
   team: { pricePerMonthUsd: 99, note: "Sample data: several projects." },
 };
 
+/** Sample data for the llm-store-support template. Not real prices. */
+export const SAMPLE_PRODUCTS: Record<
+  string,
+  { name: string; priceUsd: number }
+> = {
+  "ridgeline-2": { name: "Ridgeline 2 tent", priceUsd: 349 },
+  "basecamp-4": { name: "Basecamp 4 tent", priceUsd: 429 },
+  "summit-20": { name: "Summit 20 sleeping bag", priceUsd: 279 },
+  "trailhead-45": { name: "Trailhead 45 backpack", priceUsd: 199 },
+  "talus-mid": { name: "Talus Mid hiking boot", priceUsd: 189 },
+  "ember-stove": { name: "Ember Stove", priceUsd: 59 },
+  "clearflow-filter": { name: "Clearflow Filter", priceUsd: 39 },
+  "beacon-headlamp": { name: "Beacon Headlamp", priceUsd: 45 },
+};
+
+function normalize(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Match by id or by name, ignoring case and punctuation. */
+export function findProduct(
+  query: string,
+): { id: string; name: string; priceUsd: number } | undefined {
+  const q = normalize(query);
+  if (!q) return undefined;
+  for (const [id, row] of Object.entries(SAMPLE_PRODUCTS)) {
+    if (normalize(id) === q || normalize(row.name) === q) return { id, ...row };
+  }
+  const partial = Object.entries(SAMPLE_PRODUCTS).filter(
+    ([id, row]) => normalize(row.name).includes(q) || normalize(id).includes(q),
+  );
+  if (partial.length === 1) {
+    const [id, row] = partial[0]!;
+    return { id, ...row };
+  }
+  return undefined;
+}
+
 const MAX_BODY_BYTES = 1_048_576; // 1 MiB
 const BODY_TIMEOUT_MS = 10_000;
 const HANDLER_TIMEOUT_MS = 5_000;
@@ -102,6 +143,48 @@ function buildServer(log: (line: Record<string, unknown>) => void): McpServer {
           return `Unknown plan. Known plans: ${Object.keys(SAMPLE_PLANS).join(", ")}.`;
         }
         return JSON.stringify({ plan: plan.trim().toLowerCase(), ...row });
+      }),
+  );
+  server.registerTool(
+    "list_products",
+    {
+      description:
+        "List the products of the sample Kestrel Outdoor store with their ids and names. Sample data, no prices.",
+      inputSchema: {},
+    },
+    () =>
+      run("list_products", () =>
+        JSON.stringify(
+          Object.entries(SAMPLE_PRODUCTS).map(([id, row]) => ({
+            id,
+            name: row.name,
+          })),
+        ),
+      ),
+  );
+  server.registerTool(
+    "get_product_price",
+    {
+      description:
+        "Price in US dollars of a product of the sample Kestrel Outdoor store, by id or name. Sample data, not real prices.",
+      inputSchema: {
+        product: z
+          .string()
+          .describe("Product id or name, for example ridgeline-2"),
+      },
+    },
+    ({ product }) =>
+      run("get_product_price", () => {
+        const row = findProduct(product);
+        if (!row) {
+          return `Unknown product. Known products: ${Object.keys(SAMPLE_PRODUCTS).join(", ")}.`;
+        }
+        return JSON.stringify({
+          id: row.id,
+          name: row.name,
+          priceUsd: row.priceUsd,
+          note: "Sample data.",
+        });
       }),
   );
   server.registerTool(

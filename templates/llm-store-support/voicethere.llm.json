@@ -1,0 +1,50 @@
+{
+  "$schema": "./node_modules/@voicethere/agent/schema/voicethere.llm.schema.json",
+  "version": 1,
+  "provider": "openrouter",
+  "model": "amazon/nova-micro-v1",
+  "apiKeySecret": "AGENT_OPENROUTER_API_KEY",
+  "maxOutputTokens": 1024,
+  "greeting": {
+    "text": "Hi, this is Kestrel Outdoor support. How can I help?",
+    "interruptible": true
+  },
+  "bargeIn": { "mode": "project" },
+  "history": { "turns": 20, "interruptionNote": true },
+  "fillers": {
+    "thinking": {
+      "phrases": ["Okay.", "Right.", "Let me check."],
+      "afterMs": 1500
+    },
+    "toolCall": {
+      "phrases": ["Let me check that for you.", "One moment."]
+    },
+    "toolWait": {
+      "phrases": ["Still checking, one moment.", "Almost there."],
+      "afterMs": 4000
+    },
+    "interruptible": true
+  },
+  "toolChoice": "required-first-round",
+  "tools": {
+    "maxRounds": 4,
+    "timeoutMs": 15000
+  },
+  "toolSources": [
+    {
+      "kind": "service",
+      "path": "/mcp",
+      "allow": ["list_products", "get_product_price"]
+    }
+  ],
+  "knowledge": {
+    "store": "redis",
+    "topK": 3,
+    "embeddings": {
+      "provider": "openrouter",
+      "model": "openai/text-embedding-3-small"
+    },
+    "redis": { "namespace": "store-support" }
+  },
+  "interruptPolicy": "cancel"
+}

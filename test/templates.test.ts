@@ -63,6 +63,7 @@ describe("agent template registry", () => {
         "llm-docs-rag",
         "llm-language-tutor",
         "llm-mcp-service",
+        "llm-store-support",
         "llm-support-sticky-user",
         "mix-smoke",
         "positional-tts",
@@ -83,7 +84,7 @@ describe("agent template registry", () => {
   it("filters templates by kind", () => {
     const product = listTemplates({ kind: "product" });
     expect(product.every((template) => template.kind === "product")).toBe(true);
-    expect(product).toHaveLength(21);
+    expect(product).toHaveLength(22);
 
     const e2e = listTemplates({ kind: "e2e" });
     expect(e2e.every((template) => template.kind === "e2e")).toBe(true);
@@ -201,6 +202,7 @@ describe("seed template bundles", () => {
         "llm-docs-rag",
         "llm-language-tutor",
         "llm-mcp-service",
+        "llm-store-support",
         "llm-support-sticky-user",
         "positional-tts",
         "spatial-showcase",

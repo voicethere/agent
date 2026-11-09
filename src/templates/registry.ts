@@ -287,6 +287,38 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     },
   },
   {
+    id: "llm-store-support",
+    entry: "llm-store-support/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    title: "Store support (LLM + knowledge + MCP)",
+    summary:
+      "Phone support for a sample outdoor store: answers from Markdown knowledge and looks up prices with an MCP tool.",
+    category: "voice-data",
+    description:
+      "An LLM support assistant for the fictional Kestrel Outdoor store. It answers shipping, returns, warranty, sizing and store questions from knowledge/*.md through search_knowledge and calls get_product_price on a project service (the mcp-example-service image) for every price. Needs Project Redis, the AGENT_OPENROUTER_API_KEY secret and the example service.",
+    sourceFiles: [
+      "llm-store-support/agent.ts",
+      "llm-store-support/voicethere.llm.json",
+      "llm-store-support/prompt.md",
+      "llm-store-support/md.d.ts",
+      "llm-store-support/README.md",
+      "llm-store-support/knowledge/shipping.md",
+      "llm-store-support/knowledge/returns.md",
+      "llm-store-support/knowledge/warranty.md",
+      "llm-store-support/knowledge/sizing.md",
+      "llm-store-support/knowledge/store.md",
+      "llm-store-support/knowledge/products.md",
+    ],
+    npmDependencies: {
+      openai: "^7.43.0",
+      "@anthropic-ai/sdk": "^1.3.0",
+      "@google/genai": "^2.31.0",
+      "@modelcontextprotocol/sdk": "^1.32.2",
+      ioredis: "^5.11.1",
+    },
+  },
+  {
     id: "llm-board",
     entry: "llm-board/agent.ts",
     kind: "product",

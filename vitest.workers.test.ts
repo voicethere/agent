@@ -4,7 +4,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  chmodSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -123,21 +122,21 @@ describe("localWorkerLimit grant sharing and fallback", () => {
   });
 
   it("skips the host gate but keeps the cap when the slot dir is unusable", async () => {
-    const parent = mkdtempSync(join(tmpdir(), "vitest-ro-"));
-    chmodSync(parent, 0o500);
+    // A path below a regular file fails with ENOTDIR for every user, root included.
+    const tmp = mkdtempSync(join(tmpdir(), "vitest-ro-"));
+    writeFileSync(join(tmp, "not-a-dir"), "");
     const warnings: string[] = [];
     try {
       const result = await localWorkerLimit({
         env: { VITEST_LOCAL_MAX_WORKERS: "3" },
-        dir: join(parent, "sub", "slots"),
+        dir: join(tmp, "not-a-dir", "slots"),
         log: (m) => warnings.push(m),
       });
       expect(result).toEqual({ maxWorkers: 3 });
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toMatch(/EACCES|EROFS|EPERM/);
+      expect(warnings[0]).toMatch(/ENOTDIR/);
     } finally {
-      chmodSync(parent, 0o700);
-      rmSync(parent, { recursive: true, force: true });
+      rmSync(tmp, { recursive: true, force: true });
     }
   });
 });
@@ -293,13 +292,42 @@ describe("across processes", () => {
     return { child, line };
   }
 
+  const ownedBy = (pid: number) =>
+    slotNames().filter(
+      (s) => readFileSync(join(dir, s, "owner"), "utf8") === String(pid),
+    ).length;
+
   it("a second process waits until the first exits", async () => {
     const first = runner();
     expect(await first.line("GOT")).toBe("GOT 6");
     const second = runner();
     await second.line("WAITING");
+    const firstExit = new Promise((r) => first.child.once("exit", r));
     first.child.stdin!.end();
+    // The first process frees its slots one at a time, so the poller may take
+    // the ones already free: any grant from 1 to 6 is correct.
+    const n = Number((await second.line("GOT")).split(" ")[1]);
+    expect(n).toBeGreaterThanOrEqual(1);
+    expect(n).toBeLessThanOrEqual(6);
+    // Its slot release is finished once it has exited.
+    await firstExit;
+    expect(ownedBy(second.child.pid!)).toBe(n);
+    expect(ownedBy(first.child.pid!)).toBe(0);
+  });
+
+  it("a second process takes all 6 when the holder is killed", async () => {
+    const first = runner();
+    expect(await first.line("GOT")).toBe("GOT 6");
+    await new Promise((r) => {
+      first.child.once("exit", r);
+      first.child.kill("SIGKILL");
+    });
+    // Started after the holder is gone, so its first pass sees all 6 slots
+    // stale. A waiter already polling while the holder dies can see only some
+    // of them stale in its pass and take a partial grant.
+    const second = runner();
     expect(await second.line("GOT")).toBe("GOT 6");
+    expect(ownedBy(second.child.pid!)).toBe(6);
   });
   // One pass, no waiting: GOT n, NONE (no slot free) or ERR msg (a real failure).
   const onePassScript = `

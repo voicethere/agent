@@ -14,7 +14,7 @@
     "download-model": "node src/download-model.ts",
     "build-index": "node src/cli.ts build",
     "eval": "node src/cli.ts eval",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.native.json",
     "test": "vitest run",
     "start": "node src/server.ts",
     "smoke": "node scripts/smoke-mcp.ts"

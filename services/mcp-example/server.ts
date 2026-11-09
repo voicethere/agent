@@ -198,8 +198,12 @@ function buildServer(log: (line: Record<string, unknown>) => void): McpServer {
 type BodyFailure = "too_large" | "timeout" | "invalid_json" | "aborted";
 
 class BodyError extends Error {
-  constructor(readonly reason: BodyFailure) {
+  // No parameter property: the image runs this file with Node's strip-only
+  // type stripping, which rejects non-erasable syntax.
+  readonly reason: BodyFailure;
+  constructor(reason: BodyFailure) {
     super(reason);
+    this.reason = reason;
   }
 }
 

@@ -18,6 +18,7 @@ import {
   resetAgentIpcStateForTests,
 } from "../../../src/runtime.js";
 import { installProcessMessageCapture } from "../../helpers/process-mock.js";
+import { assertProviderOrder } from "./provider-order.js";
 
 type Capture = ReturnType<typeof installProcessMessageCapture>;
 type Msg = Record<string, unknown>;
@@ -430,6 +431,150 @@ describe("createLlmAgent", () => {
     });
     const logs = sent("log").map((m) => m.message);
     expect(logs).toContain("llm turn failed: LLM_RATE_LIMITED");
+  });
+
+  it("the llm turn failed row carries status, vendorCode and stream, never the vendor message", async () => {
+    await boot([
+      [
+        {
+          fail: new LlmProviderError(
+            "LLM_PROVIDER_ERROR",
+            "openrouter stream error",
+            undefined,
+            { vendorCode: 424, stream: true },
+          ),
+        },
+      ],
+    ]);
+    say("hi");
+    await vi.waitFor(() => expect(summaries).toHaveLength(1));
+    const row = sent("log").find(
+      (m) => m.message === "llm turn failed: LLM_PROVIDER_ERROR",
+    );
+    expect(row?.fields).toEqual({ vendorCode: 424, stream: true });
+  });
+
+  describe("a tool round left open never puts the next user message after a tool result", () => {
+    const lookup = (handler: () => Promise<string>) =>
+      defineTool({
+        name: "lookup",
+        description: "look up",
+        inputSchema: { type: "object" },
+        handler,
+      });
+
+    it("cancel barge-in before the first answer token after a tool round keeps a valid order", async () => {
+      const gate = deferred();
+      const turnIds: string[] = [];
+      const { requests } = await boot(
+        [
+          [done("", [call("c1", "lookup")])],
+          [
+            { gate: gate.promise },
+            delta("Within 60 days."),
+            done("Within 60 days."),
+          ],
+          [delta("It is 349 dollars."), done("It is 349 dollars.")],
+        ],
+        {
+          config: { interruptPolicy: "cancel" },
+          options: {
+            tools: [lookup(async () => "returns: 60 days")],
+            hooks: {
+              onBeforeLlmCall: (_m, ctx) => {
+                turnIds.push(ctx.turnId);
+              },
+            },
+          },
+        },
+      );
+      say("returns?");
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      capture.emit({
+        type: "agent_interrupted",
+        sessionId: SESSION,
+        turnId: turnIds[0],
+        replyPlayedMs: 0,
+        playedText: "",
+        unplayedText: "",
+        playedTextExact: true,
+        cancelledRequestIds: [],
+      });
+      say("price?");
+      await vi.waitFor(() => expect(requests).toHaveLength(3));
+      const msgs = requests[2].messages;
+      assertProviderOrder(msgs);
+      expect(msgs.some((m) => m.role === "tool")).toBe(false);
+      expect(msgs.at(-1)).toMatchObject({ role: "user" });
+    });
+
+    it("a provider error in the answer round after tools leaves a valid order for the next turn", async () => {
+      const { requests } = await boot(
+        [
+          [done("", [call("c1", "lookup")])],
+          [{ fail: new LlmProviderError("LLM_PROVIDER_ERROR", "x") }],
+          [delta("It is 349 dollars."), done("It is 349 dollars.")],
+        ],
+        { options: { tools: [lookup(async () => "returns: 60 days")] } },
+      );
+      say("returns?");
+      await vi.waitFor(() => expect(summaries).toHaveLength(1));
+      expect(summaries[0]).toMatchObject({ status: "failed" });
+      say("price?");
+      await vi.waitFor(() => expect(requests).toHaveLength(3));
+      assertProviderOrder(requests[2].messages);
+      expect(requests[2].messages.some((m) => m.role === "tool")).toBe(false);
+    });
+
+    it("a tool result written after the cancel settle bound is dropped and the next request keeps a valid order", async () => {
+      // runTools races the abort, but an onToolResult hook that ignores it can
+      // hold the cancelled turn past CANCEL_SETTLE_MS and write late.
+      const slow = deferred();
+      const started = deferred();
+      const { requests } = await boot(
+        [
+          [done("", [call("c1", "lookup")])],
+          [delta("It is 349 dollars."), done("It is 349 dollars.")],
+        ],
+        {
+          config: { interruptPolicy: "cancel" },
+          options: {
+            tools: [lookup(async () => "late result")],
+            hooks: {
+              onToolResult: async () => {
+                started.resolve();
+                await slow.promise;
+                return undefined;
+              },
+            },
+          },
+        },
+      );
+      say("returns?");
+      await started.promise;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      say("price?");
+      // The cancel waits at most CANCEL_SETTLE_MS (2 s) for the old turn.
+      for (let i = 0; i < 50 && requests.length < 2; i += 1) {
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      expect(requests).toHaveLength(2);
+      slow.resolve();
+      for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(10);
+      vi.useRealTimers();
+      assertProviderOrder(requests[1].messages);
+      expect(requests[1].messages.some((m) => m.role === "tool")).toBe(false);
+      await vi.waitFor(() =>
+        expect(
+          sent("log").filter((m) => m.message === "history late write dropped"),
+        ).toHaveLength(1),
+      );
+      const row = sent("log").find(
+        (m) => m.message === "history late write dropped",
+      );
+      expect(row?.fields).toMatchObject({ kind: "tool", count: 1 });
+      expect(JSON.stringify(row)).not.toContain("late result");
+    });
   });
 
   describe("output cap (max_tokens)", () => {

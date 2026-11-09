@@ -1307,7 +1307,12 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       const code =
         err instanceof LlmProviderError ? err.code : "LLM_TURN_ERROR";
       t.errorCode = code;
-      agentLog("error", `llm turn failed: ${code}`, s.sessionId);
+      agentLog(
+        "error",
+        `llm turn failed: ${code}`,
+        err instanceof LlmProviderError ? providerErrorFields(err) : {},
+        s.sessionId,
+      );
       speakFallback(s, t);
       t.status = "failed";
       return summarize(t);
@@ -1608,7 +1613,9 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     async onSessionStart(ctx: SessionContext) {
       const s: SessionState = {
         sessionId: ctx.sessionId,
-        history: new ConversationHistory(historyTurns),
+        history: new ConversationHistory(historyTurns, (fields) =>
+          agentLog("info", "history late write dropped", fields, ctx.sessionId),
+        ),
         speech: [],
         announcing: 0,
         chain: Promise.resolve(),
@@ -1699,5 +1706,16 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       }
       sessions.delete(ctx.sessionId);
     },
+  };
+}
+
+/** Safe metadata for the `llm turn failed` row: no vendor message, no body. */
+export function providerErrorFields(
+  err: LlmProviderError,
+): Record<string, unknown> {
+  return {
+    ...(err.status !== undefined ? { status: err.status } : {}),
+    ...(err.vendorCode !== undefined ? { vendorCode: err.vendorCode } : {}),
+    ...(err.stream ? { stream: true } : {}),
   };
 }

@@ -4,6 +4,7 @@ import {
   agentLog,
   announce,
   cancelSpeech,
+  disconnectClient,
   getSessionUser,
   parseChatText,
   recordReply,
@@ -70,6 +71,10 @@ import { ThinkingStripper, stripThinking } from "./thinking-stripper.js";
 
 const D = LLM_AGENT_CONFIG_DEFAULTS;
 const CANCEL_SETTLE_MS = 2_000;
+/** Longest wait for the closing message to finish before the call is closed (`failedReplies`). */
+export const FAIL_CLOSE_SPEAK_WAIT_MS = 15_000;
+/** Disconnect reason sent to the runner when `failedReplies` closes the call. */
+export const FAIL_CLOSE_REASON = "llm_failed_replies";
 
 export interface CreateLlmAgentOptions {
   /** Validated here; an invalid config throws `LLM_CONFIG_INVALID`. */
@@ -153,6 +158,8 @@ interface TurnState {
   pendingChars: number;
   coalesceTimer?: ReturnType<typeof setTimeout>;
   fallbackSpoken: boolean;
+  /** The closing message of `failedReplies` was spoken this turn; completes when it finished. */
+  closeSpeech?: Promise<unknown>;
   /** Characters of `<thinking>` blocks removed from the reply this turn. */
   thinkingCharsStripped: number;
   /** URLs sent as `assistant_content` in this turn. */
@@ -200,6 +207,10 @@ interface SessionState {
     unplayedText: string;
   };
   ended: boolean;
+  /** Consecutive failed turns (`failedReplies`). Per session, never module state. */
+  failedStreak: number;
+  /** The call is being closed by `failedReplies`: no further turn starts. */
+  closing: boolean;
 }
 
 function configError(message: string, code: string): Error {
@@ -313,6 +324,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
   const toolMaxBytes = config.tools?.maxResultBytes ?? D.toolMaxResultBytes;
   const policy = config.interruptPolicy ?? D.interruptPolicy;
   const fallbackText = config.fallbackText ?? D.fallbackText;
+  const closeAfter = config.failedReplies?.closeAfter;
+  const closeMessage = config.failedReplies?.message ?? D.failedRepliesMessage;
   const speakChat = config.speakChatReplies ?? D.speakChatReplies;
   const useNote = config.history?.interruptionNote ?? D.interruptionNote;
   const historyTurns = config.history?.turns ?? D.historyTurns;
@@ -539,24 +552,25 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     t: TurnState,
     text: string,
     interruptible = true,
-  ): void {
+  ): Promise<unknown> {
     flushSpeech(s, t);
     t.spoken.push(text);
     markReplyStarted(s, t);
     sendReplyDelta(s, t, text);
     if (t.source === "voice" || speakChat) {
       if (interruptible) {
-        trackSpeech(s, speak(s.sessionId, text, replyOpts(t)), {
+        return trackSpeech(s, speak(s.sessionId, text, replyOpts(t)), {
           turnId: t.turnId,
           text,
           sentences: t.spoken,
           indexes: [t.spoken.length - 1],
-        });
-      } else {
-        const h = announce(s.sessionId, text, replyOpts(t));
-        trackAnnouncement(s, h.done);
+        }).done;
       }
+      const h = announce(s.sessionId, text, replyOpts(t));
+      trackAnnouncement(s, h.done);
+      return h.done;
     }
+    return Promise.resolve();
   }
 
   /**
@@ -1060,6 +1074,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       ...(config.toolChoice === "required-first-round" && t.llmCalls === 1
         ? { toolChoice: "required" as const }
         : {}),
+      ...(config.vendorConfig ? { vendorConfig: config.vendorConfig } : {}),
       temperature: config.temperature,
       maxOutputTokens: config.maxOutputTokens ?? D.maxOutputTokens,
       signal,
@@ -1146,7 +1161,58 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
   function speakFallback(s: SessionState, t: TurnState): void {
     if (t.fallbackSpoken) return;
     t.fallbackSpoken = true;
+    if (closeAfter !== undefined && s.failedStreak + 1 >= closeAfter) {
+      t.closeSpeech = deliver(s, t, closeMessage);
+      return;
+    }
     deliver(s, t, fallbackText);
+  }
+
+  /**
+   * `failedReplies`: counts consecutive failed turns. At the limit the closing
+   * message is on its way (or is spoken here when a `respond` hook failed the
+   * turn), the wait for it is bounded, then the runner is asked to disconnect.
+   * The runner registers `customer_disconnect` before teardown.
+   */
+  function trackFailedReplies(
+    s: SessionState,
+    t: TurnState,
+    summary: TurnSummary,
+  ): boolean {
+    if (closeAfter === undefined || s.closing || s.ended) return false;
+    if (summary.status === "completed") {
+      s.failedStreak = 0;
+      return false;
+    }
+    if (summary.status !== "failed") return false;
+    s.failedStreak += 1;
+    if (s.failedStreak < closeAfter) return false;
+    s.closing = true;
+    t.closeSpeech ??= deliver(s, t, closeMessage);
+    return true;
+  }
+
+  async function closeAfterFailedReplies(
+    s: SessionState,
+    t: TurnState,
+  ): Promise<void> {
+    const started = now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      t.closeSpeech,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, FAIL_CLOSE_SPEAK_WAIT_MS);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (s.ended) return;
+    agentLog(
+      "info",
+      "closing call after failed replies",
+      { closeAfter, waitedMs: now() - started },
+      s.sessionId,
+    );
+    disconnectClient(s.sessionId, { reason: FAIL_CLOSE_REASON });
   }
 
   async function ensureService(t: TurnState): Promise<void> {
@@ -1391,6 +1457,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       });
     }
     setAgentState(s.sessionId, "listening");
+    const closeNow = trackFailedReplies(s, t, summary);
     if (hooks.onTurnEnd) {
       await callHook("onTurnEnd", s.sessionId, () =>
         hooks.onTurnEnd!(summary, ctx),
@@ -1415,6 +1482,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       },
       s.sessionId,
     );
+    if (closeNow) await closeAfterFailedReplies(s, t);
   }
 
   function startTurn(
@@ -1482,7 +1550,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
       } finally {
         if (s.active === active) s.active = undefined;
         const q = s.queued;
-        if (q && !s.ended && !s.active) {
+        if (q && !s.ended && !s.closing && !s.active) {
           s.queued = undefined;
           startTurn(s, q.text, q.source, q.utteranceId);
         }
@@ -1496,7 +1564,7 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
     source: Source,
     utteranceId?: string,
   ): Promise<void> {
-    if (s.ended) return;
+    if (s.ended || s.closing) return;
     if (
       source === "voice" &&
       config.speechDuringNonInterruptible === "discard" &&
@@ -1620,6 +1688,8 @@ export function createLlmAgent(opts: CreateLlmAgentOptions): AgentHandlers {
         announcing: 0,
         chain: Promise.resolve(),
         ended: false,
+        failedStreak: 0,
+        closing: false,
       };
       sessions.set(ctx.sessionId, s);
       const mode = config.bargeIn?.mode ?? D.bargeInMode;

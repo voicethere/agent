@@ -91,6 +91,31 @@ createLlmAgent({
 
 It is never added automatically.
 
+## Close the call after failed replies
+
+Off by default. Set `failedReplies` in `voicethere.llm.json` to hang up when the model keeps failing:
+
+```json
+"failedReplies": { "closeAfter": 3, "message": "Sorry, I can't answer right now. Please try again later." }
+```
+
+- `closeAfter` (integer 1 to 20): consecutive failed replies that end the call. A completed reply resets the count. Cancelled and interrupted replies leave it unchanged. The count is per session.
+- `message` (1 to 300 characters, optional): spoken and sent to chat on the closing reply instead of `fallbackText`. Default: "Sorry, I can't answer right now. Please try again later."
+- After the message the agent waits for the speech to finish, at most 15 seconds, then asks the runner to disconnect the caller with the reason `llm_failed_replies`. No further reply starts after that.
+
+## Provider request options (`vendorConfig`)
+
+`vendorConfig` is a plain JSON object (at most 8 KB serialized) merged into the provider request next to the fields the agent sets. The agent never reads it. Use the keys your provider's API documents:
+
+```json
+"vendorConfig": { "top_p": 0.8 }
+```
+
+- OpenAI and OpenRouter: chat completion parameters, sent as given.
+- Anthropic: `messages.create` parameters, sent as given.
+- Gemini: keys of `GenerateContentConfig`. The Gemini SDK sends only the keys it knows and drops the rest.
+- Keys the agent sets itself are rejected at load time with the key named: the model, the messages (`messages`, `contents`, `system`, `systemInstruction`), `tools`, the tool choice (`tool_choice`, `toolConfig`), `stream`, the max tokens (`max_tokens`, `max_completion_tokens`, `maxOutputTokens`) and `temperature`. Provider-specific extras the agent sends (`stream_options`, `output_config`, `abortSignal`) are rejected too.
+
 ## Output token cap
 
 `maxOutputTokens` is 1024 in `voicethere.llm.json`. Thinking models count hidden reasoning against `maxOutputTokens`, so keep spoken replies short in the prompt, not with a small cap. A reply cut off by the cap before anything was spoken ends the turn with `LLM_OUTPUT_TRUNCATED` and the fallback text.

@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-10
+
+### Added
+
+- `failedReplies` in `voicethere.llm.json`: `{ "closeAfter": 1..20, "message": "…" }` ends the call after that many failed replies in a row. The agent speaks and chats `message` (default "Sorry, I can't answer right now. Please try again later.") instead of `fallbackText` on the closing reply, waits for the speech for at most 15 seconds, then disconnects the caller with the reason `llm_failed_replies`. A completed reply resets the count. Off when absent.
+- `vendorConfig` in `voicethere.llm.json`: a plain JSON object (up to 8 KB) merged into the provider request next to the fields the agent sets. OpenAI, OpenRouter and Anthropic send the keys as given; Gemini takes `GenerateContentConfig` keys. Keys the agent sets itself (model, messages, system, tools, tool choice, stream, max tokens, temperature) are rejected at load time with the key named.
+
 ## [0.34.0] - 2026-11-10
 
 ### Added

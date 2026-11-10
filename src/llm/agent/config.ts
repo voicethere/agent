@@ -122,6 +122,18 @@ export interface LlmAgentConfig {
   interruptPolicy?: "cancel" | "finish";
   serviceWaitMs?: number;
   fallbackText?: string;
+  /**
+   * Close the call after this many failed replies in a row. Off when absent.
+   * A completed turn resets the count; cancelled and discarded turns leave it
+   * unchanged.
+   */
+  failedReplies?: LlmAgentFailedReplies;
+  /**
+   * Extra request keys for the provider's own API (a plain JSON object, at most
+   * 8 KB), merged under the fields the agent sets itself. The agent never reads
+   * a key of it; keys it sets itself are rejected.
+   */
+  vendorConfig?: Record<string, unknown>;
   speakChatReplies?: boolean;
   /** Tool-call log lines: `redacted` (default), `full` (secrets still removed) or `off`. */
   toolCallLogs?: "full" | "redacted" | "off";
@@ -130,6 +142,67 @@ export interface LlmAgentConfig {
   /** Links in the reply: kept out of speech and sent as `assistant_content`. */
   links?: LlmAgentLinksConfig;
 }
+
+export interface LlmAgentFailedReplies {
+  /** Integer 1..20. */
+  closeAfter: number;
+  /** Spoken and sent to chat on the closing reply, 1..300 characters. */
+  message?: string;
+}
+
+/** Keys the agent sets itself per provider; `vendorConfig` may not carry them. */
+export const VENDOR_CONFIG_RESERVED_KEYS: Record<
+  LlmProviderId,
+  readonly string[]
+> = {
+  openai: [
+    "model",
+    "messages",
+    "stream",
+    "stream_options",
+    "tools",
+    "tool_choice",
+    "temperature",
+    "max_tokens",
+    "max_completion_tokens",
+  ],
+  openrouter: [
+    "model",
+    "messages",
+    "stream",
+    "stream_options",
+    "tools",
+    "tool_choice",
+    "temperature",
+    "max_tokens",
+    "max_completion_tokens",
+  ],
+  anthropic: [
+    "model",
+    "messages",
+    "system",
+    "stream",
+    "tools",
+    "tool_choice",
+    "temperature",
+    "max_tokens",
+    "output_config",
+  ],
+  gemini: [
+    "model",
+    "contents",
+    "systemInstruction",
+    "tools",
+    "toolConfig",
+    "temperature",
+    "maxOutputTokens",
+    "abortSignal",
+  ],
+};
+
+export const VENDOR_CONFIG_MAX_BYTES = 8 * 1024;
+
+export const FAILED_REPLIES_MAX_CLOSE_AFTER = 20;
 
 export interface LlmAgentLinksConfig {
   /**
@@ -164,6 +237,8 @@ export const LLM_AGENT_CONFIG_DEFAULTS = {
   interruptPolicy: "cancel",
   serviceWaitMs: 20_000,
   fallbackText: "Sorry, something went wrong. Please try again.",
+  failedRepliesMessage:
+    "Sorry, I can't answer right now. Please try again later.",
   speakChatReplies: true,
   toolCallLogs: "redacted",
   linksMode: "extract",
@@ -480,11 +555,55 @@ const TOP_KEYS = [
   "interruptPolicy",
   "serviceWaitMs",
   "fallbackText",
+  "failedReplies",
+  "vendorConfig",
   "speakChatReplies",
   "toolCallLogs",
   "knowledge",
   "links",
 ] as const;
+
+function checkVendorConfig(
+  c: Checker,
+  raw: unknown,
+  provider: LlmProviderId | undefined,
+): Record<string, unknown> | undefined {
+  if (!isRecord(raw) || Array.isArray(raw)) {
+    c.err("vendorConfig", "must be a plain object");
+    return undefined;
+  }
+  const proto: unknown = Object.getPrototypeOf(raw);
+  if (proto !== Object.prototype && proto !== null) {
+    c.err("vendorConfig", "must be a plain object");
+    return undefined;
+  }
+  let size: number;
+  try {
+    size = Buffer.byteLength(JSON.stringify(raw), "utf8");
+  } catch {
+    c.err("vendorConfig", "must be JSON-serializable");
+    return undefined;
+  }
+  if (size > VENDOR_CONFIG_MAX_BYTES) {
+    c.err(
+      "vendorConfig",
+      `must be at most ${VENDOR_CONFIG_MAX_BYTES} bytes serialized`,
+    );
+    return undefined;
+  }
+  const reserved = provider ? VENDOR_CONFIG_RESERVED_KEYS[provider] : [];
+  let ok = true;
+  for (const key of Object.keys(raw)) {
+    if (reserved.includes(key)) {
+      c.err(
+        `vendorConfig.${key}`,
+        `is set by the agent for provider "${provider}" and cannot be overridden`,
+      );
+      ok = false;
+    }
+  }
+  return ok ? raw : undefined;
+}
 
 function validateKnowledge(
   c: Checker,
@@ -952,6 +1071,33 @@ export function validateLlmAgentConfig(input: unknown): LlmAgentConfigResult {
     const s = c.string(root.fallbackText, "fallbackText", { min: 1, max: 500 });
     if (s !== undefined) config.fallbackText = s;
   }
+  if (root.failedReplies !== undefined) {
+    const f = c.object(root.failedReplies, "failedReplies");
+    if (f) {
+      c.unknownKeys(f, ["closeAfter", "message"], "failedReplies");
+      const n = c.number(
+        f.closeAfter,
+        "failedReplies.closeAfter",
+        1,
+        FAILED_REPLIES_MAX_CLOSE_AFTER,
+        true,
+      );
+      const fr: Partial<LlmAgentFailedReplies> = {};
+      if (n !== undefined) fr.closeAfter = n;
+      if (f.message !== undefined) {
+        const m = c.string(f.message, "failedReplies.message", {
+          min: 1,
+          max: 300,
+        });
+        if (m !== undefined) fr.message = m;
+      }
+      if (n !== undefined) config.failedReplies = fr as LlmAgentFailedReplies;
+    }
+  }
+  if (root.vendorConfig !== undefined) {
+    const vc = checkVendorConfig(c, root.vendorConfig, provider);
+    if (vc) config.vendorConfig = vc;
+  }
   if (root.speakChatReplies !== undefined) {
     const b = c.boolean(root.speakChatReplies, "speakChatReplies");
     if (b !== undefined) config.speakChatReplies = b;
@@ -1302,6 +1448,29 @@ export const LLM_AGENT_CONFIG_JSON_SCHEMA = {
       minLength: 1,
       maxLength: 500,
       default: "Sorry, something went wrong. Please try again.",
+    },
+    failedReplies: {
+      type: "object",
+      additionalProperties: false,
+      required: ["closeAfter"],
+      description:
+        "Close the call after this many failed replies in a row. Off when absent. A completed reply resets the count.",
+      properties: {
+        closeAfter: { type: "integer", minimum: 1, maximum: 20 },
+        message: {
+          type: "string",
+          minLength: 1,
+          maxLength: 300,
+          default: "Sorry, I can't answer right now. Please try again later.",
+          description:
+            "Spoken and sent to chat on the closing reply, instead of fallbackText.",
+        },
+      },
+    },
+    vendorConfig: {
+      type: "object",
+      description:
+        "Extra request keys for the provider's own API, merged under the fields the agent sets itself (at most 8 KB serialized). Keys the agent sets itself (model, messages or contents, system, tools, tool choice, stream, max tokens, temperature) are rejected. See the provider's API reference for the keys it accepts.",
     },
     speakChatReplies: { type: "boolean", default: true },
     links: {

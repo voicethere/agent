@@ -387,4 +387,93 @@ describe("validateLlmAgentConfig", () => {
       );
     });
   });
+
+  describe("failedReplies", () => {
+    it("accepts closeAfter 1..20 and an optional message", () => {
+      const r = validateLlmAgentConfig({
+        ...base,
+        failedReplies: { closeAfter: 3, message: "Bye." },
+      });
+      expect(r.ok && r.config.failedReplies).toEqual({
+        closeAfter: 3,
+        message: "Bye.",
+      });
+      expect(
+        validateLlmAgentConfig({ ...base, failedReplies: { closeAfter: 20 } })
+          .ok,
+      ).toBe(true);
+    });
+
+    it("rejects closeAfter 0, 21, 1.5, a missing closeAfter, a 301-char message and unknown keys", () => {
+      for (const closeAfter of [0, 21, 1.5, "3"]) {
+        expect(errorsOf({ ...base, failedReplies: { closeAfter } })).toEqual([
+          expect.objectContaining({ path: "failedReplies.closeAfter" }),
+        ]);
+      }
+      expect(errorsOf({ ...base, failedReplies: {} })).toEqual([
+        expect.objectContaining({ path: "failedReplies.closeAfter" }),
+      ]);
+      expect(
+        errorsOf({
+          ...base,
+          failedReplies: { closeAfter: 2, message: "x".repeat(301) },
+        }),
+      ).toEqual([expect.objectContaining({ path: "failedReplies.message" })]);
+      expect(
+        errorsOf({ ...base, failedReplies: { closeAfter: 2, extra: 1 } }),
+      ).toEqual([expect.objectContaining({ path: "failedReplies.extra" })]);
+    });
+  });
+
+  describe("vendorConfig", () => {
+    it("accepts a plain object", () => {
+      const r = validateLlmAgentConfig({
+        ...base,
+        vendorConfig: { top_p: 0.5, nested: { a: [1, 2] } },
+      });
+      expect(r.ok && r.config.vendorConfig).toEqual({
+        top_p: 0.5,
+        nested: { a: [1, 2] },
+      });
+    });
+
+    it("rejects an array, a string and an object over 8 KB", () => {
+      for (const vendorConfig of [[], "x", null]) {
+        expect(errorsOf({ ...base, vendorConfig })).toEqual([
+          expect.objectContaining({ path: "vendorConfig" }),
+        ]);
+      }
+      expect(
+        errorsOf({ ...base, vendorConfig: { big: "x".repeat(9000) } }),
+      ).toEqual([expect.objectContaining({ path: "vendorConfig" })]);
+    });
+
+    it.each([
+      ["openai", "tool_choice"],
+      ["openai", "max_completion_tokens"],
+      ["openrouter", "messages"],
+      ["anthropic", "system"],
+      ["anthropic", "max_tokens"],
+      ["gemini", "systemInstruction"],
+      ["gemini", "maxOutputTokens"],
+    ])("rejects the reserved key %s / %s by name", (provider, key) => {
+      expect(
+        errorsOf({
+          ...base,
+          provider,
+          vendorConfig: { [key]: 1 },
+        }),
+      ).toEqual([expect.objectContaining({ path: `vendorConfig.${key}` })]);
+    });
+
+    it("allows a key that is reserved for another provider only", () => {
+      expect(
+        validateLlmAgentConfig({
+          ...base,
+          provider: "gemini",
+          vendorConfig: { system: "x" },
+        }).ok,
+      ).toBe(true);
+    });
+  });
 });

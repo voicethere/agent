@@ -382,6 +382,30 @@
       "maxLength": 500,
       "default": "Sorry, something went wrong. Please try again."
     },
+    "failedReplies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["closeAfter"],
+      "description": "Close the call after this many failed replies in a row. Off when absent. A completed reply resets the count.",
+      "properties": {
+        "closeAfter": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "default": "Sorry, I can't answer right now. Please try again later.",
+          "description": "Spoken and sent to chat on the closing reply, instead of fallbackText."
+        }
+      }
+    },
+    "vendorConfig": {
+      "type": "object",
+      "description": "Extra request keys for the provider's own API, merged under the fields the agent sets itself (at most 8 KB serialized). Keys the agent sets itself (model, messages or contents, system, tools, tool choice, stream, max tokens, temperature) are rejected. See the provider's API reference for the keys it accepts."
+    },
     "speakChatReplies": {
       "type": "boolean",
       "default": true

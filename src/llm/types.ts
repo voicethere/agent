@@ -75,6 +75,12 @@ export interface LlmRequest {
    * call that tool. Default `auto`.
    */
   toolChoice?: "auto" | "required" | { name: string };
+  /**
+   * `vendorConfig` of the agent config: extra request keys for the provider's
+   * own API, merged under the fields the adapter sets itself (those win).
+   * The adapter never reads a key of it.
+   */
+  vendorConfig?: Record<string, unknown>;
   signal?: AbortSignal;
 }
 

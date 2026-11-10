@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-10
+
+### Added
+
+- New template `llm-language-switch`: a travel-help assistant built on `llm-agent` that follows a mid-call language switch. The runner (project auto-switch with VoiceThere speech on both sides) detects the language, swaps speech-to-text and the voice, and replays the utterance. The agent never calls `setVoiceLanguage`: it appends one line naming the committed language to the last caller message on every LLM call, and sends `{ type: "language", language }` to the client when the switch commits and `{ type: "language_detected", language, supported }` for every detection. A detected language outside `SUPPORTED_LANGUAGES` (en, de, es, fr) is not switched to: the agent skips the LLM for that utterance and says, in the current language, which language it heard and which ones it speaks. The model is `amazon/nova-micro-v1` on OpenRouter (answered 10 of 10 sample prompts in the requested language).
+
 ## [0.33.2] - 2026-11-10
 
 ### Fixed

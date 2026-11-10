@@ -260,6 +260,33 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     },
   },
   {
+    id: "llm-language-switch",
+    entry: "llm-language-switch/agent.ts",
+    kind: "product",
+    seedOnCreate: true,
+    title: "Language switch (LLM)",
+    summary:
+      "Travel-help assistant that follows a mid-call language switch: the runner swaps speech, the LLM answers in the new language.",
+    category: "voice-data",
+    description:
+      "An LLM assistant that stays in the call when the caller changes language. The runner detects the new language and swaps speech-to-text and the voice; the agent tells the LLM which language the caller speaks now and reports it to the client. Needs the project secret AGENT_OPENROUTER_API_KEY and project auto-switch with VoiceThere speech on both sides.",
+    sourceFiles: [
+      "llm-language-switch/agent.ts",
+      "llm-language-switch/language.ts",
+      "llm-language-switch/voicethere.llm.json",
+      "llm-language-switch/prompt.md",
+      "llm-language-switch/md.d.ts",
+      "llm-language-switch/README.md",
+    ],
+    npmDependencies: {
+      openai: "^7.43.0",
+      "@anthropic-ai/sdk": "^1.3.0",
+      "@google/genai": "^2.31.0",
+      "@modelcontextprotocol/sdk": "^1.32.2",
+      ioredis: "^5.11.1",
+    },
+  },
+  {
     id: "llm-language-tutor",
     entry: "llm-language-tutor/agent.ts",
     kind: "product",

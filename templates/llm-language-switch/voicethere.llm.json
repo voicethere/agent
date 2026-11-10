@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/@voicethere/agent/schema/voicethere.llm.schema.json",
+  "version": 1,
+  "provider": "openrouter",
+  "model": "amazon/nova-micro-v1",
+  "apiKeySecret": "AGENT_OPENROUTER_API_KEY",
+  "maxOutputTokens": 256,
+  "greeting": {
+    "text": "Hi! Talk to me in English, German, Spanish or French. Switch any time and I'll follow.",
+    "interruptible": true
+  },
+  "bargeIn": { "mode": "project" },
+  "history": { "turns": 20, "interruptionNote": true },
+  "fillers": {
+    "thinking": {
+      "phrases": ["Okay.", "Right.", "Let me think."],
+      "afterMs": 1500
+    },
+    "interruptible": true
+  },
+  "toolSources": [],
+  "interruptPolicy": "cancel"
+}

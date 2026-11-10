@@ -110,7 +110,8 @@ export function createOpenAiCompatibleProvider(
           parameters: t.inputSchema,
         },
       }));
-      const params: ChatCompletionCreateParamsStreaming = {
+      const params = {
+        ...(req.vendorConfig ?? {}),
         model: req.model,
         messages: toMessages(req.system, req.messages),
         stream: true,
@@ -137,7 +138,7 @@ export function createOpenAiCompatibleProvider(
             ? { max_completion_tokens: req.maxOutputTokens }
             : { max_tokens: req.maxOutputTokens }
           : {}),
-      };
+      } as ChatCompletionCreateParamsStreaming;
       const stream = await client.chat.completions.create(params, {
         signal: req.signal,
       });

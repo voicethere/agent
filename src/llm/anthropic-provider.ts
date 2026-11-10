@@ -99,6 +99,7 @@ export function createAnthropicProvider(config: AnthropicConfig): LlmProvider {
       }));
       const stream = client.messages.stream(
         {
+          ...(req.vendorConfig ?? {}),
           model: req.model,
           max_tokens: req.maxOutputTokens ?? 1024,
           system: req.system,
@@ -121,7 +122,7 @@ export function createAnthropicProvider(config: AnthropicConfig): LlmProvider {
             ? { temperature: req.temperature }
             : {}),
           output_config: { effort: "low" },
-        },
+        } as Anthropic.Messages.MessageStreamParams,
         { signal: req.signal },
       );
       for await (const ev of stream) {

@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { defineTool } from "../../../src/llm/agent/define-tool.js";
-import { createLlmAgent } from "../../../src/llm/agent/create-llm-agent.js";
+import {
+  FAIL_CLOSE_SPEAK_WAIT_MS,
+  createLlmAgent,
+} from "../../../src/llm/agent/create-llm-agent.js";
 import type { CreateLlmAgentOptions } from "../../../src/llm/agent/create-llm-agent.js";
 import type { TurnSummary } from "../../../src/llm/agent/hooks.js";
 import { openai } from "../../../src/llm/openai.js";
@@ -2044,6 +2047,108 @@ describe("createLlmAgent", () => {
         { kind: "link", url: URL_B, label: "Agents" },
       ]);
       expect(errors).toEqual(["INVALID_CONTENT"]);
+    });
+  });
+
+  describe("failedReplies", () => {
+    const fail = (): Step[] => [
+      { fail: new LlmProviderError("LLM_RATE_LIMITED", "slow", 429) },
+    ];
+    const ok = (): Step[] => [delta("Fine."), done("Fine.")];
+    const MESSAGE = "Goodbye, the assistant is unavailable.";
+    const FALLBACK = "Sorry, something went wrong. Please try again.";
+    const disconnects = () => sent("disconnect_client");
+
+    async function turn(text: string, n: number) {
+      say(text);
+      await vi.waitFor(() => expect(summaries).toHaveLength(n));
+    }
+
+    it("3 failures in a row: the message is spoken once, then one disconnect with reason llm_failed_replies", async () => {
+      await boot([fail()], {
+        config: { failedReplies: { closeAfter: 3, message: MESSAGE } },
+      });
+      await turn("a", 1);
+      await turn("b", 2);
+      expect(disconnects()).toHaveLength(0);
+      say("c");
+      await vi.waitFor(() => expect(speaks().length).toBe(3));
+      expect(speaks().map((m) => m.text)).toEqual([
+        FALLBACK,
+        FALLBACK,
+        MESSAGE,
+      ]);
+      expect(disconnects()).toHaveLength(0);
+      const last = speaks()[2];
+      speakResult(last.requestId, last.turnId);
+      await vi.waitFor(() => expect(disconnects()).toHaveLength(1));
+      expect(disconnects()[0]).toMatchObject({
+        sessionId: SESSION,
+        reason: "llm_failed_replies",
+      });
+      expect(
+        clientPayloads().filter((p) => p.text === MESSAGE).length,
+      ).toBeGreaterThan(0);
+      // No further turn starts on a closing session.
+      say("d");
+      await new Promise((r) => setTimeout(r, 20));
+      expect(summaries).toHaveLength(3);
+      expect(disconnects()).toHaveLength(1);
+    });
+
+    it("fail, success, fail, fail: no close at closeAfter 3", async () => {
+      await boot([fail(), ok(), fail(), fail()], {
+        config: { failedReplies: { closeAfter: 3, message: MESSAGE } },
+      });
+      for (let i = 1; i <= 4; i += 1) {
+        await turn(`m${i}`, i);
+      }
+      expect(summaries.map((x) => x.status)).toEqual([
+        "failed",
+        "completed",
+        "failed",
+        "failed",
+      ]);
+      expect(speaks().some((m) => m.text === MESSAGE)).toBe(false);
+      expect(disconnects()).toHaveLength(0);
+    });
+
+    it("absent failedReplies never closes", async () => {
+      await boot([fail()]);
+      for (let i = 1; i <= 5; i += 1) {
+        await turn(`m${i}`, i);
+      }
+      expect(disconnects()).toHaveLength(0);
+      expect(speaks().every((m) => m.text === FALLBACK)).toBe(true);
+    });
+
+    it("uses the default message when none is configured", async () => {
+      await boot([fail()], { config: { failedReplies: { closeAfter: 1 } } });
+      say("a");
+      await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+      expect(speaks()[0].text).toBe(
+        "Sorry, I can't answer right now. Please try again later.",
+      );
+      speakResult(speaks()[0].requestId, speaks()[0].turnId);
+      await vi.waitFor(() => expect(disconnects()).toHaveLength(1));
+    });
+
+    it("the speech wait is bounded: speech never completes, disconnect after FAIL_CLOSE_SPEAK_WAIT_MS", async () => {
+      vi.useFakeTimers();
+      await boot([fail()], {
+        config: { failedReplies: { closeAfter: 1, message: MESSAGE } },
+      });
+      say("a");
+      await vi.waitFor(() => expect(speaks()).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(FAIL_CLOSE_SPEAK_WAIT_MS - 1_000);
+      expect(disconnects()).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(disconnects()).toHaveLength(1);
+      expect(disconnects()[0]).toMatchObject({ reason: "llm_failed_replies" });
+      const row = sent("log").find(
+        (m) => m.message === "closing call after failed replies",
+      );
+      expect(row).toBeDefined();
     });
   });
 });

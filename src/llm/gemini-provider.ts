@@ -81,6 +81,7 @@ export function createGeminiProvider(config: GeminiConfig): LlmProvider {
         model: req.model,
         contents: toContents(req.messages),
         config: {
+          ...(req.vendorConfig ?? {}),
           systemInstruction: req.system,
           tools: req.tools.length
             ? [

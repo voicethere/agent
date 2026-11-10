@@ -119,6 +119,20 @@ interface SessionLanguage {
   current: string;
   /** Detected language outside the list, waiting for its final. */
   unsupported?: string;
+  /** Last detected language in the list, until it is committed. */
+  detected?: string;
+  /**
+   * Language of the turn the LLM is answering now. Set by a replayed final:
+   * the runner replays only after it has swapped to the detected language,
+   * and it sends `voice_language_changed` after the replay, so the commit can
+   * arrive after the LLM call starts.
+   */
+  turn?: string;
+}
+
+/** The language the LLM is told for the current turn. */
+function replyLanguage(state: SessionLanguage | undefined): string {
+  return state?.turn ?? state?.current ?? DEFAULT_LANGUAGE;
 }
 
 /**
@@ -134,8 +148,10 @@ export function languageSwitchAgent(
     onBeforeLlmCall(messages, ctx) {
       // Typed chat is answered in the language it is written in.
       if (ctx.source === "chat") return;
-      const code = sessions.get(ctx.sessionId)?.current ?? DEFAULT_LANGUAGE;
-      return withLanguageNote(messages, code);
+      return withLanguageNote(
+        messages,
+        replyLanguage(sessions.get(ctx.sessionId)),
+      );
     },
   });
 
@@ -168,7 +184,10 @@ export function languageSwitchAgent(
         supported,
       });
       const state = sessions.get(ctx.sessionId);
-      if (state) state.unsupported = supported ? undefined : language;
+      if (state) {
+        state.unsupported = supported ? undefined : language;
+        state.detected = supported ? language : undefined;
+      }
     },
 
     onVoiceLanguageChanged(ctx) {
@@ -178,12 +197,20 @@ export function languageSwitchAgent(
       if (state) {
         state.current = language;
         state.unsupported = undefined;
+        state.detected = undefined;
+        state.turn = undefined;
       }
       sendToClient(ctx.sessionId, { type: "language", language });
     },
 
     onUserSpeechFinal(ctx) {
       const state = sessions.get(ctx.sessionId);
+      if (state) {
+        // A replayed final is the switching utterance re-decoded by the new
+        // language's STT; the commit follows it. Any other final is answered
+        // in the committed language.
+        state.turn = ctx.replay ? (state.detected ?? state.current) : undefined;
+      }
       if (state?.unsupported && !ctx.replay) {
         // The transcript came from the wrong language's STT: do not ask the
         // LLM, say what was heard in the current language instead.

@@ -225,6 +225,84 @@ describe("llm-language-switch behavior", () => {
     expect(JSON.stringify(second.messages)).not.toContain("English (en)");
   });
 
+  // Runner order (runner src/voice/language-switch.ts: the replay is awaited
+  // at L1756/L2259, then logSwitchCommitted emits voice_language_changed at
+  // L1829/L2319): user_language -> replayed final -> LLM call starts ->
+  // voice_language_changed.
+  it("answers the replayed final in the detected language when the commit arrives after the LLM call started", async () => {
+    await boot();
+    say("s1", "Good morning, this is an English test.");
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    await vi.waitFor(() => expect(sent("speak").length).toBeGreaterThan(0));
+
+    speech("s1", { type: "user_language", language: "de", text: "de" });
+    await vi.waitFor(() => expect(client("language_detected")).toHaveLength(1));
+    say("s1", "Guten Tag, wie geht es Ihnen heute?", { replay: true });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    // The badge still follows the commit only.
+    expect(client("language")).toEqual([]);
+    const second = requests[1]!;
+    expect(noteCount(second)).toBe(1);
+    expect(lastUserText(second)).toContain(
+      "The caller now speaks German (de). Reply only in German.",
+    );
+    expect(JSON.stringify(second.messages)).not.toContain("English (en)");
+
+    speech("s1", {
+      type: "voice_language_changed",
+      language: "de",
+      text: "de",
+    });
+    await vi.waitFor(() =>
+      expect(client("language")).toEqual([
+        { type: "language", language: "de" },
+      ]),
+    );
+    say("s1", "Und wo ist der Bahnhof?");
+    await vi.waitFor(() => expect(requests).toHaveLength(3));
+    expect(lastUserText(requests[2]!)).toContain("German (de)");
+  });
+
+  it("answers the replayed final in the committed language when the commit arrives first", async () => {
+    await boot();
+    speech("s1", { type: "user_language", language: "fr", text: "fr" });
+    speech("s1", {
+      type: "voice_language_changed",
+      language: "fr",
+      text: "fr",
+    });
+    await vi.waitFor(() => expect(client("language")).toHaveLength(1));
+    say("s1", "Bonjour", { replay: true });
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(noteCount(requests[0]!)).toBe(1);
+    expect(lastUserText(requests[0]!)).toContain("French (fr)");
+  });
+
+  it("a replayed final after an unsupported detection keeps the committed language", async () => {
+    await boot();
+    speech("s1", { type: "user_language", language: "de", text: "de" });
+    speech("s1", { type: "user_language", language: "it", text: "it" });
+    await vi.waitFor(() => expect(client("language_detected")).toHaveLength(2));
+    say("s1", "replayed text", { replay: true });
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(lastUserText(requests[0]!)).toContain("English (en)");
+  });
+
+  it("a typed chat message during a pending switch gets no language note", async () => {
+    await boot();
+    speech("s1", { type: "user_language", language: "de", text: "de" });
+    await vi.waitFor(() => expect(client("language_detected")).toHaveLength(1));
+    capture.emit({
+      type: "data_channel_message",
+      sessionId: "s1",
+      payload: JSON.stringify({ type: "chat", text: "Where is the station?" }),
+    });
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(JSON.stringify(requests[0]!.messages)).not.toContain(
+      "The caller now speaks",
+    );
+  });
+
   it("a detection alone changes no note but is reported as supported", async () => {
     await boot();
     speech("s1", { type: "user_language", language: "de", text: "de" });

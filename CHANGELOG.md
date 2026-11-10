@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.35.1] - 2026-11-10
+
+### Fixed
+
+- Template `llm-language-switch`: the reply to the utterance that switched the language came in the old language. The runner replays that utterance through the new speech-to-text first and sends `voice_language_changed` only after the replay, so the LLM call for the replay started while the agent still told the model the old language ("Reply only in English"). A replayed final is now answered in the language detected for it (the last supported `user_language`), and any other final in the committed language. The client's `{ type: "language" }` message still follows the commit only. An unsupported detection and typed chat behave as before.
+
 ## [0.35.0] - 2026-11-10
 
 ### Added

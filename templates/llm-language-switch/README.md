@@ -14,8 +14,8 @@ A small travel-help assistant that follows the caller when they change language 
 
 The runner owns the switch. The agent never calls `setVoiceLanguage`.
 
-- `onVoiceLanguageChanged` records the committed language and sends `{ "type": "language", "language": "de" }` to the client. Only a committed language changes what the LLM is told. The agent appends one line ("The caller now speaks German (de). Reply only in German.") to a copy of the last caller message on every LLM call, so it never piles up in the history.
-- `onUserLanguage` only reports what was heard: `{ "type": "language_detected", "language": "it", "supported": false }`. The runner may still reject a detection, so the LLM note does not change on it.
+- `onVoiceLanguageChanged` records the committed language and sends `{ "type": "language", "language": "de" }` to the client. The runner sends it after it has replayed the switching utterance, so the replayed final (`replay: true`) is answered in the language detected for it; every other final is answered in the committed language. The agent appends one line ("The caller now speaks German (de). Reply only in German.") to a copy of the last caller message on every LLM call, so it never piles up in the history.
+- `onUserLanguage` only reports what was heard: `{ "type": "language_detected", "language": "it", "supported": false }`. The runner may still reject a detection, so a detection alone does not change the LLM note: only the replay that follows a switch uses it.
 - When the detected language is not in `SUPPORTED_LANGUAGES`, the runner does not switch and the transcript comes from the wrong language's speech model. The agent skips the LLM for that utterance and says, in the current language, "I heard Italian. I can talk with you in English, German, Spanish or French." That notice is not added to the LLM history.
 - Typed chat messages are answered in the language they are written in (the prompt says so); chat does not change the voice.
 

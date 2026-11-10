@@ -19,6 +19,7 @@ import {
 } from "../src/runtime.js";
 import { listTemplates } from "../src/templates/index.js";
 import {
+  CHAT_NOTE,
   SUPPORTED_LANGUAGES,
   languageSwitchAgent,
   unsupportedNotice,
@@ -286,7 +287,7 @@ describe("llm-language-switch behavior", () => {
     expect(lastUserText(requests[0]!)).toContain("English (en)");
   });
 
-  it("a typed chat message during a pending switch gets no language note", async () => {
+  it("a typed chat message during a pending switch gets the chat note, not a voice note", async () => {
     await boot();
     speech("s1", { type: "user_language", language: "de", text: "de" });
     await vi.waitFor(() => expect(client("language_detected")).toHaveLength(1));
@@ -299,6 +300,7 @@ describe("llm-language-switch behavior", () => {
     expect(JSON.stringify(requests[0]!.messages)).not.toContain(
       "The caller now speaks",
     );
+    expect(lastUserText(requests[0]!)).toContain(CHAT_NOTE);
   });
 
   it("a detection alone changes no note but is reported as supported", async () => {
@@ -398,7 +400,7 @@ describe("llm-language-switch behavior", () => {
     expect(lastUserText(requests[0]!)).toContain("English (en)");
   });
 
-  it("a typed chat message gets no language note", async () => {
+  it("a typed chat message gets the chat note, and voice turns keep the voice note", async () => {
     await boot();
     capture.emit({
       type: "data_channel_message",
@@ -406,7 +408,9 @@ describe("llm-language-switch behavior", () => {
       payload: JSON.stringify({ type: "chat", text: "Wo ist der Bahnhof?" }),
     });
     await vi.waitFor(() => expect(requests).toHaveLength(1));
-    expect(lastUserText(requests[0]!)).toBe("Wo ist der Bahnhof?");
+    expect(lastUserText(requests[0]!)).toBe(
+      `Wo ist der Bahnhof?\n\n(${CHAT_NOTE})`,
+    );
     expect(JSON.stringify(requests[0]!.messages)).not.toContain(
       "The caller now speaks",
     );
@@ -420,6 +424,45 @@ describe("llm-language-switch behavior", () => {
     await vi.waitFor(() => expect(requests).toHaveLength(2));
     expect(noteCount(requests[1]!)).toBe(1);
     expect(lastUserText(requests[1]!)).toContain("German (de)");
+    // The chat note was on a copy: it is not in the stored history.
+    expect(JSON.stringify(requests[1]!.messages)).not.toContain(CHAT_NOTE);
+  });
+
+  it("chat after a German voice switch gets the chat note and not the German note", async () => {
+    await boot();
+    speech("s1", {
+      type: "voice_language_changed",
+      language: "de",
+      text: "de",
+    });
+    await vi.waitFor(() => expect(client("language")).toHaveLength(1));
+    say("s1", "Hallo");
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    await vi.waitFor(() => expect(sent("speak").length).toBeGreaterThan(0));
+    capture.emit({
+      type: "data_channel_message",
+      sessionId: "s1",
+      payload: JSON.stringify({
+        type: "chat",
+        text: "¿Dónde está la estación?",
+      }),
+    });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    const chat = requests[1]!;
+    expect(lastUserText(chat)).toContain(
+      `¿Dónde está la estación?\n\n(${CHAT_NOTE})`,
+    );
+    expect(JSON.stringify(chat.messages)).not.toContain("German (de)");
+    expect(JSON.stringify(chat.messages)).not.toContain("Reply only in German");
+    // The earlier voice turn in the history is stored without any note.
+    expect(JSON.stringify(chat.messages)).not.toContain(
+      "The caller now speaks",
+    );
+    // The next voice turn is German again and carries no chat note.
+    say("s1", "Und wo ist das Hotel?");
+    await vi.waitFor(() => expect(requests).toHaveLength(3));
+    expect(lastUserText(requests[2]!)).toContain("German (de)");
+    expect(JSON.stringify(requests[2]!.messages)).not.toContain(CHAT_NOTE);
   });
 
   it("an interrupted notice leaves no interruption note in the LLM history", async () => {

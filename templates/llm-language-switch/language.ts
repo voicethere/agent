@@ -99,7 +99,19 @@ export function withLanguageNote(
   messages: LlmMessage[],
   code: string,
 ): LlmMessage[] {
-  const note = languageNote(code);
+  return withNote(messages, languageNote(code));
+}
+
+/** The one line that tells the LLM to answer a typed message in its own language. */
+export const CHAT_NOTE =
+  "Reply in the language this message is written in, even if the earlier conversation used another language.";
+
+/** Same as `withLanguageNote`, for a typed chat message. */
+export function withChatNote(messages: LlmMessage[]): LlmMessage[] {
+  return withNote(messages, CHAT_NOTE);
+}
+
+function withNote(messages: LlmMessage[], note: string): LlmMessage[] {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i]!;
     if (m.role === "user") {
@@ -146,8 +158,9 @@ export function languageSwitchAgent(
 
   const llm = create({
     onBeforeLlmCall(messages, ctx) {
-      // Typed chat is answered in the language it is written in.
-      if (ctx.source === "chat") return;
+      // Typed chat is answered in the language it is written in, not the
+      // call's voice language (the history may be in another language).
+      if (ctx.source === "chat") return withChatNote(messages);
       return withLanguageNote(
         messages,
         replyLanguage(sessions.get(ctx.sessionId)),

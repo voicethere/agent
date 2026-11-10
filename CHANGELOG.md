@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.35.2] - 2026-11-10
+
+### Fixed
+
+- Template `llm-language-switch`: a typed chat message after the caller switched the voice language was answered in the voice language (a Spanish message got a German reply), because the model followed the German history. The agent now adds a one-line note to a copy of the chat message, asking for a reply in the language the message is written in. The note is not stored in the history, and voice turns are unchanged.
+
 ## [0.35.1] - 2026-11-10
 
 ### Fixed

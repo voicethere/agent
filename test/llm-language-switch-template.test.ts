@@ -322,6 +322,53 @@ describe("llm-language-switch behavior", () => {
     expect(lastUserText(requests[0]!)).toContain("English (en)");
   });
 
+  it("a typed chat message gets no language note", async () => {
+    await boot();
+    capture.emit({
+      type: "data_channel_message",
+      sessionId: "s1",
+      payload: JSON.stringify({ type: "chat", text: "Wo ist der Bahnhof?" }),
+    });
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(lastUserText(requests[0]!)).toBe("Wo ist der Bahnhof?");
+    expect(JSON.stringify(requests[0]!.messages)).not.toContain(
+      "The caller now speaks",
+    );
+    speech("s1", {
+      type: "voice_language_changed",
+      language: "de",
+      text: "de",
+    });
+    await vi.waitFor(() => expect(client("language")).toHaveLength(1));
+    say("s1", "Hallo");
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    expect(noteCount(requests[1]!)).toBe(1);
+    expect(lastUserText(requests[1]!)).toContain("German (de)");
+  });
+
+  it("an interrupted notice leaves no interruption note in the LLM history", async () => {
+    await boot();
+    speech("s1", { type: "user_language", language: "it", text: "it" });
+    await vi.waitFor(() => expect(client("language_detected")).toHaveLength(1));
+    say("s1", "garbled");
+    await vi.waitFor(() => expect(sent("speak")).toHaveLength(1));
+    capture.emit({
+      type: "agent_interrupted",
+      sessionId: "s1",
+      turnId: sent("speak")[0]!.turnId,
+      replyPlayedMs: 100,
+      playedText: "I heard",
+      unplayedText: "Italian.",
+      playedTextExact: true,
+      cancelledRequestIds: [],
+    });
+    say("s1", "Hello");
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(JSON.stringify(requests[0]!.messages)).not.toContain(
+      "The caller interrupted",
+    );
+  });
+
   it("logs language_switch.auto_off once when auto-switch is off in env", async () => {
     await boot(["s1"], {}, false);
     const logs = sent().filter((m) =>

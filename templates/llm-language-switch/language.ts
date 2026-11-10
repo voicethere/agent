@@ -111,6 +111,9 @@ export function withLanguageNote(
   return messages;
 }
 
+/** Turn id prefix of the unsupported-language notice (not an LLM reply). */
+const NOTICE_TURN_PREFIX = "lang-notice-";
+
 interface SessionLanguage {
   /** Committed by the runner (`voice_language_changed`), never a guess. */
   current: string;
@@ -129,6 +132,8 @@ export function languageSwitchAgent(
 
   const llm = create({
     onBeforeLlmCall(messages, ctx) {
+      // Typed chat is answered in the language it is written in.
+      if (ctx.source === "chat") return;
       const code = sessions.get(ctx.sessionId)?.current ?? DEFAULT_LANGUAGE;
       return withLanguageNote(messages, code);
     },
@@ -184,7 +189,7 @@ export function languageSwitchAgent(
         // LLM, say what was heard in the current language instead.
         const text = unsupportedNotice(state.unsupported, state.current);
         state.unsupported = undefined;
-        const turnId = `lang-notice-${ctx.utteranceId ?? Date.now()}`;
+        const turnId = `${NOTICE_TURN_PREFIX}${ctx.utteranceId ?? Date.now()}`;
         sendToClient(ctx.sessionId, {
           type: "assistant_delta",
           turnId,
@@ -202,6 +207,12 @@ export function languageSwitchAgent(
         return;
       }
       return llm.onUserSpeechFinal?.(ctx);
+    },
+
+    onAgentInterrupted(ctx) {
+      // The notice is not an LLM reply: no interruption note for it.
+      if (ctx.turnId?.startsWith(NOTICE_TURN_PREFIX)) return;
+      return llm.onAgentInterrupted?.(ctx);
     },
 
     onSessionEnd(ctx) {

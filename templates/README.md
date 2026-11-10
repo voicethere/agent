@@ -76,6 +76,7 @@ Each folder has its own README. Summary:
 | `webhooks`                | `webhooks/`                | Inbound HMAC webhooks                                                                                                        |
 | `webhooks-redis`          | `webhooks-redis/`          | Webhooks plus Redis counter                                                                                                  |
 | `llm-agent`               | `llm-agent/`               | LLM voice and chat agent, tools, MCP, optional knowledge (RAG)                                                               |
+| `llm-language-switch`     | `llm-language-switch/`     | `llm-agent` that follows a mid-call language switch (runner auto-switch, VoiceThere speech both sides)                       |
 | `llm-language-tutor`      | `llm-language-tutor/`      | English practice partner: `llm-agent` plus a lessons knowledge base (Redis)                                                  |
 | `llm-store-support`       | `llm-store-support/`       | Support assistant for a sample store: Markdown knowledge (Redis) plus an MCP price tool on a project service                 |
 | `llm-board`               | `llm-board/`               | Shared sticky-note board over the data channel with an LLM facilitator (no Redis)                                            |

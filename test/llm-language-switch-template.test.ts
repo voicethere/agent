@@ -225,10 +225,8 @@ describe("llm-language-switch behavior", () => {
     expect(JSON.stringify(second.messages)).not.toContain("English (en)");
   });
 
-  // Runner order (runner src/voice/language-switch.ts: the replay is awaited
-  // at L1756/L2259, then logSwitchCommitted emits voice_language_changed at
-  // L1829/L2319): user_language -> replayed final -> LLM call starts ->
-  // voice_language_changed.
+  // Runner order: user_language -> the switching utterance is replayed through
+  // the new STT (replayed final) -> LLM call starts -> voice_language_changed.
   it("answers the replayed final in the detected language when the commit arrives after the LLM call started", async () => {
     await boot();
     say("s1", "Good morning, this is an English test.");

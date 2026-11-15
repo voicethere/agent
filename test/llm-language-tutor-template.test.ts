@@ -394,6 +394,7 @@ describe("llm-language-tutor promises", () => {
       say(userText);
     } else {
       // after-tool-chat: a tool round whose answer is still unplayed, then chat.
+      speakResults(replyTurn, "played", 3000);
       script.push(
         {
           toolCalls: [
@@ -449,6 +450,17 @@ describe("llm-language-tutor promises", () => {
           text: "(The call has started.)",
         });
         expect(req.messages[1]).toMatchObject({ role: "assistant" });
+      }
+      if (shape === "after-tool-chat") {
+        expect(req.messages.slice(2, 5).map((m) => m.role)).toEqual([
+          "user",
+          "assistant",
+          "user",
+        ]);
+        expect(req.messages[3]).toMatchObject({
+          role: "assistant",
+          text: "Nice to meet you. How are you today?",
+        });
       }
       writeRequestFixture("T1", req, meta("T1", shape));
     });

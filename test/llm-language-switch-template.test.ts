@@ -1,4 +1,10 @@
-import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  existsSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -138,6 +144,8 @@ describe("guessChatLanguage", () => {
 describe("llm-language-switch behavior", () => {
   let capture: ReturnType<typeof installProcessMessageCapture>;
   const requests: LlmRequest[] = [];
+  /** Scripted reply texts, one per LLM call; "Okay." when empty. */
+  const replies: string[] = [];
 
   beforeEach(() => {
     resetAgentIpcStateForTests();
@@ -145,6 +153,7 @@ describe("llm-language-switch behavior", () => {
     process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
     capture = installProcessMessageCapture();
     requests.length = 0;
+    replies.length = 0;
   });
 
   afterEach(() => {
@@ -178,12 +187,13 @@ describe("llm-language-switch behavior", () => {
     id: "openai",
     stream(req) {
       requests.push(structuredClone({ ...req, signal: undefined }));
+      const text = replies.shift() ?? "Okay.";
       return (async function* (): AsyncIterable<LlmStreamEvent> {
-        yield { type: "text_delta", text: "Okay." };
+        yield { type: "text_delta", text };
         yield {
           type: "done",
           stopReason: "end",
-          text: "Okay.",
+          text,
           toolCalls: [],
         };
       })();
@@ -593,6 +603,160 @@ describe("llm-language-switch behavior", () => {
     expect(JSON.stringify(requests[0]!.messages)).not.toContain(
       "The caller interrupted",
     );
+  });
+
+  // Staging run 43644678938 (llm-language-switch-smoke leg 3). The greeting is
+  // cut by the English clip, the English reply by the German clip; the German
+  // clip is replayed after the switch and answered in German; then the typed
+  // Spanish chat arrives ~1.6 s after that reply's assistant_done.
+  // WRITE_INCIDENT_FIXTURE=<prefix> writes <prefix>-<case>.json with the
+  // OpenRouter chat/completions body of the chat request.
+  const INCIDENT_CHAT =
+    "Hola, ¿cómo puedo llegar al aeropuerto desde el centro de la ciudad?";
+  // e2e suites/lib/language-switch-clips.ts LANGUAGE_SWITCH_ENGLISH_PHRASE
+  const INCIDENT_ENGLISH =
+    "Good morning, this is an English test. one. two. three. four. five. six.";
+  // e2e suites/lib/language-id-turn.ts LANGUAGE_ID_SMOKE_GERMAN_PHRASE
+  const INCIDENT_GERMAN =
+    "Guten Tag, wie geht es Ihnen heute? Ich hoffe, es geht Ihnen gut.";
+  const INCIDENT_EN_REPLY = "Good morning! How can I help you today?";
+  const INCIDENT_DE_REPLY = "Guten Tag! Wie kann ich Ihnen heute helfen?";
+
+  async function bootIncident() {
+    const config = readConfig();
+    defineAgent(
+      languageSwitchAgent((hooks) =>
+        createLlmAgent({
+          config: {
+            ...config,
+            provider: "openai",
+            apiKeySecret: "AGENT_TEST_KEY",
+            speech: { coalesceMs: 0 },
+          },
+          systemPrompt: readFileSync(join(templateDir, "prompt.md"), "utf8"),
+          provider,
+          env: () => ({ AGENT_TEST_KEY: "secret-value" }),
+          hooks,
+        }),
+      ),
+    );
+    capture.emit({
+      type: "session_start",
+      sessionId: "s1",
+      env: { SHERPA_LID_AUTO_SWITCH: "1" },
+      speakControlAvailable: true,
+    });
+    await vi.waitFor(() => expect(sent("session_start_ack")).toHaveLength(1));
+  }
+
+  const speaksOf = (pred: (m: Msg) => boolean) => sent("speak").filter(pred);
+  const speakResults = (turnId: unknown, status: string, playedMs: number) => {
+    for (const m of speaksOf((x) => x.turnId === turnId)) {
+      capture.emit({
+        type: "speak_result",
+        sessionId: "s1",
+        requestId: m.requestId,
+        turnId,
+        status,
+        playedMs,
+      });
+    }
+  };
+  const interrupt = (turnId: unknown, played: string, unplayed: string) => {
+    capture.emit({
+      type: "agent_interrupted",
+      sessionId: "s1",
+      turnId,
+      replyPlayedMs: 1200,
+      playedText: played,
+      unplayedText: unplayed,
+      playedTextExact: true,
+      cancelledRequestIds: [],
+    });
+    speakResults(turnId, "interrupted", 1200);
+  };
+
+  /** Replays the incident up to the German reply; returns its turn id. */
+  async function replayIncidentUntilGermanReply(): Promise<unknown> {
+    replies.push(INCIDENT_EN_REPLY, INCIDENT_DE_REPLY);
+    await bootIncident();
+    await vi.waitFor(() => expect(sent("speak")).toHaveLength(1));
+    const greetTurn = sent("speak")[0]!.turnId;
+    interrupt(
+      greetTurn,
+      "Hi! Talk to me in English, German, Spanish or French.",
+      "Switch any time and I'll follow.",
+    );
+    say("s1", INCIDENT_ENGLISH);
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    const notGreet = (m: Msg) => m.turnId !== greetTurn;
+    await vi.waitFor(() =>
+      expect(speaksOf(notGreet).length).toBeGreaterThan(0),
+    );
+    const enTurn = speaksOf(notGreet)[0]!.turnId;
+    interrupt(enTurn, "Good morning!", "How can I help you today?");
+    speech("s1", { type: "user_language", language: "de", text: "de" });
+    await vi.waitFor(() => expect(client("language_detected")).toHaveLength(1));
+    say("s1", INCIDENT_GERMAN, { replay: true });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    speech("s1", {
+      type: "voice_language_changed",
+      language: "de",
+      text: "de",
+    });
+    await vi.waitFor(() => expect(client("language")).toHaveLength(1));
+    const deSpeak = (m: Msg) => notGreet(m) && m.turnId !== enTurn;
+    await vi.waitFor(() => expect(speaksOf(deSpeak).length).toBeGreaterThan(0));
+    await vi.waitFor(() =>
+      expect(client("assistant_done").length).toBeGreaterThanOrEqual(3),
+    );
+    return speaksOf(deSpeak)[0]!.turnId;
+  }
+
+  function writeIncidentFixture(label: string, req: LlmRequest) {
+    const prefix = process.env.WRITE_INCIDENT_FIXTURE;
+    if (!prefix) return;
+    const body = {
+      model: req.model,
+      messages: [
+        { role: "system", content: req.system },
+        ...req.messages.map((m) => ({
+          role: m.role,
+          content: (m as { text: string }).text,
+        })),
+      ],
+      max_tokens: req.maxOutputTokens,
+    };
+    writeFileSync(
+      `${prefix}-${label}.json`,
+      `${JSON.stringify(body, null, 2)}\n`,
+    );
+  }
+
+  async function sendIncidentChat(label: string): Promise<LlmRequest> {
+    capture.emit({
+      type: "data_channel_message",
+      sessionId: "s1",
+      payload: JSON.stringify({ type: "chat", text: INCIDENT_CHAT }),
+    });
+    await vi.waitFor(() => expect(requests).toHaveLength(3));
+    const chat = requests[2]!;
+    writeIncidentFixture(label, chat);
+    expect(lastUserText(chat).endsWith(`(${chatLanguageNote("es")})`)).toBe(
+      true,
+    );
+    return chat;
+  }
+
+  it("incident replay: chat while the German reply is still playing gets the Spanish note", async () => {
+    await replayIncidentUntilGermanReply();
+    await sendIncidentChat("in-flight");
+  });
+
+  it("incident replay: chat after the German reply settled gets the Spanish note", async () => {
+    const deTurn = await replayIncidentUntilGermanReply();
+    speakResults(deTurn, "played", 2500);
+    await sendIncidentChat("settled");
   });
 
   it("logs language_switch.auto_off once when auto-switch is off in env", async () => {

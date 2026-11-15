@@ -545,6 +545,33 @@ describe("llm-language-switch behavior", () => {
     expect(lastUserText(requests[0]!)).toBe(`ok\n\n(${CHAT_NOTE})`);
   });
 
+  it("a typed chat after an interruption is guessed from the caller's text only", async () => {
+    await boot();
+    say("s1", "Hello");
+    await vi.waitFor(() => expect(sent("speak").length).toBeGreaterThan(0));
+    capture.emit({
+      type: "agent_interrupted",
+      sessionId: "s1",
+      turnId: sent("speak")[0]!.turnId,
+      replyPlayedMs: 100,
+      playedText:
+        "The museum is open from nine to five and the station is near the",
+      unplayedText: "old town.",
+      playedTextExact: true,
+      cancelledRequestIds: [],
+    });
+    capture.emit({
+      type: "data_channel_message",
+      sessionId: "s1",
+      payload: JSON.stringify({ type: "chat", text: "Wo ist der Bahnhof?" }),
+    });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    const last = lastUserText(requests[1]!);
+    // The runtime's own note is really present before the typed text.
+    expect(last).toContain("The caller interrupted your previous reply");
+    expect(last).toContain(`(${chatLanguageNote("de")})`);
+  });
+
   it("an interrupted notice leaves no interruption note in the LLM history", async () => {
     await boot();
     speech("s1", { type: "user_language", language: "it", text: "it" });

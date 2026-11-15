@@ -191,13 +191,13 @@ const TUTOR_INSTRUCTIONS = {
   T3: "Never make up the meaning of an idiom",
 } as const;
 
-/** The "Small talk at work" chunk of the template's own lessons. */
-function smallTalkChunk(): string {
+/** One `##` lesson chunk of the template's own lessons. */
+function lessonChunk(heading: string): string {
   const lessons = readFileSync(
     join(templateDir, "knowledge", "lessons.md"),
     "utf8",
   );
-  const start = lessons.indexOf("## Small talk at work");
+  const start = lessons.indexOf(`## ${heading}`);
   const next = lessons.indexOf("\n## ", start + 1);
   return lessons.slice(start, next === -1 ? undefined : next).trim();
 }
@@ -210,13 +210,18 @@ const fakeKnowledge: KnowledgeBase = {
     return [];
   },
   async search(query) {
-    return /break the ice/i.test(query)
+    const lesson = /break the ice/i.test(query)
+      ? "Small talk at work"
+      : /hit the ground running/i.test(query)
+        ? "A job interview"
+        : undefined;
+    return lesson
       ? [
           {
-            title: "Small talk at work",
+            title: lesson,
             source: "lessons",
             score: 0.9,
-            text: smallTalkChunk(),
+            text: lessonChunk(lesson),
           },
         ]
       : [];
@@ -365,6 +370,7 @@ describe("llm-language-tutor promises", () => {
     systemPrompt = TUTOR_PROMPT,
   ): Promise<LlmRequest> {
     const greetTurn = await boot(systemPrompt);
+    speakResults(greetTurn, "played", 3000);
     script.push({ text: "Nice to meet you. How are you today?" });
     say("Hello");
     await vi.waitFor(() => expect(requests).toHaveLength(1));
@@ -376,7 +382,6 @@ describe("llm-language-tutor promises", () => {
     const replyTurn = sent("speak").find((m) => m.turnId !== greetTurn)!.turnId;
     const before = requests.length;
     if (shape === "settled") {
-      speakResults(greetTurn, "played", 3000);
       speakResults(replyTurn, "played", 3000);
       script.push({ text: "Okay." });
       say(userText);
@@ -428,10 +433,23 @@ describe("llm-language-tutor promises", () => {
 
   describe("T1: a phrase or idiom question calls search_knowledge before any reply", () => {
     it.each(SHAPES)("shape %s", async (shape) => {
-      const req = await drive(shape, "What does break the ice mean?");
+      // after-tool-chat asks a different idiom than its first turn, so a
+      // correct model cannot answer from history without a new search.
+      const question =
+        shape === "after-tool-chat"
+          ? "What does hit the ground running mean?"
+          : "What does break the ice mean?";
+      const req = await drive(shape, question);
       expectTutorInstructions(req);
       expect(req.toolChoice).toBeUndefined();
-      expect(lastUserTextOf(req)).toContain("What does break the ice mean?");
+      expect(lastUserTextOf(req)).toContain(question);
+      if (shape === "in-flight" || shape === "after-tool-chat") {
+        expect(req.messages[0]).toMatchObject({
+          role: "user",
+          text: "(The call has started.)",
+        });
+        expect(req.messages[1]).toMatchObject({ role: "assistant" });
+      }
       writeRequestFixture("T1", req, meta("T1", shape));
     });
   });
@@ -443,6 +461,13 @@ describe("llm-language-tutor promises", () => {
         const req = await drive(shape, "¿Puedes hablar español conmigo?");
         expectTutorInstructions(req);
         expect(lastUserTextOf(req)).toContain("hablar español");
+        if (shape === "in-flight") {
+          expect(req.messages[0]).toMatchObject({
+            role: "user",
+            text: "(The call has started.)",
+          });
+          expect(req.messages[1]).toMatchObject({ role: "assistant" });
+        }
         writeRequestFixture("T2", req, meta("T2", shape));
       },
     );
@@ -483,7 +508,7 @@ describe("llm-language-tutor promises", () => {
         "What does break the ice mean?",
         TUTOR_PROMPT.replace(sentence, ""),
       );
-      expect(() => expectTutorInstructions(req)).toThrow();
+      expect(() => expectTutorInstructions(req)).toThrow(sentence);
     });
   });
 });

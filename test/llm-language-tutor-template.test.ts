@@ -204,7 +204,7 @@ function lessonChunk(heading: string): string {
 
 const fakeKnowledge: KnowledgeBase = {
   async ensureIndexed() {
-    return { status: "fresh", chunks: 1, waitedMs: 0 };
+    return { status: "fresh", chunks: 1, waitedMs: 0, contentHash: "fake" };
   },
   async gc() {
     return [];

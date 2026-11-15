@@ -20,6 +20,8 @@ import {
 import { listTemplates } from "../src/templates/index.js";
 import {
   CHAT_NOTE,
+  chatLanguageNote,
+  guessChatLanguage,
   SUPPORTED_LANGUAGES,
   languageSwitchAgent,
   unsupportedNotice,
@@ -58,6 +60,7 @@ describe("llm-language-switch template files", () => {
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(config.provider).toBe("openrouter");
     expect(config.apiKeySecret).toBe("AGENT_OPENROUTER_API_KEY");
+    expect(config.model).toBe("anthropic/claude-haiku-5.5");
     expect(config.greeting.text).toBe(
       "Hi! Talk to me in English, German, Spanish or French. Switch any time and I'll follow.",
     );
@@ -98,6 +101,36 @@ describe("unsupportedNotice", () => {
     expect(SUPPORTED_LANGUAGES).toEqual(["en", "de", "es", "fr"]);
     expect(readFileSync(join(templateDir, "README.md"), "utf8")).toContain(
       '`["en", "de", "es", "fr"]`',
+    );
+  });
+});
+
+describe("guessChatLanguage", () => {
+  it.each([
+    [
+      "Hola, ¿cómo puedo llegar al aeropuerto desde el centro de la ciudad?",
+      "es",
+    ],
+    ["Wo ist der Bahnhof und wie komme ich dorthin?", "de"],
+    ["Where is the station and how can I get there?", "en"],
+    ["Bonjour, où est la gare et comment puis-je y aller ?", "fr"],
+  ])("%s -> %s", (text, code) => {
+    expect(guessChatLanguage(text)).toBe(code);
+  });
+
+  it.each([
+    ["ok"],
+    ["Hola"],
+    ["Where está the station, dónde?"],
+    ["Bahnhof"],
+    [""],
+  ])("%j has no clear language", (text) => {
+    expect(guessChatLanguage(text)).toBeUndefined();
+  });
+
+  it("names the guessed language in the note", () => {
+    expect(chatLanguageNote("es")).toBe(
+      "The caller typed this message in Spanish (es). Reply only in Spanish.",
     );
   });
 });
@@ -300,7 +333,7 @@ describe("llm-language-switch behavior", () => {
     expect(JSON.stringify(requests[0]!.messages)).not.toContain(
       "The caller now speaks",
     );
-    expect(lastUserText(requests[0]!)).toContain(CHAT_NOTE);
+    expect(lastUserText(requests[0]!)).toContain(chatLanguageNote("en"));
   });
 
   it("a detection alone changes no note but is reported as supported", async () => {
@@ -409,7 +442,7 @@ describe("llm-language-switch behavior", () => {
     });
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     expect(lastUserText(requests[0]!)).toBe(
-      `Wo ist der Bahnhof?\n\n(${CHAT_NOTE})`,
+      `Wo ist der Bahnhof?\n\n(${chatLanguageNote("de")})`,
     );
     expect(JSON.stringify(requests[0]!.messages)).not.toContain(
       "The caller now speaks",
@@ -450,8 +483,9 @@ describe("llm-language-switch behavior", () => {
     await vi.waitFor(() => expect(requests).toHaveLength(2));
     const chat = requests[1]!;
     expect(lastUserText(chat)).toContain(
-      `¿Dónde está la estación?\n\n(${CHAT_NOTE})`,
+      `¿Dónde está la estación?\n\n(${chatLanguageNote("es")})`,
     );
+    expect(lastUserText(chat)).toContain("Spanish (es)");
     expect(JSON.stringify(chat.messages)).not.toContain("German (de)");
     expect(JSON.stringify(chat.messages)).not.toContain("Reply only in German");
     // The earlier voice turn in the history is stored without any note.
@@ -462,7 +496,53 @@ describe("llm-language-switch behavior", () => {
     say("s1", "Und wo ist das Hotel?");
     await vi.waitFor(() => expect(requests).toHaveLength(3));
     expect(lastUserText(requests[2]!)).toContain("German (de)");
-    expect(JSON.stringify(requests[2]!.messages)).not.toContain(CHAT_NOTE);
+    expect(JSON.stringify(requests[2]!.messages)).not.toContain(
+      "The caller typed this message",
+    );
+  });
+
+  it("the incident message after English and German turns gets the Spanish note on the last user message only", async () => {
+    await boot();
+    say("s1", "Hello, how do I get to the airport?");
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    await vi.waitFor(() => expect(sent("speak").length).toBeGreaterThan(0));
+    speech("s1", {
+      type: "voice_language_changed",
+      language: "de",
+      text: "de",
+    });
+    await vi.waitFor(() => expect(client("language")).toHaveLength(1));
+    say("s1", "Wie komme ich zum Bahnhof?");
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    const incident =
+      "Hola, ¿cómo puedo llegar al aeropuerto desde el centro de la ciudad?";
+    capture.emit({
+      type: "data_channel_message",
+      sessionId: "s1",
+      payload: JSON.stringify({ type: "chat", text: incident }),
+    });
+    await vi.waitFor(() => expect(requests).toHaveLength(3));
+    const chat = requests[2]!;
+    expect(lastUserText(chat)).toContain(
+      `${incident}\n\n(The caller typed this message in Spanish (es). Reply only in Spanish.)`,
+    );
+    const users = (chat.messages as Msg[]).filter((m) => m.role === "user");
+    expect(
+      users.slice(0, -1).every((m) => !String(m.text).includes("(es)")),
+    ).toBe(true);
+    // The guess did not switch the voice: no language message to the client.
+    expect(client("language")).toHaveLength(1);
+  });
+
+  it("a typed chat with no clear language gets the fallback chat note", async () => {
+    await boot();
+    capture.emit({
+      type: "data_channel_message",
+      sessionId: "s1",
+      payload: JSON.stringify({ type: "chat", text: "ok" }),
+    });
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(lastUserText(requests[0]!)).toBe(`ok\n\n(${CHAT_NOTE})`);
   });
 
   it("an interrupted notice leaves no interruption note in the LLM history", async () => {

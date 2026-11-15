@@ -102,13 +102,78 @@ export function withLanguageNote(
   return withNote(messages, languageNote(code));
 }
 
-/** The one line that tells the LLM to answer a typed message in its own language. */
+/** The fallback line when the language of a typed message is not clear. */
 export const CHAT_NOTE =
   "Reply in the language this message is written in, even if the earlier conversation used another language.";
 
-/** Same as `withLanguageNote`, for a typed chat message. */
+/** Common words per language; ambiguous ones (`de`, `la`, `en`, `a`) are left out. */
+const STOPWORDS: Record<string, readonly string[]> = {
+  en: "the is are what where how can you your i my to of and for with from this that it do does please".split(
+    " ",
+  ),
+  de: "der die das ist sind wo wie kann ich du sie ein eine und nicht mit von zu bitte wann welche auf nach".split(
+    " ",
+  ),
+  es: "el los las es son dónde donde cómo como puedo puede yo tú un una y no con por para hola desde al qué que cuál".split(
+    " ",
+  ),
+  fr: "le les est sont où ou comment puis je tu vous un une et pas avec pour bonjour depuis au quel quelle que qu'est-ce".split(
+    " ",
+  ),
+};
+
+/** Characters that mark one language among the supported ones. */
+const MARKS: Record<string, string> = {
+  es: "¿¡ñ",
+  de: "ßäöü",
+  fr: "çàèùêîôû",
+};
+
+/**
+ * Guesses the language of a typed message from stopwords and marks, limited
+ * to `SUPPORTED_LANGUAGES`. Returns a code only when the best language has at
+ * least 2 hits and leads the next one by at least 2; short, mixed or unknown
+ * text returns undefined. A guess only words the chat note: it never changes
+ * the session language or the voice.
+ */
+export function guessChatLanguage(text: string): string | undefined {
+  const words = text.toLowerCase().match(/[\p{L}'-]+/gu) ?? [];
+  const scores = SUPPORTED_LANGUAGES.map((code) => {
+    const stop = new Set(STOPWORDS[code] ?? []);
+    let hits = words.filter((w) => stop.has(w)).length;
+    for (const mark of MARKS[code] ?? "") {
+      if (text.toLowerCase().includes(mark)) hits += 1;
+    }
+    return { code, hits };
+  }).sort((a, b) => b.hits - a.hits);
+  const best = scores[0];
+  const next = scores[1];
+  if (!best || best.hits < 2 || best.hits - (next?.hits ?? 0) < 2) {
+    return undefined;
+  }
+  return best.code;
+}
+
+/** The chat note naming the language of a typed message. */
+export function chatLanguageNote(code: string): string {
+  const name = languageName(code, "en");
+  return `The caller typed this message in ${name} (${code}). Reply only in ${name}.`;
+}
+
+const INTERRUPTION_NOTE =
+  /^\(The caller interrupted your previous reply after: [\s\S]*?\.\)\n/;
+
+/**
+ * Same as `withLanguageNote`, for a typed chat message: names the guessed
+ * language, or falls back to `CHAT_NOTE` when the guess is not clear.
+ */
 export function withChatNote(messages: LlmMessage[]): LlmMessage[] {
-  return withNote(messages, CHAT_NOTE);
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  // The runtime may put its English interruption note before the message;
+  // it is not the caller's text and must not count towards the guess.
+  const typed = last?.text.replace(INTERRUPTION_NOTE, "");
+  const code = typed ? guessChatLanguage(typed) : undefined;
+  return withNote(messages, code ? chatLanguageNote(code) : CHAT_NOTE);
 }
 
 function withNote(messages: LlmMessage[], note: string): LlmMessage[] {

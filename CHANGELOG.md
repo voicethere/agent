@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.35.3] - 2026-11-15
+
+### Fixed
+
+- Template `llm-language-switch`: a typed chat message could still be answered in the wrong language, for example a Spanish question after English and German turns got an English reply. The agent now guesses the language of the typed message from common words and characters (English, German, Spanish or French) and adds a note that names it, such as "The caller typed this message in Spanish (es). Reply only in Spanish." When the text is too short or mixed to tell, it adds the general note as before. The note is added to a copy of the message, is not stored in the history, and never changes the voice language.
+
+### Changed
+
+- Template `llm-language-switch` uses `anthropic/claude-haiku-5.5` on OpenRouter instead of `amazon/nova-micro-v1`, which followed the language instruction less reliably. The API key secret is unchanged. Projects created from the template earlier keep their own `voicethere.llm.json`.
+
 ## [0.35.2] - 2026-11-10
 
 ### Fixed

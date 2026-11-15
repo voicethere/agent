@@ -17,13 +17,13 @@ The runner owns the switch. The agent never calls `setVoiceLanguage`.
 - `onVoiceLanguageChanged` records the committed language and sends `{ "type": "language", "language": "de" }` to the client. The runner sends it after it has replayed the switching utterance, so the replayed final (`replay: true`) is answered in the language detected for it; every other final is answered in the committed language. The agent appends one line ("The caller now speaks German (de). Reply only in German.") to a copy of the last caller message on every LLM call, so it never piles up in the history.
 - `onUserLanguage` only reports what was heard: `{ "type": "language_detected", "language": "it", "supported": false }`. The runner may still reject a detection, so a detection alone does not change the LLM note: only the replay that follows a switch uses it.
 - When the detected language is not in `SUPPORTED_LANGUAGES`, the runner does not switch and the transcript comes from the wrong language's speech model. The agent skips the LLM for that utterance and says, in the current language, "I heard Italian. I can talk with you in English, German, Spanish or French." That notice is not added to the LLM history.
-- Typed chat messages are answered in the language they are written in (the agent adds a one-line note to the chat message, not stored in the history, so the reply does not follow the voice language); chat does not change the voice.
+- Typed chat messages are answered in the language they are written in (the agent guesses the language from common words and characters, limited to the supported languages, and adds a one-line note naming it to the chat message, for example "The caller typed this message in Spanish (es). Reply only in Spanish."; when the text is short or mixed it adds a general "reply in the language of this message" note instead. The note is not stored in the history, so the reply does not follow the voice language); chat does not change the voice.
 
 ## Files
 
 - `agent.ts` wires `createLlmAgent` into `languageSwitchAgent`.
 - `language.ts` holds `SUPPORTED_LANGUAGES`, the language note and the unsupported-language notice. Keep `SUPPORTED_LANGUAGES` equal to the project's `voice.allowedLanguages`.
-- `voicethere.llm.json` holds the model, greeting and limits.
+- `voicethere.llm.json` holds the model (`anthropic/claude-haiku-5.5` on OpenRouter), greeting and limits.
 - `prompt.md` is the system prompt.
 - `md.d.ts` lets TypeScript accept `import x from "./x.md"`.
 

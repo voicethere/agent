@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.35.4] - 2026-11-15
+
+### Changed
+
+- Docs for `onUserUtteranceSplit` and `UserUtteranceSplitEvent`: `from` and `to` can be either `caller` or `other`. With `splitOnSpeakerChange` on, the runner now also cuts an utterance where a bystander's speech runs straight into the caller's, not only the other way round. It does so only when an earlier part of the utterance scored clearly below the caller (under 0.20 on the speaker score); otherwise the utterance is treated as the caller's, as before. The split event and the handler context have the same fields as before, so no code change is needed. The behavior applies once the platform runs the updated runtime.
+
 ## [0.35.3] - 2026-11-15
 
 ### Fixed

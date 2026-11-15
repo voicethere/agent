@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createOpenAiCompatibleProvider } from "../../src/llm/openai-provider.js";
+import {
+  buildChatCompletionParams,
+  createOpenAiCompatibleProvider,
+} from "../../src/llm/openai-provider.js";
 import type { LlmRequest } from "../../src/llm/types.js";
 import { collect, sseData, startMock, type MockServer } from "./mock-server.js";
 
@@ -248,3 +251,112 @@ for (const id of ["openai", "openrouter"] as const) {
     });
   });
 }
+
+describe("buildChatCompletionParams", () => {
+  const tool = {
+    name: "get_time",
+    description: "time",
+    inputSchema: { type: "object", properties: {} },
+  };
+  const asRecord = (p: unknown) => p as Record<string, unknown>;
+
+  it("maps toolChoice required with tools to tool_choice required", () => {
+    const p = asRecord(
+      buildChatCompletionParams(
+        { ...base, tools: [tool], toolChoice: "required" },
+        "openrouter",
+      ),
+    );
+    expect(p.tool_choice).toBe("required");
+    expect(p.tools).toHaveLength(1);
+  });
+
+  it("maps toolChoice {name} to a function choice", () => {
+    const p = asRecord(
+      buildChatCompletionParams(
+        { ...base, tools: [tool], toolChoice: { name: "get_time" } },
+        "openrouter",
+      ),
+    );
+    expect(p.tool_choice).toEqual({
+      type: "function",
+      function: { name: "get_time" },
+    });
+  });
+
+  it("omits tools and tool_choice when there are no tools", () => {
+    const p = asRecord(
+      buildChatCompletionParams(
+        { ...base, toolChoice: "required" },
+        "openrouter",
+      ),
+    );
+    expect(p).not.toHaveProperty("tools");
+    expect(p).not.toHaveProperty("tool_choice");
+  });
+
+  it("uses max_tokens for openrouter and max_completion_tokens for openai", () => {
+    const or = asRecord(
+      buildChatCompletionParams({ ...base, maxOutputTokens: 50 }, "openrouter"),
+    );
+    const oa = asRecord(
+      buildChatCompletionParams({ ...base, maxOutputTokens: 50 }, "openai"),
+    );
+    expect(or.max_tokens).toBe(50);
+    expect(or).not.toHaveProperty("max_completion_tokens");
+    expect(oa.max_completion_tokens).toBe(50);
+    expect(oa).not.toHaveProperty("max_tokens");
+  });
+
+  it("maps assistant tool calls and tool results, prefixing ERROR: on isError", () => {
+    const p = buildChatCompletionParams(
+      {
+        ...base,
+        tools: [tool],
+        messages: [
+          { role: "user", text: "time?" },
+          {
+            role: "assistant",
+            text: "",
+            toolCalls: [{ id: "c1", name: "get_time", input: { tz: "UTC" } }],
+          },
+          {
+            role: "tool",
+            results: [
+              { callId: "c1", name: "get_time", content: "12:00" },
+              {
+                callId: "c2",
+                name: "get_time",
+                content: "boom",
+                isError: true,
+              },
+            ],
+          },
+        ],
+      },
+      "openrouter",
+    );
+    const m = p.messages as unknown as Array<Record<string, unknown>>;
+    expect(m[2]).toMatchObject({
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "c1",
+          type: "function",
+          function: { name: "get_time", arguments: '{"tz":"UTC"}' },
+        },
+      ],
+    });
+    expect(m[3]).toEqual({
+      role: "tool",
+      tool_call_id: "c1",
+      content: "12:00",
+    });
+    expect(m[4]).toEqual({
+      role: "tool",
+      tool_call_id: "c2",
+      content: "ERROR: boom",
+    });
+  });
+});

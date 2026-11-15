@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildAgentBundle } from "../src/build-bundle.js";
 import { validateLlmAgentConfig } from "../src/llm/agent/config.js";
@@ -14,6 +14,21 @@ import {
   searchKnowledgeTool,
   type LlmEmbedder,
 } from "../src/llm/index.js";
+import { createLlmAgent } from "../src/llm/agent/create-llm-agent.js";
+import type {
+  KnowledgeBase,
+  LlmProvider,
+  LlmRequest,
+  LlmStreamEvent,
+  LlmToolCall,
+} from "../src/llm/index.js";
+import {
+  SESSION_START_INIT_DELAY_ENABLED_ENV,
+  defineAgent,
+  resetAgentIpcStateForTests,
+} from "../src/runtime.js";
+import { installProcessMessageCapture } from "./helpers/process-mock.js";
+import { writeRequestFixture } from "./helpers/request-fixture.js";
 import { openTestRedis } from "./helpers/test-redis.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -155,3 +170,320 @@ describe.skipIf(!queryEngine)(
     }, 30_000);
   },
 );
+
+// --- Promise probes -------------------------------------------------------
+// Each promise the README / prompt.md makes about model behaviour is tied to a
+// named instruction in the system prompt, and the request the runtime sends in
+// each concurrency shape is captured with WRITE_INCIDENT_FIXTURE=<dir> for the
+// e2e probe (rule template-promise-probed-at-shipped-model).
+
+type Msg = Record<string, unknown>;
+type Shape = "settled" | "in-flight" | "interrupted" | "after-tool-chat";
+
+const TUTOR_PROMPT = readFileSync(join(templateDir, "prompt.md"), "utf8");
+const TUTOR_PROMPT_SHA = createHash("sha256")
+  .update(TUTOR_PROMPT)
+  .digest("hex");
+const TUTOR_INSTRUCTIONS = {
+  T1: "call search_knowledge first",
+  T1b: "before you say anything",
+  T2: "Speak English only",
+  T3: "Never make up the meaning of an idiom",
+} as const;
+
+/** The "Small talk at work" chunk of the template's own lessons. */
+function smallTalkChunk(): string {
+  const lessons = readFileSync(
+    join(templateDir, "knowledge", "lessons.md"),
+    "utf8",
+  );
+  const start = lessons.indexOf("## Small talk at work");
+  const next = lessons.indexOf("\n## ", start + 1);
+  return lessons.slice(start, next === -1 ? undefined : next).trim();
+}
+
+const fakeKnowledge: KnowledgeBase = {
+  async ensureIndexed() {
+    return { status: "fresh", chunks: 1, waitedMs: 0 };
+  },
+  async gc() {
+    return [];
+  },
+  async search(query) {
+    return /break the ice/i.test(query)
+      ? [
+          {
+            title: "Small talk at work",
+            source: "lessons",
+            score: 0.9,
+            text: smallTalkChunk(),
+          },
+        ]
+      : [];
+  },
+  async close() {},
+};
+
+function expectTutorInstructions(req: LlmRequest): void {
+  expect(req.tools.map((t) => t.name)).toContain("search_knowledge");
+  for (const sentence of Object.values(TUTOR_INSTRUCTIONS)) {
+    expect(req.system).toContain(sentence);
+  }
+}
+
+function lastUserTextOf(req: LlmRequest): string {
+  const users = req.messages.filter((m) => m.role === "user");
+  return (users[users.length - 1] as { text: string }).text;
+}
+
+describe("llm-language-tutor promises", () => {
+  let capture: ReturnType<typeof installProcessMessageCapture>;
+  const requests: LlmRequest[] = [];
+  type Step = { text?: string; toolCalls?: LlmToolCall[] };
+  const script: Step[] = [];
+
+  const provider: LlmProvider = {
+    id: "openai",
+    stream(req) {
+      requests.push(structuredClone({ ...req, signal: undefined }));
+      const step = script.shift() ?? { text: "Okay." };
+      const text = step.text ?? "";
+      const toolCalls = step.toolCalls ?? [];
+      return (async function* (): AsyncIterable<LlmStreamEvent> {
+        if (text) yield { type: "text_delta", text };
+        yield {
+          type: "done",
+          stopReason: toolCalls.length > 0 ? "tool_calls" : "end",
+          text,
+          toolCalls,
+        };
+      })();
+    },
+  };
+
+  beforeEach(() => {
+    resetAgentIpcStateForTests();
+    process.env[SESSION_START_INIT_DELAY_ENABLED_ENV] = "false";
+    process.env.__CHILD_BUNDLE_PATH__ = "/tmp/agent.js";
+    capture = installProcessMessageCapture();
+    requests.length = 0;
+    script.length = 0;
+  });
+
+  afterEach(() => {
+    capture.emit({ type: "session_end", sessionId: "s1" });
+    capture.restore();
+    resetAgentIpcStateForTests();
+    delete process.env[SESSION_START_INIT_DELAY_ENABLED_ENV];
+    delete process.env.__CHILD_BUNDLE_PATH__;
+  });
+
+  const sent = (type: string): Msg[] =>
+    capture.send.mock.calls
+      .map((c) => c[0] as Msg)
+      .filter((m) => m.type === type);
+  const say = (text: string) =>
+    capture.emit({
+      type: "speech_event",
+      sessionId: "s1",
+      event: { type: "user_speech_final", text },
+    });
+  const chat = (text: string) =>
+    capture.emit({
+      type: "data_channel_message",
+      sessionId: "s1",
+      payload: JSON.stringify({ type: "chat", text }),
+    });
+  const speakResults = (turnId: unknown, status: string, playedMs: number) => {
+    for (const m of sent("speak").filter((x) => x.turnId === turnId)) {
+      capture.emit({
+        type: "speak_result",
+        sessionId: "s1",
+        requestId: m.requestId,
+        turnId,
+        status,
+        playedMs,
+      });
+    }
+  };
+  const interrupt = (turnId: unknown, played: string, unplayed: string) => {
+    capture.emit({
+      type: "agent_interrupted",
+      sessionId: "s1",
+      turnId,
+      replyPlayedMs: 1200,
+      playedText: played,
+      unplayedText: unplayed,
+      playedTextExact: true,
+      cancelledRequestIds: [],
+    });
+    speakResults(turnId, "interrupted", 1200);
+  };
+
+  async function boot(systemPrompt = TUTOR_PROMPT): Promise<unknown> {
+    defineAgent(
+      createLlmAgent({
+        config: {
+          ...readConfig(),
+          provider: "openai",
+          apiKeySecret: "AGENT_TEST_KEY",
+          speech: { coalesceMs: 0 },
+          knowledge: {
+            ...readConfig().knowledge,
+            embeddings: {
+              ...readConfig().knowledge.embeddings,
+              apiKeySecret: "AGENT_TEST_KEY",
+            },
+          },
+        },
+        systemPrompt,
+        provider,
+        knowledge: { base: fakeKnowledge },
+        env: () => ({ AGENT_TEST_KEY: "secret-value" }),
+      }),
+    );
+    capture.emit({
+      type: "session_start",
+      sessionId: "s1",
+      env: {},
+      speakControlAvailable: true,
+    });
+    await vi.waitFor(() => expect(sent("session_start_ack")).toHaveLength(1));
+    await vi.waitFor(() => expect(sent("speak")).toHaveLength(1));
+    return sent("speak")[0]!.turnId;
+  }
+
+  const lastRequest = () => requests[requests.length - 1]!;
+
+  /**
+   * Drives the harness into `shape` and returns the request the model would
+   * answer for `userText`. A first exchange ("Hello") precedes every shape.
+   */
+  async function drive(
+    shape: Shape,
+    userText: string,
+    systemPrompt = TUTOR_PROMPT,
+  ): Promise<LlmRequest> {
+    const greetTurn = await boot(systemPrompt);
+    script.push({ text: "Nice to meet you. How are you today?" });
+    say("Hello");
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    await vi.waitFor(() =>
+      expect(
+        sent("speak").filter((m) => m.turnId !== greetTurn).length,
+      ).toBeGreaterThan(0),
+    );
+    const replyTurn = sent("speak").find((m) => m.turnId !== greetTurn)!.turnId;
+    const before = requests.length;
+    if (shape === "settled") {
+      speakResults(greetTurn, "played", 3000);
+      speakResults(replyTurn, "played", 3000);
+      script.push({ text: "Okay." });
+      say(userText);
+    } else if (shape === "in-flight") {
+      script.push({ text: "Okay." });
+      chat(userText);
+    } else if (shape === "interrupted") {
+      interrupt(replyTurn, "Nice to meet you.", "How are you today?");
+      script.push({ text: "Okay." });
+      say(userText);
+    } else {
+      // after-tool-chat: a tool round whose answer is still unplayed, then chat.
+      script.push(
+        {
+          toolCalls: [
+            {
+              id: "c1",
+              name: "search_knowledge",
+              input: { query: "break the ice" },
+            },
+          ],
+        },
+        { text: "It means to start a conversation." },
+      );
+      say("What does break the ice mean?");
+      await vi.waitFor(() => expect(requests).toHaveLength(before + 2));
+      script.push({ text: "Okay." });
+      chat(userText);
+      await vi.waitFor(() => expect(requests).toHaveLength(before + 3));
+      return lastRequest();
+    }
+    await vi.waitFor(() => expect(requests).toHaveLength(before + 1));
+    return lastRequest();
+  }
+
+  const meta = (promise: string, shape: string) => ({
+    template: "llm-language-tutor",
+    promise,
+    shape,
+    promptSha256: TUTOR_PROMPT_SHA,
+  });
+
+  const SHAPES: Shape[] = [
+    "settled",
+    "in-flight",
+    "interrupted",
+    "after-tool-chat",
+  ];
+
+  describe("T1: a phrase or idiom question calls search_knowledge before any reply", () => {
+    it.each(SHAPES)("shape %s", async (shape) => {
+      const req = await drive(shape, "What does break the ice mean?");
+      expectTutorInstructions(req);
+      expect(req.toolChoice).toBeUndefined();
+      expect(lastUserTextOf(req)).toContain("What does break the ice mean?");
+      writeRequestFixture("T1", req, meta("T1", shape));
+    });
+  });
+
+  describe("T2: English only, even when the learner switches language", () => {
+    it.each(SHAPES.filter((s) => s !== "after-tool-chat"))(
+      "shape %s",
+      async (shape) => {
+        const req = await drive(shape, "¿Puedes hablar español conmigo?");
+        expectTutorInstructions(req);
+        expect(lastUserTextOf(req)).toContain("hablar español");
+        writeRequestFixture("T2", req, meta("T2", shape));
+      },
+    );
+  });
+
+  describe("T3: an idiom is answered from the search result only", () => {
+    it.each([
+      ["found", "break the ice", "Break the ice"],
+      ["empty", "piece of cake on a stick", "No matching knowledge found."],
+    ])("search result %s", async (label, query, expected) => {
+      await boot();
+      script.push(
+        {
+          toolCalls: [{ id: "c1", name: "search_knowledge", input: { query } }],
+        },
+        { text: "Okay." },
+      );
+      say(`What does ${query} mean?`);
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      const req = lastRequest();
+      expectTutorInstructions(req);
+      const last = req.messages[req.messages.length - 1]!;
+      expect(last.role).toBe("tool");
+      expect(JSON.stringify(last)).toContain(expected);
+      writeRequestFixture("T3", req, meta("T3", label));
+    });
+  });
+
+  describe("instruction removal fails the matching assertion", () => {
+    it.each([
+      ["T1", TUTOR_INSTRUCTIONS.T1],
+      ["T2", TUTOR_INSTRUCTIONS.T2],
+      ["T3", TUTOR_INSTRUCTIONS.T3],
+    ])("%s: removing %j", async (_id, sentence) => {
+      expect(TUTOR_PROMPT).toContain(sentence);
+      const req = await drive(
+        "settled",
+        "What does break the ice mean?",
+        TUTOR_PROMPT.replace(sentence, ""),
+      );
+      expect(() => expectTutorInstructions(req)).toThrow();
+    });
+  });
+});

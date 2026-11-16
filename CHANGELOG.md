@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- Templates `llm-store-support` and `llm-language-tutor`: the prompts now name two instructions the model was skipping. The store assistant says exactly the price the price tool returned. The tutor, when the search finds nothing, suggests a lesson topic instead of explaining an idiom it did not look up.
+
 ## [0.35.3] - 2026-11-15
 
 ### Fixed

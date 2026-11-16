@@ -247,10 +247,15 @@ export interface AgentHandlers {
    */
   onUserSpeechIgnored?: (ctx: UserSpeechIgnoredContext) => void | Promise<void>;
   /**
-   * The runner split one utterance in two because the speaker changed from the
-   * caller to someone else without a pause (`user_utterance_split`). The final
-   * of `fromUtteranceId` carries `reason: "speaker_split"`; the rest of the
-   * audio becomes `toUtteranceId`. There is no text.
+   * The runner split one utterance in two because the speaker changed without a
+   * pause (`user_utterance_split`). `from` and `to` can each be `caller` or
+   * `other`: a caller who runs into a bystander, or a bystander who runs into
+   * the caller. A change from `other` to `caller` is split only when the
+   * runner scored an earlier part of the utterance as confidently not the
+   * caller (below 0.20); otherwise the whole utterance counts as the caller's,
+   * as before. The final of `fromUtteranceId` carries
+   * `reason: "speaker_split"`; the rest of the audio becomes `toUtteranceId`.
+   * There is no text.
    */
   onUserUtteranceSplit?: (
     ctx: UserUtteranceSplitContext,

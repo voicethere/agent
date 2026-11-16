@@ -1042,9 +1042,10 @@ export interface UserSpeechIgnoredEvent {
 }
 
 /**
- * The runner split one utterance in two because the speaker changed from the
- * caller to someone else without a pause. Carries no text. Sent as a
- * {@link SpeechEventMessage} with `event.type === "user_utterance_split"`.
+ * The runner split one utterance in two because the speaker changed without a
+ * pause, from the caller to someone else or from someone else to the caller.
+ * Carries no text. Sent as a {@link SpeechEventMessage} with
+ * `event.type === "user_utterance_split"`.
  */
 export interface UserUtteranceSplitEvent {
   type: "user_utterance_split";
@@ -1054,16 +1055,15 @@ export interface UserUtteranceSplitEvent {
   toUtteranceId: string;
   /** Milliseconds into the audio of `fromUtteranceId` where the speaker changed. */
   splitAtMs?: number;
-  /** Speaker label before the split. */
+  /** Speaker label before the split: `caller` or `other`. */
   from?: SpeakerVerdict;
-  /** Speaker label after the split. */
+  /** Speaker label after the split: `other` or `caller`. */
   to?: SpeakerVerdict;
 }
 
 /** Why a final was cut short by a speaker split (`reason` on `user_speech_final`). */
 export type UserSpeechFinalReason =
-  | "speaker_split"
-  | "speaker_split_redecode_timeout";
+  "speaker_split" | "speaker_split_redecode_timeout";
 
 /** Thrown by mix group helpers when {@link SessionStartMessage.mixAvailable} is not `true`. */
 export const MIX_REQUIRES_VOICE_PLUS_DATA =

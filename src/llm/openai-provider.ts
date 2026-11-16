@@ -89,6 +89,52 @@ function parseArgs(raw: string): unknown {
   }
 }
 
+/**
+ * Pure request body the provider sends to chat/completions. Exported so test
+ * fixtures are byte-for-byte what the runtime sends.
+ */
+export function buildChatCompletionParams(
+  req: LlmRequest,
+  providerId: string,
+): ChatCompletionCreateParamsStreaming {
+  const tools: ChatCompletionTool[] = req.tools.map((t) => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.inputSchema,
+    },
+  }));
+  const params = {
+    ...(req.vendorConfig ?? {}),
+    model: req.model,
+    messages: toMessages(req.system, req.messages),
+    stream: true,
+    stream_options: { include_usage: true },
+    ...(tools.length > 0 ? { tools } : {}),
+    ...(tools.length > 0 && req.toolChoice === "required"
+      ? { tool_choice: "required" as const }
+      : {}),
+    ...(tools.length > 0 &&
+    typeof req.toolChoice === "object" &&
+    req.toolChoice !== null
+      ? {
+          tool_choice: {
+            type: "function" as const,
+            function: { name: req.toolChoice.name },
+          },
+        }
+      : {}),
+    ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+    ...(req.maxOutputTokens !== undefined
+      ? providerId === "openai"
+        ? { max_completion_tokens: req.maxOutputTokens }
+        : { max_tokens: req.maxOutputTokens }
+      : {}),
+  } as ChatCompletionCreateParamsStreaming;
+  return params;
+}
+
 export function createOpenAiCompatibleProvider(
   config: OpenAiCompatibleConfig,
 ): LlmProvider {
@@ -102,43 +148,7 @@ export function createOpenAiCompatibleProvider(
   return {
     id: config.id,
     async *stream(req: LlmRequest): AsyncIterable<LlmStreamEvent> {
-      const tools: ChatCompletionTool[] = req.tools.map((t) => ({
-        type: "function",
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.inputSchema,
-        },
-      }));
-      const params = {
-        ...(req.vendorConfig ?? {}),
-        model: req.model,
-        messages: toMessages(req.system, req.messages),
-        stream: true,
-        stream_options: { include_usage: true },
-        ...(tools.length > 0 ? { tools } : {}),
-        ...(tools.length > 0 && req.toolChoice === "required"
-          ? { tool_choice: "required" as const }
-          : {}),
-        ...(tools.length > 0 &&
-        typeof req.toolChoice === "object" &&
-        req.toolChoice !== null
-          ? {
-              tool_choice: {
-                type: "function" as const,
-                function: { name: req.toolChoice.name },
-              },
-            }
-          : {}),
-        ...(req.temperature !== undefined
-          ? { temperature: req.temperature }
-          : {}),
-        ...(req.maxOutputTokens !== undefined
-          ? config.id === "openai"
-            ? { max_completion_tokens: req.maxOutputTokens }
-            : { max_tokens: req.maxOutputTokens }
-          : {}),
-      } as ChatCompletionCreateParamsStreaming;
+      const params = buildChatCompletionParams(req, config.id);
       const stream = await client.chat.completions.create(params, {
         signal: req.signal,
       });

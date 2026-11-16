@@ -173,6 +173,7 @@ const STORE_PROMPT_SHA = createHash("sha256")
 const STORE_INSTRUCTIONS = {
   S1: "call get_product_price",
   S2: "Never state a price that did not come from get_product_price",
+  S2b: "Say exactly the priceUsd that get_product_price returned, in words, and no other amount.",
 } as const;
 const SEARCH_INSTRUCTION = "Search before you answer such a question";
 const SERVICE_TOKEN = "store-probe-token";
@@ -604,6 +605,7 @@ describe("llm-store-support promises", () => {
     it.each([
       ["S1", STORE_INSTRUCTIONS.S1],
       ["S2", STORE_INSTRUCTIONS.S2],
+      ["S2b", STORE_INSTRUCTIONS.S2b],
     ])("%s: removing %j", async (_id, sentence) => {
       expect(STORE_PROMPT).toContain(sentence);
       const { first } = await drive(

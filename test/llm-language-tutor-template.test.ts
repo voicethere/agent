@@ -189,6 +189,8 @@ const TUTOR_INSTRUCTIONS = {
   T1b: "before you say anything",
   T2: "Speak English only",
   T3: "Never make up the meaning of an idiom",
+  T3b: "suggest one lesson topic to practice instead.",
+  T3c: "Do not explain any phrase or idiom that the search did not return.",
 } as const;
 
 /** One `##` lesson chunk of the template's own lessons. */
@@ -232,8 +234,9 @@ const fakeKnowledge: KnowledgeBase = {
 function expectTutorInstructions(req: LlmRequest): void {
   expect(req.tools.map((t) => t.name)).toContain("search_knowledge");
   for (const sentence of Object.values(TUTOR_INSTRUCTIONS)) {
-    expect(req.system).toContain(sentence);
+    expect(req.system, sentence).toContain(sentence);
   }
+  expect(req.system).not.toContain("offer a different phrase to practice");
 }
 
 function lastUserTextOf(req: LlmRequest): string {
@@ -513,6 +516,8 @@ describe("llm-language-tutor promises", () => {
       ["T1", TUTOR_INSTRUCTIONS.T1],
       ["T2", TUTOR_INSTRUCTIONS.T2],
       ["T3", TUTOR_INSTRUCTIONS.T3],
+      ["T3b", TUTOR_INSTRUCTIONS.T3b],
+      ["T3c", TUTOR_INSTRUCTIONS.T3c],
     ])("%s: removing %j", async (_id, sentence) => {
       expect(TUTOR_PROMPT).toContain(sentence);
       const req = await drive(

@@ -25,10 +25,8 @@ import {
 
 /** Per-peer conversational state — extend or replace with your store. */
 interface PeerState {
-  userSpeaking: boolean;
   agentSpeaking: boolean;
   lastPartial: string;
-  sttActive: boolean;
 }
 
 const peers = new Map<string, PeerState>();
@@ -37,10 +35,8 @@ function peerState(sessionId: string): PeerState {
   let state = peers.get(sessionId);
   if (!state) {
     state = {
-      userSpeaking: false,
       agentSpeaking: false,
       lastPartial: "",
-      sttActive: false,
     };
     peers.set(sessionId, state);
   }
@@ -52,6 +48,8 @@ function formatSpeechDetail(speech: SpeechEvent): string {
   if (language) return language;
   if (speech.text) return `"${speech.text}"`;
   if (speech.error) return speech.error;
+  const reason = (speech as SpeechEvent & { reason?: string }).reason;
+  if (reason) return reason;
   return "";
 }
 
@@ -97,7 +95,7 @@ function handleSpeechEvent(sessionId: string, speech: SpeechEvent): void {
       break;
 
     default:
-      // Other speech event types are not delivered by the cloud runner.
+      // Other types are not delivered, apart from the language-switch events in RUNNER_LANGUAGE_SWITCH_EVENTS.
       break;
   }
 }

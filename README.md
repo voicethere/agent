@@ -242,19 +242,23 @@ session orchestration and crash policy remain in the runner codebase.
 
 ### Speech events (parent → child)
 
-Forwarded from the runner voice pipeline as SDK `SpeechEvent` payloads on `speech_event.event` (`event.type`, optional `text` / `error`):
+The runner forwards these SDK `SpeechEvent` payloads on `speech_event.event` (`event.type`, optional `text` / `error`). The package exports the same list as `RUNNER_FORWARDED_SPEECH_EVENTS`.
 
-| Event                                                                                  | Typical use in custom agent                                                                                                                  |
-| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `user_speaking_start` / `user_speaking_end`                                            | UI state, turn-taking                                                                                                                        |
-| `user_speech_partial`                                                                  | Live captions, early barge-in logic                                                                                                          |
-| `user_speech_final`                                                                    | Primary turn boundary (`onUserSpeechFinal` convenience)                                                                                      |
-| `user_language`                                                                        | Detected ISO 639-1 (`onUserLanguage`). Does not change STT/TTS unless you call `setVoiceLanguage` or the project enables runner auto-switch. |
-| `voice_language_switching` / `voice_language_changed` / `voice_language_switch_failed` | Runner language switch lifecycle; `onVoiceLanguageChanged` on `voice_language_changed`.                                                      |
-| `agent_speaking_start` / `agent_speaking_end`                                          | Know when TTS playback starts/stops                                                                                                          |
-| `barge_in`                                                                             | User interrupted agent playback                                                                                                              |
-| `vad_triggered`, `stt_stream_*`, `user_stt_*`                                          | Low-level pipeline hooks                                                                                                                     |
-| `error`                                                                                | Vendor or pipeline failure                                                                                                                   |
+| Event                  | Typical use in custom agent                                                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_speech_final`    | Primary turn boundary (`onUserSpeechFinal` convenience)                                                                                      |
+| `user_speech_ignored`  | The speaker gate dropped an utterance because it was not the enrolled caller (`reason: speaker_mismatch`, no text)                           |
+| `user_utterance_split` | One utterance was cut in two because the speaker changed (`onUserUtteranceSplit`)                                                            |
+| `user_language`        | Detected ISO 639-1 (`onUserLanguage`). Does not change STT/TTS unless you call `setVoiceLanguage` or the project enables runner auto-switch. |
+| `agent_speaking_start` | Know when TTS playback starts                                                                                                                |
+| `agent_speaking_end`   | Know when TTS playback ends                                                                                                                  |
+| `tts_wait`             | Playback is waiting for speech synthesis                                                                                                     |
+| `agent_speak_failed`   | A `speak` could not be synthesized (`error` holds the reason)                                                                                |
+| `tts_phrase_cache_hit` | A phrase came from the TTS phrase cache                                                                                                      |
+| `speaker_gate_ready`   | The speaker gate is ready for the session                                                                                                    |
+| `barge_in`             | The caller interrupted agent playback. Not sent for the cut the runner makes itself when it handles a `speak_cancel`.                        |
+
+Not delivered in cloud: partial transcripts (`user_speech_partial`), VAD and speaking state (`vad_triggered`, `user_speaking_start`, `user_speaking_end`), `stt_stream_*`, `user_stt_*` and `error`. They stay inside the runner, so an agent never sees them.
 
 `voice_language_switch_failed` carries `from`, `to`, `reason`, `error`, `fallbackLanguage` and `attempts`. When the new language's speech models do not start in time (two attempts of about 20 s), `reason` is `"language_unavailable"`, `error` holds the underlying cause (`pool_timeout` or `pool_unavailable`) and the session continues in `fallbackLanguage`. The event arrives before the caller's held speech is transcribed in the previous language. `setVoiceLanguage` resolves `{ ok: false, reason: "language_unavailable" }` in the same case.
 

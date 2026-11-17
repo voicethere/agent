@@ -6,6 +6,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-17
+
+### Added
+
+- `AgentInterruptedMessage.cutPlayedChars`: the number of code points of the cut speak's played part, counted by the speak controller. It covers only the speak that was playing when the caller cut in, not earlier speaks of the same turn, so a reply with repeated words ("yes yes no") no longer has to be matched back by text.
+- `RUNNER_FORWARDED_SPEECH_EVENTS`: the speech event types the cloud runner delivers to an agent, exported from the package root.
+
+### Changed
+
+- The README table of speech events now lists only the types the runner delivers: `user_speech_final`, `user_speech_ignored`, `user_utterance_split`, `user_language`, `agent_speaking_start`, `agent_speaking_end`, `tts_wait`, `agent_speak_failed`, `tts_phrase_cache_hit`, `speaker_gate_ready` and `barge_in`. Partial transcripts, VAD and speaking state, `stt_stream_*`, `user_stt_*` and `error` are not delivered in cloud. The starter template and `examples/agent.ts` no longer branch on them.
+- `barge_in` reaches the agent once the runner forwards it. The runner does not send it for the cut it makes itself when it handles a `speak_cancel`.
+
 ## [0.35.4] - 2026-11-16
 
 ### Changed

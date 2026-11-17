@@ -50,10 +50,13 @@ function bundleStubPlugin(): esbuild.Plugin {
         path: "supports-color",
         namespace: "agent-bundle-stub",
       }));
-      build.onLoad({ filter: /.*/, namespace: "agent-bundle-stub" }, (args) => ({
-        contents: BUNDLE_STUB_MODULES[args.path] ?? "export {};",
-        loader: "js",
-      }));
+      build.onLoad(
+        { filter: /.*/, namespace: "agent-bundle-stub" },
+        (args) => ({
+          contents: BUNDLE_STUB_MODULES[args.path] ?? "export {};",
+          loader: "js",
+        }),
+      );
     },
   };
 }

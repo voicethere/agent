@@ -336,6 +336,11 @@ export interface AgentInterruptedMessage {
   playedText: string;
   /** Text the caller did not hear. */
   unplayedText: string;
+  /**
+   * Code points of the cut speak's played part, as the speak controller counted them.
+   * Counts only the cut speak, not earlier speaks of the same turn.
+   */
+  cutPlayedChars?: number;
   /** `false` when `playedText` is estimated from timing. */
   playedTextExact: boolean;
   /** Speaks dropped from the queue by this barge-in. */

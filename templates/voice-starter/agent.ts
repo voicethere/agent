@@ -1,7 +1,7 @@
 /**
  * Full starter template — copy into your project and build to a single `agent.js` bundle.
  *
- * Handles every `SpeechEvent` from the runner voice pipeline (`@node-webrtc-rust/sdk/voice`).
+ * Handles the speech events the cloud runner delivers (`RUNNER_FORWARDED_SPEECH_EVENTS`).
  * Replace the stub bodies with your product logic; keep `onUserSpeechFinal` as the main turn hook.
  *
  * Build:
@@ -56,8 +56,8 @@ function formatSpeechDetail(speech: SpeechEvent): string {
 }
 
 /**
- * Dispatch every speech lifecycle event from the parent Sherpa/VAD/STT/TTS pipeline.
- * `speech.type` values match `SpeechEventType` in `@node-webrtc-rust/sdk/voice`.
+ * Dispatch the speech lifecycle events the runner forwards. `speech.type` values match
+ * `SpeechEventType` in `@node-webrtc-rust/sdk/voice`.
  */
 function handleSpeechEvent(sessionId: string, speech: SpeechEvent): void {
   const state = peerState(sessionId);
@@ -70,57 +70,7 @@ function handleSpeechEvent(sessionId: string, speech: SpeechEvent): void {
   }
 
   switch (speech.type) {
-    // --- User turn (VAD + STT) ---
-    case "user_speaking_start":
-      state.userSpeaking = true;
-      agentLog("info", `[${sessionId}] user_speaking_start`);
-      break;
-
-    case "user_speaking_end":
-      state.userSpeaking = false;
-      agentLog("info", `[${sessionId}] user_speaking_end`);
-      break;
-
-    case "vad_triggered":
-      agentLog(
-        "info",
-        `[${sessionId}] vad_triggered — STT listen window opened`,
-      );
-      break;
-
-    case "stt_stream_start":
-      agentLog("info", `[${sessionId}] stt_stream_start`);
-      break;
-
-    case "stt_stream_end":
-      agentLog("info", `[${sessionId}] stt_stream_end`);
-      break;
-
-    case "user_stt_start":
-      state.sttActive = true;
-      state.lastPartial = "";
-      agentLog("info", `[${sessionId}] user_stt_start`);
-      break;
-
-    case "user_stt_end":
-      state.sttActive = false;
-      agentLog("info", `[${sessionId}] user_stt_end`);
-      break;
-
-    case "user_stt_not_found":
-      agentLog(
-        "info",
-        `[${sessionId}] user_stt_not_found — no speech recognized in listen window`,
-      );
-      // Optional: speak(sessionId, "I didn't catch that. Could you repeat?")
-      break;
-
-    case "user_speech_partial":
-      state.lastPartial = speech.text ?? "";
-      agentLog("info", `[${sessionId}] user_speech_partial ${detail}`);
-      // Optional: live captions, early intent detection, custom barge-in rules
-      break;
-
+    // --- User turn ---
     case "user_speech_final":
       state.lastPartial = "";
       agentLog("info", `[${sessionId}] user_speech_final ${detail}`);
@@ -146,20 +96,9 @@ function handleSpeechEvent(sessionId: string, speech: SpeechEvent): void {
       // Optional: cancel in-flight LLM/TTS work keyed by sessionId
       break;
 
-    case "error":
-      agentLog(
-        "error",
-        `[${sessionId}] pipeline error: ${speech.error ?? "unknown"}`,
-      );
+    default:
+      // Other speech event types are not delivered by the cloud runner.
       break;
-
-    default: {
-      const _exhaustive: never = speech.type;
-      agentLog(
-        "error",
-        `[${sessionId}] unhandled speech event: ${String(_exhaustive)}`,
-      );
-    }
   }
 }
 

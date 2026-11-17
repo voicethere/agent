@@ -1,6 +1,6 @@
 /**
  * Default agent bundle — built to `dist/agent.js` for local runner dev.
- * Same event coverage as `templates/voice-starter/agent.ts` (imports from src for this repo).
+ * Same speech event handling as `templates/voice-starter/agent.ts` (imports from src for this repo).
  *
  *   cd agent && npm run build
  *   AGENT_BUNDLE_PATH=../agent/dist/agent.js npm run start   # on your agent runner checkout
@@ -49,39 +49,6 @@ function handleSpeechEvent(sessionId: string, speech: SpeechEvent): void {
   const detail = formatSpeechDetail(speech);
 
   switch (speech.type) {
-    case "user_speaking_start":
-      state.userSpeaking = true;
-      agentLog("info", `[${sessionId}] user_speaking_start`);
-      break;
-    case "user_speaking_end":
-      state.userSpeaking = false;
-      agentLog("info", `[${sessionId}] user_speaking_end`);
-      break;
-    case "vad_triggered":
-      agentLog("info", `[${sessionId}] vad_triggered`);
-      break;
-    case "stt_stream_start":
-      agentLog("info", `[${sessionId}] stt_stream_start`);
-      break;
-    case "stt_stream_end":
-      agentLog("info", `[${sessionId}] stt_stream_end`);
-      break;
-    case "user_stt_start":
-      state.sttActive = true;
-      state.lastPartial = "";
-      agentLog("info", `[${sessionId}] user_stt_start`);
-      break;
-    case "user_stt_end":
-      state.sttActive = false;
-      agentLog("info", `[${sessionId}] user_stt_end`);
-      break;
-    case "user_stt_not_found":
-      agentLog("info", `[${sessionId}] user_stt_not_found`);
-      break;
-    case "user_speech_partial":
-      state.lastPartial = speech.text ?? "";
-      agentLog("info", `[${sessionId}] user_speech_partial ${detail}`);
-      break;
     case "user_speech_final":
       state.lastPartial = "";
       agentLog("info", `[${sessionId}] user_speech_final ${detail}`);
@@ -97,13 +64,9 @@ function handleSpeechEvent(sessionId: string, speech: SpeechEvent): void {
     case "barge_in":
       agentLog("info", `[${sessionId}] barge_in`);
       break;
-    case "error":
-      agentLog("error", `[${sessionId}] error: ${speech.error ?? "unknown"}`);
+    default:
+      // Other speech event types are not delivered by the cloud runner.
       break;
-    default: {
-      const _exhaustive: never = speech.type;
-      agentLog("error", `[${sessionId}] unhandled: ${String(_exhaustive)}`);
-    }
   }
 }
 

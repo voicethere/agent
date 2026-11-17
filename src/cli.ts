@@ -9,14 +9,8 @@
  */
 
 import { buildAgentBundle } from "./build-bundle.js";
-import {
-  DEFAULT_VERIFY_BUNDLE,
-  DEFAULT_VERIFY_ENTRY,
-} from "./verify/lib.js";
-import {
-  formatVerifyFailure,
-  runAgentVerify,
-} from "./verify/run-verify.js";
+import { DEFAULT_VERIFY_BUNDLE, DEFAULT_VERIFY_ENTRY } from "./verify/lib.js";
+import { formatVerifyFailure, runAgentVerify } from "./verify/run-verify.js";
 import { runAgentVerifyStart } from "./verify/run-verify-start.js";
 import { processFlowIo, runFlowCommand } from "./flow/cli-flow.js";
 

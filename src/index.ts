@@ -101,6 +101,8 @@ export {
   type UserHistoryResponseMessage,
 } from "./protocol.js";
 
+export { RUNNER_FORWARDED_SPEECH_EVENTS } from "./runner-forwarded-events.js";
+
 export {
   agentLog,
   addClientToMix,

@@ -253,22 +253,22 @@ The runner forwards these SDK `SpeechEvent` payloads on `speech_event.event` (`e
 | `agent_speaking_start` | Know when TTS playback starts                                                                                                                |
 | `agent_speaking_end`   | Know when TTS playback ends                                                                                                                  |
 | `tts_wait`             | Playback is waiting for speech synthesis                                                                                                     |
-| `agent_speak_failed`   | A `speak` could not be synthesized (`reason` holds why)                                                                                |
+| `agent_speak_failed`   | A `speak` could not be synthesized (`reason` holds why)                                                                                      |
 | `tts_phrase_cache_hit` | A phrase came from the TTS phrase cache                                                                                                      |
-| `speaker_gate_ready`   | The speaker model finished loading (`waitMs`, no text)                                                                                                   |
+| `speaker_gate_ready`   | The speaker model finished loading (`waitMs`, no text)                                                                                       |
 | `barge_in`             | The caller interrupted agent playback. Not sent for the cut the runner makes itself when it handles a `speak_cancel`.                        |
 
 Sent only when the project uses language switching (exported as `RUNNER_LANGUAGE_SWITCH_EVENTS`):
 
-| Event                          | Typical use in custom agent                                                                              |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `voice_language_switching`     | A runner language switch has started                                                                     |
-| `voice_language_changed`       | The switch was applied (`onVoiceLanguageChanged`)                                                        |
-| `voice_language_switch_failed` | The switch failed and the session stays in the previous language; details below                          |
+| Event                          | Typical use in custom agent                                                                                          |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `voice_language_switching`     | A runner language switch has started                                                                                 |
+| `voice_language_changed`       | The switch was applied (`onVoiceLanguageChanged`)                                                                    |
+| `voice_language_switch_failed` | The switch failed and the session stays in the previous language; details below                                      |
 | `user_speech_final_held`       | A final was held while a switch or language check runs (`reason` is `language_switch` or `language_check`, `holdMs`) |
-| `user_speech_final_released`   | The held final was released                                                                              |
-| `stt_hold_started`             | The runner paused STT for the switch                                                                     |
-| `stt_hold_ended`               | The runner resumed STT                                                                                   |
+| `user_speech_final_released`   | The held final was released                                                                                          |
+| `stt_hold_started`             | The runner paused STT for the switch                                                                                 |
+| `stt_hold_ended`               | The runner resumed STT                                                                                               |
 
 Other types are not delivered in cloud, apart from these: partial transcripts (`user_speech_partial`), VAD and speaking state (`vad_triggered`, `user_speaking_start`, `user_speaking_end`), `stt_stream_*`, `user_stt_*` and `error` stay inside the runner.
 

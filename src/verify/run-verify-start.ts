@@ -38,9 +38,7 @@ export async function runAgentVerifyStart(
   const cwd = options.cwd ?? process.cwd();
   const checks: VerifyCheckResult[] = [];
   const quiet = options.quiet;
-  const bundlePath =
-    options.bundlePath ??
-    parseBundleArg([], process.env, cwd);
+  const bundlePath = options.bundlePath ?? parseBundleArg([], process.env, cwd);
 
   logLine(quiet, "[@voicethere/agent verify-start]");
 

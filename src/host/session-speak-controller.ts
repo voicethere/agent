@@ -356,6 +356,7 @@ export class SessionSpeakController {
         earlier.reduce((sum, e) => sum + e.playedMs, 0) + cutPlayedMs,
       playedText: playedParts.join(" "),
       unplayedText: unplayedParts.join(" "),
+      cutPlayedChars: Array.from(est.played).length,
       playedTextExact: false,
       cancelledRequestIds: p.cancelled
         .filter((e) => !e.legacy)

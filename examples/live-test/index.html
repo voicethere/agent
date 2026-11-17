@@ -9,7 +9,11 @@
         color-scheme: dark;
         background: #070b12;
         color: #e5e7eb;
-        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          sans-serif;
       }
       body {
         margin: 0;
@@ -79,7 +83,8 @@
       }
       #log {
         white-space: pre-wrap;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         font-size: 0.82rem;
         max-height: 240px;
         overflow: auto;
@@ -95,7 +100,10 @@
   </head>
   <body>
     <h1>VoiceThere agent live test</h1>
-    <p>Connect to your running agent session and inspect mic/incoming audio in real time.</p>
+    <p>
+      Connect to your running agent session and inspect mic/incoming audio in
+      real time.
+    </p>
 
     <section class="panel">
       <div class="actions">
@@ -125,7 +133,10 @@
       <h3>Log</h3>
       <div id="log"></div>
       <div class="chat-row">
-        <input id="chat-input" placeholder="Type a chat payload (type=chat) to test echo..." />
+        <input
+          id="chat-input"
+          placeholder="Type a chat payload (type=chat) to test echo..."
+        />
         <button id="chat-send-btn" disabled>Send chat</button>
       </div>
     </section>
@@ -138,7 +149,13 @@
     <section class="panel">
       <h3>Incoming visualizer (remote)</h3>
       <canvas id="incoming-canvas" width="920" height="120"></canvas>
-      <audio id="incoming-audio" autoplay playsinline controls style="margin-top: 0.7rem; width: 100%"></audio>
+      <audio
+        id="incoming-audio"
+        autoplay
+        playsinline
+        controls
+        style="margin-top: 0.7rem; width: 100%"
+      ></audio>
     </section>
 
     <script type="module">
@@ -200,9 +217,10 @@
 
       function attachIncomingVisualizer(track) {
         incomingVisualizer?.stop();
-        const sourceStream = incomingAudio.srcObject instanceof MediaStream
-          ? incomingAudio.srcObject
-          : null;
+        const sourceStream =
+          incomingAudio.srcObject instanceof MediaStream
+            ? incomingAudio.srcObject
+            : null;
         const stream = sourceStream?.getAudioTracks().length
           ? sourceStream
           : new MediaStream([track]);
@@ -214,8 +232,11 @@
             barColor: "#22d3ee",
           });
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          log(`incoming visualizer stream-source failed, falling back to audio element: ${message}`);
+          const message =
+            error instanceof Error ? error.message : String(error);
+          log(
+            `incoming visualizer stream-source failed, falling back to audio element: ${message}`,
+          );
           incomingVisualizer = attachAudioVisualizer({
             canvas: incomingCanvas,
             audioElement: incomingAudio,
@@ -261,7 +282,8 @@
           log(`chat->agent ${JSON.stringify({ type: "chat", text })}`);
           chatInput.value = "";
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           log(`chat send failed: ${message}`);
           setStatus(message, true);
         }
@@ -285,8 +307,14 @@
             expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
           };
 
-          if (!credentials.signaling_url || !credentials.session_id || !credentials.room_id) {
-            throw new Error("Signaling URL, session ID, and room ID are required");
+          if (
+            !credentials.signaling_url ||
+            !credentials.session_id ||
+            !credentials.room_id
+          ) {
+            throw new Error(
+              "Signaling URL, session ID, and room ID are required",
+            );
           }
 
           const signalingHttp = parseWsOriginAsHttp(credentials.signaling_url);
@@ -305,20 +333,31 @@
             audioElement: incomingAudio,
             onDebugEvent: {
               debug: (scope, event, detail) =>
-                log(`debug ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`),
+                log(
+                  `debug ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`,
+                ),
               info: (scope, event, detail) =>
-                log(`info ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`),
+                log(
+                  `info ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`,
+                ),
               warn: (scope, event, detail) =>
-                log(`warn ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`),
+                log(
+                  `warn ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`,
+                ),
               error: (scope, event, detail) =>
-                log(`error ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`),
+                log(
+                  `error ${scope}:${event}${detail ? ` ${JSON.stringify(detail)}` : ""}`,
+                ),
             },
             onAgentAudioTrack: (track) => {
               attachIncomingVisualizer(track);
               log("incoming audio track attached");
             },
             onControlMessage: (payload) => {
-              if (payload.type === "chat_echo" && typeof payload.text === "string") {
+              if (
+                payload.type === "chat_echo" &&
+                typeof payload.text === "string"
+              ) {
                 log(`agent->chat_echo "${payload.text}"`);
                 return;
               }
@@ -343,7 +382,8 @@
           chatSendBtn.disabled = false;
           log(`connected peer=${session.peerId}`);
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           setStatus(message, true);
           log(`connect failed: ${message}`);
           cleanupSession();

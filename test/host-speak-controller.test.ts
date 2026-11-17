@@ -175,6 +175,48 @@ describe("SessionSpeakController", () => {
     expect(i.playedTextExact).toBe(false);
   });
 
+  it("cutPlayedChars counts only the cut speak when its text repeats an earlier word", () => {
+    accept("r1", "yes yes no", { turnId: "t" });
+    accept("r2", "yes yes no", { turnId: "t" });
+    ctl.onPlayStart("r1");
+    ctl.onReplyEnd("r1", {
+      playedMs: 1000,
+      interrupted: false,
+      synthesizedMs: 1000,
+      synthesisComplete: true,
+    });
+    ctl.onPlayStart("r2");
+    ctl.onBargeIn();
+    ctl.onReplyEnd("r2", {
+      playedMs: 300,
+      interrupted: true,
+      synthesizedMs: 1000,
+      synthesisComplete: true,
+    });
+    const i = interruptions()[0]!;
+    const cutPart = i.playedText.slice("yes yes no ".length);
+    expect(i.cutPlayedChars).toBe(Array.from(cutPart).length);
+    expect(i.cutPlayedChars).toBeGreaterThan(0);
+    expect(i.cutPlayedChars).toBeLessThan("yes yes no".length);
+    expect(i.playedText.length).toBeGreaterThan(i.cutPlayedChars!);
+  });
+
+  it("cutPlayedChars counts code points, not UTF-16 units", () => {
+    accept("r1", "😀😀 ok go", { turnId: "t" });
+    ctl.onPlayStart("r1");
+    ctl.onBargeIn();
+    ctl.onReplyEnd("r1", {
+      playedMs: 600,
+      interrupted: true,
+      synthesizedMs: 1000,
+      synthesisComplete: true,
+    });
+    const i = interruptions()[0]!;
+    expect(i.playedText).toBe("😀😀");
+    expect(i.cutPlayedChars).toBe(2);
+    expect(i.playedText.length).toBe(4);
+  });
+
   it("flushPendingInterruption emits once with an elapsed-time estimate before the reply end arrives", () => {
     clock = 0;
     accept("r1", "Your order ships tomorrow morning.", { turnId: "t" });

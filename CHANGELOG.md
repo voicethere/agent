@@ -6,6 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.36.1] - 2026-11-17
+
+### Added
+
+- `RUNNER_LANGUAGE_SWITCH_EVENTS`: the speech event types the runner sends only when the project uses language switching (`voice_language_switching`, `voice_language_changed`, `voice_language_switch_failed`, `user_speech_final_held`, `user_speech_final_released`, `stt_hold_started`, `stt_hold_ended`).
+
+### Changed
+
+- README: the speech event table for `agent_speak_failed` now says `reason` holds why a speak failed (it said `error`), `speaker_gate_ready` is described as the speaker model finishing loading, and a second table lists the language-switch events, which 0.36.0 had dropped.
+- The starter template and `examples/agent.ts` print `reason` in their event log lines when it is set, and no longer keep unused per-peer state.
+
 ## [0.36.0] - 2026-11-17
 
 ### Added

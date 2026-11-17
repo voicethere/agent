@@ -194,11 +194,8 @@ describe("SessionSpeakController", () => {
       synthesisComplete: true,
     });
     const i = interruptions()[0]!;
-    const cutPart = i.playedText.slice("yes yes no ".length);
-    expect(i.cutPlayedChars).toBe(Array.from(cutPart).length);
-    expect(i.cutPlayedChars).toBeGreaterThan(0);
-    expect(i.cutPlayedChars).toBeLessThan("yes yes no".length);
-    expect(i.playedText.length).toBeGreaterThan(i.cutPlayedChars!);
+    expect(i.playedText).toBe("yes yes no yes");
+    expect(i.cutPlayedChars).toBe(3);
   });
 
   it("cutPlayedChars counts code points, not UTF-16 units", () => {

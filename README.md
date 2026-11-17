@@ -253,12 +253,24 @@ The runner forwards these SDK `SpeechEvent` payloads on `speech_event.event` (`e
 | `agent_speaking_start` | Know when TTS playback starts                                                                                                                |
 | `agent_speaking_end`   | Know when TTS playback ends                                                                                                                  |
 | `tts_wait`             | Playback is waiting for speech synthesis                                                                                                     |
-| `agent_speak_failed`   | A `speak` could not be synthesized (`error` holds the reason)                                                                                |
+| `agent_speak_failed`   | A `speak` could not be synthesized (`reason` holds why)                                                                                |
 | `tts_phrase_cache_hit` | A phrase came from the TTS phrase cache                                                                                                      |
-| `speaker_gate_ready`   | The speaker gate is ready for the session                                                                                                    |
+| `speaker_gate_ready`   | The speaker model finished loading (`waitMs`, no text)                                                                                                   |
 | `barge_in`             | The caller interrupted agent playback. Not sent for the cut the runner makes itself when it handles a `speak_cancel`.                        |
 
-Not delivered in cloud: partial transcripts (`user_speech_partial`), VAD and speaking state (`vad_triggered`, `user_speaking_start`, `user_speaking_end`), `stt_stream_*`, `user_stt_*` and `error`. They stay inside the runner, so an agent never sees them.
+Sent only when the project uses language switching (exported as `RUNNER_LANGUAGE_SWITCH_EVENTS`):
+
+| Event                          | Typical use in custom agent                                                                              |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `voice_language_switching`     | A runner language switch has started                                                                     |
+| `voice_language_changed`       | The switch was applied (`onVoiceLanguageChanged`)                                                        |
+| `voice_language_switch_failed` | The switch failed and the session stays in the previous language; details below                          |
+| `user_speech_final_held`       | A final was held while a switch or language check runs (`reason` is `language_switch` or `language_check`, `holdMs`) |
+| `user_speech_final_released`   | The held final was released                                                                              |
+| `stt_hold_started`             | The runner paused STT for the switch                                                                     |
+| `stt_hold_ended`               | The runner resumed STT                                                                                   |
+
+Other types are not delivered in cloud, apart from these: partial transcripts (`user_speech_partial`), VAD and speaking state (`vad_triggered`, `user_speaking_start`, `user_speaking_end`), `stt_stream_*`, `user_stt_*` and `error` stay inside the runner.
 
 `voice_language_switch_failed` carries `from`, `to`, `reason`, `error`, `fallbackLanguage` and `attempts`. When the new language's speech models do not start in time (two attempts of about 20 s), `reason` is `"language_unavailable"`, `error` holds the underlying cause (`pool_timeout` or `pool_unavailable`) and the session continues in `fallbackLanguage`. The event arrives before the caller's held speech is transcribed in the previous language. `setVoiceLanguage` resolves `{ ok: false, reason: "language_unavailable" }` in the same case.
 

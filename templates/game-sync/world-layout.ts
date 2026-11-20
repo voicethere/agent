@@ -41,8 +41,11 @@ export const MAX_FRAME_BYTES =
   FRAME_HEADER_BYTES + MAX_LIVE_OBJECTS * FRAME_RECORD_BYTES;
 export const BOARD_X_MAX = 1280;
 export const BOARD_Y_MAX = 720;
-/** Elastic collisions keep |v| <= 180 x sqrt(2) per component; 512 leaves wide margin. */
-export const VELOCITY_LIMIT = 512;
+/**
+ * Elastic collisions can pass energy to one object (about 900 px/s with 25 objects), so the
+ * range is 1024; a component beyond it is clamped and counted ({@link getClampedComponentCount}).
+ */
+export const VELOCITY_LIMIT = 1024;
 
 export function slotToObjectId(slot: number): number {
   return slot + 1;
@@ -325,6 +328,22 @@ export type DecodedObject = {
 
 /** Objects dropped by {@link encodeLiveObjectsInto} for a non-finite component. */
 let invalidObjectDrops = 0;
+/** Components {@link encodeLiveObjectsInto} clamped to their quantization range. */
+let clampedComponents = 0;
+
+export function getClampedComponentCount(): number {
+  return clampedComponents;
+}
+
+function quantizeCounted(v: number, min: number, max: number): number {
+  if (v < min || v > max) clampedComponents += 1;
+  return quantize(v, min, max);
+}
+
+function quantizeUnitCounted(v: number): number {
+  if (v < -1 || v > 1) clampedComponents += 1;
+  return quantizeUnit(v);
+}
 
 export function invalidObjectDropCount(): number {
   return invalidObjectDrops;
@@ -368,22 +387,22 @@ export function encodeLiveObjectsInto(
     }
     dest[at] = objectId & 0xff;
     dest[at + 1] = (objectId >> 8) & 0xff;
-    writeI16(dest, at + 2, quantize(world[start + 1]!, 0, BOARD_X_MAX));
-    writeI16(dest, at + 4, quantize(world[start + 2]!, 0, BOARD_Y_MAX));
-    writeI16(dest, at + 6, quantizeUnit(world[start + 3]!));
-    writeI16(dest, at + 8, quantizeUnit(world[start + 4]!));
+    writeI16(dest, at + 2, quantizeCounted(world[start + 1]!, 0, BOARD_X_MAX));
+    writeI16(dest, at + 4, quantizeCounted(world[start + 2]!, 0, BOARD_Y_MAX));
+    writeI16(dest, at + 6, quantizeUnitCounted(world[start + 3]!));
+    writeI16(dest, at + 8, quantizeUnitCounted(world[start + 4]!));
     writeI16(
       dest,
       at + 10,
-      quantize(world[start + 5]!, -VELOCITY_LIMIT, VELOCITY_LIMIT),
+      quantizeCounted(world[start + 5]!, -VELOCITY_LIMIT, VELOCITY_LIMIT),
     );
     writeI16(
       dest,
       at + 12,
-      quantize(world[start + 6]!, -VELOCITY_LIMIT, VELOCITY_LIMIT),
+      quantizeCounted(world[start + 6]!, -VELOCITY_LIMIT, VELOCITY_LIMIT),
     );
-    writeI16(dest, at + 14, quantizeUnit(world[start + 7]!));
-    writeI16(dest, at + 16, quantizeUnit(world[start + 8]!));
+    writeI16(dest, at + 14, quantizeUnitCounted(world[start + 7]!));
+    writeI16(dest, at + 16, quantizeUnitCounted(world[start + 8]!));
     at += FRAME_RECORD_BYTES;
     count += 1;
   }
@@ -432,4 +451,22 @@ export function dequantizeObject(q: readonly number[]): number[] {
     dequantizeUnit(q[6]!),
     dequantizeUnit(q[7]!),
   ];
+}
+
+/** A step is skipped when less than half a 60 Hz interval has passed since the stored sim-at. */
+export const SIM_STEP_MIN_MS = Math.floor(1000 / 60) / 2;
+export const SIM_STEP_MAX_SEC = 0.05;
+
+/**
+ * dt (s) to step from the stored sim-at, or null to skip. No lower clamp, so the sum of
+ * dt equals Redis wall time whatever the timer jitter. No stored sim-at: one interval.
+ */
+export function planRedisStepDtSec(
+  simAtMs: number,
+  nowMs: number,
+): number | null {
+  if (simAtMs === 0) return 1 / 60;
+  const elapsed = nowMs - simAtMs;
+  if (elapsed < SIM_STEP_MIN_MS) return null;
+  return Math.min(SIM_STEP_MAX_SEC, elapsed / 1000);
 }

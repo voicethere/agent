@@ -23,6 +23,7 @@ import {
 } from "vitest";
 
 import {
+  collectActiveObjectIds,
   normalizeWorldBuffer,
   REDIS_SIM_AT_KEY,
   REDIS_SIM_LOCK_KEY,
@@ -44,8 +45,15 @@ vi.mock("@voicethere/agent", (importOriginal) =>
   agentMockFactory(importOriginal as () => Promise<Record<string, unknown>>),
 );
 
-type RedisHooks = { evalGate: Promise<void> | null; pending: number };
-const hooks = vi.hoisted(() => ({ evalGate: null, pending: 0 }) as RedisHooks);
+type RedisHooks = {
+  evalGate: Promise<void> | null;
+  pending: number;
+  /** Evals that have completed (the lock-release eval of a finished attempt counts). */
+  evalsDone: number;
+};
+const hooks = vi.hoisted(
+  () => ({ evalGate: null, pending: 0, evalsDone: 0 }) as RedisHooks,
+);
 
 vi.mock("ioredis", async (importOriginal) => {
   const actual = (await importOriginal()) as typeof import("ioredis");
@@ -63,7 +71,13 @@ vi.mock("ioredis", async (importOriginal) => {
 
     override async eval(...args: unknown[]): Promise<unknown> {
       if (hooks.evalGate) await hooks.evalGate;
-      return (super.eval as (...a: unknown[]) => Promise<unknown>)(...args);
+      try {
+        return await (super.eval as (...a: unknown[]) => Promise<unknown>)(
+          ...args,
+        );
+      } finally {
+        hooks.evalsDone += 1;
+      }
     }
   }
   return { ...actual, Redis: TrackedRedis, default: TrackedRedis };
@@ -160,6 +174,7 @@ describe.skipIf(!harness)("game-sync pods on one Redis", () => {
     } as never);
     await podA.onClientJoin?.({ sessionId: "lock-a" } as never);
 
+    const evalsBefore = hooks.evalsDone;
     // A's register parks inside its critical section (allocate eval) holding
     // the sim lock until the test releases it, past the 32 ms TTL.
     let release!: () => void;
@@ -191,9 +206,17 @@ describe.skipIf(!harness)("game-sync pods on one Redis", () => {
 
     hooks.evalGate = null;
     release();
-    await registered;
+    // A's first attempt returns -3 and its finally ran the compare-and-delete release:
+    // allocate eval + release-lock eval.
+    await vi.waitFor(() => expect(hooks.evalsDone).toBe(evalsBefore + 2), {
+      timeout: 1_000,
+      interval: 1,
+    });
     // A's release must not delete B's lock.
     expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).toBe("holder-b");
+    // B lets go; A's single retry then takes a new token and registers.
+    await podsRedis!.del(REDIS_SIM_LOCK_KEY);
+    await registered;
     await podA.onClientLeave?.({ sessionId: "lock-a" } as never);
   });
 
@@ -312,5 +335,152 @@ describe.skipIf(!harness)("game-sync pods on one Redis", () => {
     await podsRedis!.set(REDIS_SIM_AT_KEY, String(future + 1));
     await tickTwice();
     expect(frames()).toBe(2);
+  });
+
+  async function podWithSession(sessionId: string) {
+    const pod = await loadPod(
+      () => import("../templates/game-sync/agent.js"),
+      () => vi.resetModules(),
+    );
+    await pod.onAgentStart?.({ env: { AGENT_REDIS_URL: podsUrl } } as never);
+    await pod.onClientJoin?.({ sessionId } as never);
+    return pod;
+  }
+
+  function jsonTo(
+    sessionId: string,
+    type: string,
+  ): Array<Record<string, unknown>> {
+    return meterState()
+      .sends.filter(
+        (send) =>
+          send.sessionId === sessionId &&
+          send.kind === "json" &&
+          (send.payload as { type?: string }).type === type,
+      )
+      .map((send) => send.payload as Record<string, unknown>);
+  }
+
+  async function lockLapses(): Promise<void> {
+    await vi.waitFor(
+      async () => {
+        expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).not.toBeNull();
+      },
+      { timeout: 1_000, interval: 1 },
+    );
+    await vi.waitFor(
+      async () => {
+        expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).toBeNull();
+      },
+      { timeout: 1_000, interval: 2 },
+    );
+  }
+
+  async function liveObjectIds(): Promise<number[]> {
+    const world = normalizeWorldBuffer(
+      await podsRedis!.getBuffer(REDIS_WORLD_KEY),
+    );
+    return collectActiveObjectIds(world);
+  }
+
+  it("register retries once after a lost lock", async () => {
+    const pod = await podWithSession("retry-a");
+    resetMeter();
+    let release!: () => void;
+    hooks.evalGate = new Promise<void>((r) => {
+      release = r;
+    });
+    const registered = pod.onDataChannelMessage?.({
+      sessionId: "retry-a",
+      message: { type: "register" },
+    } as never);
+    await lockLapses();
+    expect(
+      await podsRedis!.set(REDIS_SIM_LOCK_KEY, "holder-b", "PX", 10_000, "NX"),
+    ).toBe("OK");
+    const evalsBefore = hooks.evalsDone;
+    hooks.evalGate = null;
+    release();
+    await vi.waitFor(() => expect(hooks.evalsDone).toBe(evalsBefore + 2), {
+      timeout: 1_000,
+      interval: 1,
+    });
+    // B drops the lock: the one retry takes a new token and writes.
+    await podsRedis!.del(REDIS_SIM_LOCK_KEY);
+    await registered;
+    expect(jsonTo("retry-a", "register_ack")).toHaveLength(1);
+    expect(jsonTo("retry-a", "register_nack")).toHaveLength(0);
+    expect(await liveObjectIds()).toHaveLength(1);
+  });
+
+  it("unregister after two lost locks nacks busy and keeps the owner", async () => {
+    const pod = await podWithSession("busy-a");
+    await pod.onClientJoin?.({ sessionId: "busy-b" } as never);
+    await pod.onDataChannelMessage?.({
+      sessionId: "busy-a",
+      message: { type: "register" },
+    } as never);
+    const objectId = (
+      jsonTo("busy-a", "register_ack")[0] as { objectId: number }
+    ).objectId;
+    expect(await liveObjectIds()).toEqual([objectId]);
+    resetMeter();
+
+    // Attempt 1: parked past the TTL, B takes the lock.
+    let release1!: () => void;
+    hooks.evalGate = new Promise<void>((r) => {
+      release1 = r;
+    });
+    const unregistered = pod.onDataChannelMessage?.({
+      sessionId: "busy-a",
+      message: { type: "unregister", objectId },
+    } as never);
+    await lockLapses();
+    expect(
+      await podsRedis!.set(REDIS_SIM_LOCK_KEY, "holder-b", "PX", 10_000, "NX"),
+    ).toBe("OK");
+    const evalsBefore = hooks.evalsDone;
+    hooks.evalGate = null;
+    release1();
+    // release-object eval returns -3, then the finally's compare-and-delete eval.
+    await vi.waitFor(() => expect(hooks.evalsDone).toBe(evalsBefore + 2), {
+      timeout: 1_000,
+      interval: 1,
+    });
+    expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).toBe("holder-b");
+
+    // Attempt 2 (the one retry): parked past the TTL again, B takes the lock again.
+    let release2!: () => void;
+    hooks.evalGate = new Promise<void>((r) => {
+      release2 = r;
+    });
+    await podsRedis!.del(REDIS_SIM_LOCK_KEY);
+    await lockLapses();
+    expect(
+      await podsRedis!.set(REDIS_SIM_LOCK_KEY, "holder-b2", "PX", 10_000, "NX"),
+    ).toBe("OK");
+    hooks.evalGate = null;
+    release2();
+    await unregistered;
+
+    expect(jsonTo("busy-a", "unregister_nack")).toEqual([
+      { type: "unregister_nack", reason: "busy" },
+    ]);
+    expect(jsonTo("busy-a", "unregister_ack")).toHaveLength(0);
+    // No release was announced, the object is still in the world.
+    expect(jsonTo("busy-b", "object_released")).toHaveLength(0);
+    expect(await liveObjectIds()).toEqual([objectId]);
+
+    // Still owned: once the lock is free, the same session can unregister it.
+    await podsRedis!.del(REDIS_SIM_LOCK_KEY);
+    await pod.onDataChannelMessage?.({
+      sessionId: "busy-a",
+      message: { type: "unregister", objectId },
+    } as never);
+    expect(jsonTo("busy-a", "unregister_ack")).toEqual([
+      { type: "unregister_ack", objectId },
+    ]);
+    expect(jsonTo("busy-b", "object_released")).toHaveLength(1);
+    expect(await liveObjectIds()).toEqual([]);
   });
 });

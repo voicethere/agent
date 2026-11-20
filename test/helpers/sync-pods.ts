@@ -15,6 +15,8 @@ export type SyncSend = {
   kind: "binary" | "json";
   /** Copy of the bytes at send time (binary only). */
   copy?: Buffer;
+  /** The JSON payload (json only). */
+  payload?: unknown;
 };
 
 type MeterState = {
@@ -68,6 +70,7 @@ export async function agentMockFactory(
         sessionId,
         bytes: Buffer.byteLength(JSON.stringify(payload)),
         kind: "json",
+        payload,
       });
     },
     sendBinaryToClient: (sessionId: string, data: Buffer | Uint8Array) => {

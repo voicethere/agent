@@ -14,6 +14,7 @@ import {
   FRAME_HEADER_BYTES,
   FRAME_RECORD_BYTES,
   FRAME_VERSION,
+  getClampedComponentCount,
   invalidObjectDropCount,
   MAX_FRAME_BYTES,
   VELOCITY_LIMIT,
@@ -158,6 +159,20 @@ describe("game-sync quantized frame", () => {
     expect(invalidObjectDropCount() - before).toBe(2);
     const objects = decodeLiveObjectsFrame(dest.subarray(0, length));
     expect(objects.map((o) => o.objectId)).toEqual([2]);
+  });
+
+  it("clamps a 2000 px/s component to the velocity limit and counts it", () => {
+    const world = createEmptyWorldBuffer();
+    writeObjectSlot(world, 0, 1, 10, 20, 0, 1, 2000, -900, 0, 0);
+    const before = getClampedComponentCount();
+    const dest = new Uint8Array(MAX_FRAME_BYTES);
+    const length = encodeLiveObjectsInto(dest, world);
+    expect(getClampedComponentCount() - before).toBe(1);
+    const q = decodeLiveObjectsFrame(dest.subarray(0, length))[0]!.q;
+    expect(q[4]).toBe(32767);
+    // 900 px/s (the worst case of energy collecting in one object) is inside the range.
+    expect(dequantizeObject(q)[5]).toBeCloseTo(-900, 1);
+    expect(VELOCITY_LIMIT).toBe(1024);
   });
 
   it("decoder throws a named error for an unknown format, version or length", () => {

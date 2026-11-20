@@ -18,6 +18,8 @@
  * - `{ type: "register" }` -> allocates (or reuses) one 9-float slot
  * - server replies `{ type: "register_ack", objectId }`
  * - `{ type: "register_nack", reason: "world_full", maxObjects: 25 }` when cap reached
+ * - `{ type: "register_nack", reason: "busy" }` / `{ type: "unregister_nack", reason: "busy" }`
+ *   when the Redis sim lock was lost twice in a row (the write was skipped; retry later)
  * - `{ type: "remove", objectId }` or `{ type: "unregister", objectId?: number }` ->
  *   zeros that live slot (objectId required for click-to-remove; omit objectId on
  *   unregister to drop the highest object owned by this session)
@@ -53,7 +55,9 @@ import {
   parseRegisterCommand,
   parseUnregisterCommand,
   resolveRemoveTarget,
+  REGISTER_NACK_REASON_BUSY,
   REGISTER_NACK_REASON_WORLD_FULL,
+  UNREGISTER_NACK_REASON_BUSY,
   UNREGISTER_NACK_REASON_NOT_FOUND,
 } from "./protocol.js";
 import {
@@ -87,6 +91,7 @@ import {
   objectIdToSlot,
   MAX_FRAME_BYTES,
   planRedisSimTick,
+  planRedisStepDtSec,
   REDIS_SIM_AT_KEY,
   REDIS_SIM_LOCK_KEY,
   REDIS_WORLD_KEY,
@@ -101,6 +106,8 @@ const SIM_LOCK_TTL_MS = SIM_INTERVAL_MS * 2;
 const SIM_LOCK_RETRY_MS = 5;
 /** Allocate/release Lua result when the lock no longer holds this pod's token. */
 const LUA_LOCK_LOST = -3;
+const LOCK_LOST = "lock_lost" as const;
+type LockLost = typeof LOCK_LOST;
 
 const connectedSessions = new Set<string>();
 /** Same members as connectedSessions; array form lets the broadcast skip Set iteration. */
@@ -283,7 +290,7 @@ function registerObjectInMemory(sessionId: string): number | null {
 async function registerObjectInRedis(
   sessionId: string,
   token: string,
-): Promise<number | null> {
+): Promise<number | null | LockLost> {
   if (!redis) {
     return registerObjectInMemory(sessionId);
   }
@@ -304,7 +311,7 @@ async function registerObjectInRedis(
   const objectId = Number(result);
   if (objectId === LUA_LOCK_LOST) {
     agentLog("warn", "register skipped: sim lock lost before the world write");
-    return null;
+    return LOCK_LOST;
   }
   if (!Number.isFinite(objectId) || objectId < 1) {
     return null;
@@ -318,9 +325,9 @@ async function registerObjectInRedis(
 async function releaseObjectInRedis(
   objectId: number,
   token: string,
-): Promise<boolean> {
-  detachObjectFromSession(objectId);
+): Promise<boolean | LockLost> {
   if (!redis) {
+    detachObjectFromSession(objectId);
     releaseObjectInMemory(objectId);
     return true;
   }
@@ -338,12 +345,26 @@ async function releaseObjectInRedis(
     token,
   );
   if (Number(released) === LUA_LOCK_LOST) {
+    // Nothing was written and nothing was detached: the owner stays as it was.
     agentLog("warn", "release skipped: sim lock lost before the world write");
+    return LOCK_LOST;
   }
+  detachObjectFromSession(objectId);
   if (Number(released) === 1) {
     await loadWorldFromRedis();
   }
   return Number(released) === 1;
+}
+
+/** Run a lock-guarded write; when the lock was lost mid-way, retry once with a new token. */
+async function withSimLockRetryOnce<T>(
+  fn: (token: string) => Promise<T | LockLost>,
+): Promise<T | LockLost> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await withRedisSimLock(fn);
+    if (result !== LOCK_LOST) return result as T;
+  }
+  return LOCK_LOST;
 }
 
 async function unregisterObject(
@@ -357,19 +378,21 @@ async function unregisterObject(
   }
 
   const previousOwner = objectOwners.get(target.objectId) ?? sessionId;
-  notifyObjectReleased(target.objectId, previousOwner);
   const released = await withWorldMutation(async () => {
     if (!redis) {
       return releaseObjectInRedis(target.objectId, "");
     }
-    const result = await withRedisSimLock((token) =>
+    return withSimLockRetryOnce((token) =>
       releaseObjectInRedis(target.objectId, token),
     );
-    return result === true;
   });
+  if (released === LOCK_LOST) {
+    return { ok: false, reason: UNREGISTER_NACK_REASON_BUSY };
+  }
   if (!released) {
     return { ok: false, reason: UNREGISTER_NACK_REASON_NOT_FOUND };
   }
+  notifyObjectReleased(target.objectId, previousOwner);
   return { ok: true, objectId: target.objectId };
 }
 
@@ -474,10 +497,10 @@ type StepOutcome = "stepped" | "skipped" | "lost";
 async function stepWorldWithRedis(token: string): Promise<StepOutcome> {
   if (!redis) return "lost";
   await loadWorldFromRedis();
-  const simAt = lastReadSimAt;
   const now = lastReadNowMs;
-  if (simAt !== 0 && now - simAt < SIM_INTERVAL_MS) return "skipped";
-  stepWorldInPlace(clampSimulationDtSec(simAt === 0 ? 0 : now - simAt, SIM_HZ));
+  const dt = planRedisStepDtSec(lastReadSimAt, now);
+  if (dt === null) return "skipped";
+  stepWorldInPlace(dt);
   const written = await redis.eval(
     LUA_COMMIT_WORLD,
     3,
@@ -627,11 +650,18 @@ defineAgent({
         if (!redis) {
           return registerObjectInMemory(ctx.sessionId);
         }
-        const result = await withRedisSimLock((token) =>
+        return withSimLockRetryOnce((token) =>
           registerObjectInRedis(ctx.sessionId, token),
         );
-        return result;
       });
+      if (objectId === LOCK_LOST) {
+        sendToClient(ctx.sessionId, {
+          type: "register_nack",
+          reason: REGISTER_NACK_REASON_BUSY,
+        });
+        agentLog("info", `register_nack busy session=${ctx.sessionId}`);
+        return;
+      }
       if (objectId === null) {
         sendToClient(ctx.sessionId, {
           type: "register_nack",

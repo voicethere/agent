@@ -124,16 +124,18 @@ function kb(
   return base;
 }
 
+// Top level: the describe below is skipped without the Redis Query Engine, and a
+// skipped describe never runs its own afterAll, which leaked the container.
+afterAll(async () => {
+  kbRedis?.disconnect();
+  await harness?.close();
+});
+
 describe.skipIf(!supported)("createRedisKnowledgeBase (real Redis 8)", () => {
   afterEach(async () => {
     await Promise.all(open.splice(0).map((b) => b.close()));
     for (const name of namespaces.splice(0)) await wipe(name);
   });
-  afterAll(async () => {
-    kbRedis?.disconnect();
-    await harness?.close();
-  });
-
   it("indexes and finds the chunk that answers", async () => {
     const e = fakeEmbedder();
     const base = kb(ns(), e);

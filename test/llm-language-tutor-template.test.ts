@@ -4,7 +4,15 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { buildAgentBundle } from "../src/build-bundle.js";
 import { validateLlmAgentConfig } from "../src/llm/agent/config.js";
@@ -95,6 +103,10 @@ describe("llm-language-tutor template", () => {
 });
 
 const harness = await openTestRedis();
+
+afterAll(async () => {
+  await harness?.close();
+});
 let queryEngine = false;
 if (harness) {
   try {

@@ -1,5 +1,11 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import {
+  spawn,
+  spawnSync,
+  type ChildProcess,
+  type SpawnSyncReturns,
+} from "node:child_process";
 import { randomInt } from "node:crypto";
+import { hostname } from "node:os";
 import { Redis } from "ioredis";
 
 const CONNECT_TIMEOUT_MS = 400;
@@ -104,23 +110,133 @@ async function spawnRedisServer(): Promise<{
   return { url: `redis://127.0.0.1:${port}/15`, child };
 }
 
+const DOCKER_LABEL = "voicethere-agent-test";
+const DOCKER_PID_LABEL = "voicethere-agent-test-pid";
+const DOCKER_HOST_LABEL = "voicethere-agent-test-host";
+
+/** Containers this process started and has not yet removed. */
+const ownContainers = new Set<string>();
+let exitHooksInstalled = false;
+
+function removeOwnContainers(): void {
+  for (const id of ownContainers) {
+    spawnSync("docker", ["rm", "-f", "-v", id], { encoding: "utf8" });
+  }
+  ownContainers.clear();
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Remove containers a crashed or killed earlier run left behind. Only
+ * containers carrying our label whose recorded pid is gone are touched.
+ */
+function removeStaleContainers(): void {
+  const listed = spawnSync(
+    "docker",
+    [
+      "ps",
+      "-a",
+      "--no-trunc",
+      "--filter",
+      `label=${DOCKER_LABEL}=1`,
+      "--format",
+      `{{.ID}} {{.Label "${DOCKER_PID_LABEL}"}} {{.Label "${DOCKER_HOST_LABEL}"}}`,
+    ],
+    { encoding: "utf8" },
+  );
+  if (listed.status !== 0) return;
+  for (const line of listed.stdout.split("\n")) {
+    const [id, pidText, host] = line.trim().split(/\s+/);
+    const pid = Number(pidText);
+    // A pid from another host or pid namespace (a devcontainer sharing the
+    // Docker socket) says nothing about liveness here: never reap it.
+    if (host !== hostname()) continue;
+    if (!id || !Number.isInteger(pid) || pid <= 0 || pidAlive(pid)) continue;
+    spawnSync("docker", ["rm", "-f", "-v", id], { encoding: "utf8" });
+  }
+}
+
+function installExitHooks(): void {
+  if (exitHooksInstalled) return;
+  exitHooksInstalled = true;
+  process.once("exit", removeOwnContainers);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    const handler = () => {
+      removeOwnContainers();
+      process.removeListener(signal, handler);
+      // Re-raise so the default signal semantics (exit by signal) still apply.
+      process.kill(process.pid, signal);
+    };
+    process.on(signal, handler);
+  }
+}
+
+/**
+ * Host port for docker attempt `attempt`. Test-only
+ * `AGENT_TEST_REDIS_DOCKER_PORTS` (comma list) fixes the first ports so the
+ * port-conflict retry can be reproduced deterministically; otherwise random.
+ */
+function pickDockerPort(attempt: number): number {
+  const fixed = process.env.AGENT_TEST_REDIS_DOCKER_PORTS?.split(",")
+    .map((p) => Number(p.trim()))
+    .filter((p) => Number.isInteger(p) && p > 0);
+  return fixed?.[attempt] ?? 30_000 + randomInt(20_000);
+}
+
 async function spawnDockerRedis(): Promise<{
   url: string;
   containerId: string;
 } | null> {
-  const port = 30_000 + randomInt(20_000);
-  const started = spawnSync(
-    "docker",
-    ["run", "-d", "--rm", "-p", `127.0.0.1:${port}:6379`, "redis:7-alpine"],
-    { encoding: "utf8" },
-  );
-  if (started.status !== 0) {
+  removeStaleContainers();
+  // A random host port can already be taken (other runs, leaked containers):
+  // retry with a new port on a port conflict only; any other failure is final.
+  const portTaken = /port is already allocated|address already in use/i;
+  let port = 0;
+  let started: SpawnSyncReturns<string> | undefined;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    port = pickDockerPort(attempt);
+    started = spawnSync(
+      "docker",
+      [
+        "run",
+        "-d",
+        "--rm",
+        "--name",
+        `${DOCKER_LABEL}-redis-${process.pid}-${port}`,
+        "--label",
+        `${DOCKER_LABEL}=1`,
+        "--label",
+        `${DOCKER_PID_LABEL}=${process.pid}`,
+        "--label",
+        `${DOCKER_HOST_LABEL}=${hostname()}`,
+        "-p",
+        `127.0.0.1:${port}:6379`,
+        "redis:7-alpine",
+      ],
+      { encoding: "utf8" },
+    );
+    if (started.status === 0 || !portTaken.test(started.stderr)) break;
+  }
+  if (!started || started.status !== 0) {
+    console.warn(
+      `[test-redis] docker run failed: ${started?.stderr.trim().split("\n")[0]}`,
+    );
     return null;
   }
   const containerId = started.stdout.trim();
   if (!containerId) {
     return null;
   }
+  ownContainers.add(containerId);
+  installExitHooks();
   const url = `redis://127.0.0.1:${port}/15`;
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
@@ -131,7 +247,8 @@ async function spawnDockerRedis(): Promise<{
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  spawnSync("docker", ["rm", "-f", containerId], { encoding: "utf8" });
+  spawnSync("docker", ["rm", "-f", "-v", containerId], { encoding: "utf8" });
+  ownContainers.delete(containerId);
   return null;
 }
 
@@ -144,16 +261,26 @@ async function spawnDockerRedis(): Promise<{
  * 3. Spawn `redis-server` on a random port when the binary is on PATH
  * 4. `docker run redis:7-alpine` when Docker is on PATH (set `AGENT_TEST_REDIS_DOCKER=0` to disable)
  *
+ * `AGENT_TEST_REDIS_FORCE_DOCKER=1` skips 1-3 (used by the leak test).
+ * `AGENT_TEST_REDIS_DOCKER_PORTS=p1,p2` fixes the docker host ports tried
+ * first (test-only, for the port-conflict retry test).
+ * The docker container is labelled with this process's pid and removed on
+ * exit or SIGINT/SIGTERM/SIGHUP even when the caller never calls `close()`;
+ * containers of dead pids carrying the label are removed on the next spawn.
+ *
  * Returns null when none of those work so callers can `skip`.
  */
 let cached: Promise<TestRedis | null> | undefined;
 
 export function openTestRedis(): Promise<TestRedis | null> {
   cached ??= (async () => {
-    const urls = [
-      configuredUrl() ? withDefaultDb(configuredUrl()!, 15) : undefined,
-      "redis://127.0.0.1:6379/15",
-    ].filter((url): url is string => Boolean(url));
+    const forceDocker = process.env.AGENT_TEST_REDIS_FORCE_DOCKER === "1";
+    const urls = forceDocker
+      ? []
+      : [
+          configuredUrl() ? withDefaultDb(configuredUrl()!, 15) : undefined,
+          "redis://127.0.0.1:6379/15",
+        ].filter((url): url is string => Boolean(url));
 
     const seen = new Set<string>();
     for (const url of urls) {
@@ -171,7 +298,7 @@ export function openTestRedis(): Promise<TestRedis | null> {
       }
     }
 
-    const spawned = await spawnRedisServer();
+    const spawned = forceDocker ? null : await spawnRedisServer();
     if (spawned) {
       const redis = await pingUrl(spawned.url);
       if (redis) {
@@ -197,15 +324,17 @@ export function openTestRedis(): Promise<TestRedis | null> {
             url: docker.url,
             close: async () => {
               redis.disconnect();
-              spawnSync("docker", ["rm", "-f", docker.containerId], {
+              spawnSync("docker", ["rm", "-f", "-v", docker.containerId], {
                 encoding: "utf8",
               });
+              ownContainers.delete(docker.containerId);
             },
           };
         }
-        spawnSync("docker", ["rm", "-f", docker.containerId], {
+        spawnSync("docker", ["rm", "-f", "-v", docker.containerId], {
           encoding: "utf8",
         });
+        ownContainers.delete(docker.containerId);
       }
     }
 

@@ -90,6 +90,8 @@ export async function agentMockFactory(
           sessionId,
           bytes: buffer.byteLength,
           kind: "binary",
+          // The scratch buffer is reused: capture the content at send time.
+          copy: Buffer.from(buffer),
         });
       }
     },

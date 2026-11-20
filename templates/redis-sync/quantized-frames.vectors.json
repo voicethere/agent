@@ -1,5 +1,5 @@
 {
-  "description": "Encoded sync frames and their expected decode. Identical copy lives in platform (src/lib/showcase/quantized-frames.vectors.json); each side's tests decode every frame to the listed slots. Regenerate only with the agent codec, then copy.",
+  "description": "Encoded sync frames and their expected decode. Platform imports this file from the bumped @voicethere/agent package (export ./templates/redis-sync/quantized-frames.vectors.json) and does not copy it; the agent and platform tests decode every frame to the listed slots. Regenerate only with the agent codec.",
   "source": "agent/templates/redis-sync/quantized-frames.vectors.json",
   "board": {
     "min": -1024,

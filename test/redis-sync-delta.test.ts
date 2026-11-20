@@ -5,8 +5,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { quantStep } from "../templates/redis-sync/quantize.js";
 import {
   applyFrameToWorld,
+  BOARD_MAX,
+  BOARD_MIN,
+  normalizeWorldBuffer,
   createEmptyWorldBuffer,
   decodeFrame,
   encodePositionInto,
@@ -27,11 +31,13 @@ const fakeRedis = vi.hoisted(() => {
   const state = {
     store: new Map<string, Buffer>(),
     calls: [] as Array<{ cmd: string; args: unknown[] }>,
+    getGate: null as Promise<void> | null,
   };
   class FakeRedis {
     async connect(): Promise<void> {}
     async getBuffer(key: string): Promise<Buffer | null> {
       state.calls.push({ cmd: "getBuffer", args: [key] });
+      if (state.getGate) await state.getGate;
       const value = state.store.get(key);
       return value ? Buffer.from(value) : null;
     }
@@ -97,9 +103,11 @@ describe.each([
   beforeEach(() => {
     vi.useFakeTimers();
     resetMeter();
+    fakeRedis.state.getGate = null;
   });
   afterEach(() => {
     vi.useRealTimers();
+    fakeRedis.state.getGate = null;
   });
 
   it("sends no frame when nothing changed, and a keyframe every 20th tick", async () => {
@@ -179,9 +187,16 @@ describe.each([
     } as never);
     await vi.advanceTimersByTimeAsync(TICK_MS);
     const clientWorld = createEmptyWorldBuffer();
-    applyFrameToWorld(clientWorld, first.copy!);
-    const after = framesFor("new").length;
-    expect(after).toBeGreaterThanOrEqual(1);
+    for (const frame of framesFor("new")) {
+      applyFrameToWorld(clientWorld, frame.copy!);
+    }
+    const half = quantStep(BOARD_MIN, BOARD_MAX) / 2;
+    const five = readPeerSlot(clientWorld, 5)!;
+    const six = readPeerSlot(clientWorld, 6)!;
+    expect(Math.abs(five.x - 50)).toBeLessThanOrEqual(half);
+    expect(Math.abs(five.y - 60)).toBeLessThanOrEqual(half);
+    expect(Math.abs(six.x - 1)).toBeLessThanOrEqual(half);
+    expect(Math.abs(six.y - 2)).toBeLessThanOrEqual(half);
     await pod.onClientLeave?.({ sessionId: "old" } as never);
     await pod.onClientLeave?.({ sessionId: "new" } as never);
   });
@@ -228,13 +243,72 @@ describe.each([
   });
 });
 
+describe("redis-sync join during an in-flight tick (redis mode)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetMeter();
+    fakeRedis.state.getGate = null;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    fakeRedis.state.getGate = null;
+  });
+
+  it("a join during an in-flight tick converges to the pod world", async () => {
+    const pod = await startPod("redis://fake");
+    await pod.onClientJoin?.({ sessionId: "old" } as never);
+    await pod.onDataChannelBinary?.({
+      sessionId: "old",
+      rawBinary: pose(5, 50, 60),
+    } as never);
+    await vi.advanceTimersByTimeAsync(TICK_MS);
+    await pod.onDataChannelBinary?.({
+      sessionId: "old",
+      rawBinary: pose(6, 1, 2),
+    } as never);
+    let release!: () => void;
+    fakeRedis.state.getGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await vi.advanceTimersByTimeAsync(TICK_MS); // parked in the GET
+    await pod.onClientJoin?.({ sessionId: "new" } as never);
+    fakeRedis.state.getGate = null;
+    release();
+    await vi.advanceTimersByTimeAsync(TICK_MS);
+    await vi.advanceTimersByTimeAsync(TICK_MS);
+
+    const clientWorld = createEmptyWorldBuffer();
+    for (const frame of framesFor("new")) {
+      applyFrameToWorld(clientWorld, frame.copy!);
+    }
+    const podWorld = normalizeWorldBuffer(
+      fakeRedis.state.store.get(REDIS_WORLD_KEY),
+      createEmptyWorldBuffer(),
+    );
+    const active = (world: Uint8Array) =>
+      Array.from({ length: MAX_PEERS }, (_, i) => i)
+        .filter((i) => world[i * SLOT_BYTES + 1] === 1)
+        .map((i) =>
+          Buffer.from(
+            world.subarray(i * SLOT_BYTES, (i + 1) * SLOT_BYTES),
+          ).toString("hex"),
+        );
+    expect(active(podWorld)).toHaveLength(2);
+    expect(active(clientWorld)).toEqual(active(podWorld));
+    await pod.onClientLeave?.({ sessionId: "old" } as never);
+    await pod.onClientLeave?.({ sessionId: "new" } as never);
+  });
+});
+
 describe("redis-sync SETRANGE write path", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     resetMeter();
+    fakeRedis.state.getGate = null;
   });
   afterEach(() => {
     vi.useRealTimers();
+    fakeRedis.state.getGate = null;
   });
 
   it("writes one 6-byte slot at clientIndex * 6 and never uses Lua", async () => {

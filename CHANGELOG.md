@@ -6,6 +6,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-20
+
+### Breaking
+
+- game-sync and redis-sync wire format is now quantized int16 with a 4-byte header; game-sync broadcasts at 30 Hz. A client that reads the old Float32 snapshots must switch to the new frames. game-sync sends `u8 format (2) · u8 version (1) · u16le objectCount` and 18 B per live object (a full 25-object frame is 454 B instead of 900 B). redis-sync sends `u8 kind (1 keyframe, 2 delta) · u8 version (1) · u16le slotCount` and 6 B per slot, as a delta of changed slots with a keyframe on join and every second. The Redis world key of redis-sync is now `e2e:redis-sync:world:v2`.
+
+### Added
+
+- Exports for the shared quantizer and frame layouts: `@voicethere/agent/templates/redis-sync/quantize`, `@voicethere/agent/templates/game-sync/quantize`, `@voicethere/agent/templates/game-sync/world-layout` and `@voicethere/agent/templates/game-sync/sim`.
+- `@voicethere/agent/templates/redis-sync/quantized-frames.vectors.json`: encoded frames and their decoded values for both templates, so a client decoder can be tested against the same bytes.
+
+### Changed
+
+- world-sync and world-sync-binary coalesce poses: a pose only marks the world dirty and a 30 Hz tick sends one shared snapshot when dirty, so a session receives at most 30 frames/s however many peers send poses. Join and leave still broadcast at once.
+- redis-sync writes a position with one 6 B `SETRANGE` instead of a Lua patch, and reuses its buffers between ticks.
+- The binary send path is covered by a test that mutates a buffer after the send, to keep the copy-on-send behavior the reused buffers rely on.
+
+### Fixed
+
+- game-sync with Redis: world writes are conditional on the sim lock token, so a pod whose lock expired can no longer overwrite a newer world.
+- game-sync with Redis: the world carries its own sim time, so several pods no longer step the same interval twice (double-step).
+- game-sync answers `register_nack` / `unregister_nack` with `reason: "busy"` when the lock was lost twice in a row, instead of writing without it.
+- game-sync velocity range is 1024 px/s; a larger component is clamped and counted.
+
 ## [0.36.1] - 2026-11-17
 
 ### Added

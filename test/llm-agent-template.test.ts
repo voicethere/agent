@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { buildAgentBundle } from "../src/build-bundle.js";
 import { LLM_PROVIDERS } from "../src/llm/catalog.js";
@@ -185,6 +185,10 @@ describe("llm-agent template", () => {
 });
 
 const harness = await openTestRedis();
+
+afterAll(async () => {
+  await harness?.close();
+});
 let queryEngine = false;
 if (harness) {
   try {

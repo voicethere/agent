@@ -2,7 +2,7 @@
 
 Single-agent positional sync using **binary** DataChannel frames. No Redis.
 
-Clients send an `ArrayBuffer` of three little-endian float32 values `[x, y, z]`. Reuse one `Float32Array(3)` on the client. The agent stores xyz in one `Float32Array`, rewrites a single `WorldSnapshotBuffer` in place, and fans the resulting view out with `broadCastBinaryToClients` — one `Buffer` wrap per tick, zero byte copies.
+Clients send an `ArrayBuffer` of three little-endian float32 values `[x, y, z]`. Reuse one `Float32Array(3)` on the client. The agent stores xyz in one `Float32Array`, rewrites a single `WorldSnapshotBuffer` in place, and fans the resulting view out with `broadCastBinaryToClients` — one `Buffer` wrap per tick, zero byte copies. A pose only marks the world dirty; a 30 Hz tick sends one shared snapshot when dirty, so a session receives at most 30 frames/s. Join and leave broadcast at once.
 
 ## Protocol
 

@@ -5,6 +5,9 @@
 export const MAX_LIVE_OBJECTS = 25;
 
 export const REGISTER_NACK_REASON_WORLD_FULL = "world_full" as const;
+/** Redis sim lock lost twice in a row (another pod held it past our TTL); retry later. */
+export const REGISTER_NACK_REASON_BUSY = "busy" as const;
+export const UNREGISTER_NACK_REASON_BUSY = "busy" as const;
 export const UNREGISTER_NACK_REASON_NOT_FOUND = "not_found" as const;
 export const UNREGISTER_NACK_REASON_NOT_OWNER = "not_owner" as const;
 

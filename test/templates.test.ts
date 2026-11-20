@@ -141,7 +141,7 @@ describe("agent template registry", () => {
   it("loads redis-sync multi-file sources with world-layout", () => {
     const sources = loadTemplateSources("redis-sync");
     expect(sources.map((source) => source.path).sort()).toEqual(
-      ["agent.ts", "world-layout.ts"].sort(),
+      ["agent.ts", "quantize.ts", "world-layout.ts"].sort(),
     );
     expect(
       sources.find((source) => source.path === "world-layout.ts")?.content,
@@ -160,6 +160,7 @@ describe("agent template registry", () => {
       [
         "agent.ts",
         "protocol.ts",
+        "quantize.ts",
         "redis.ts",
         "sim.ts",
         "world-layout.ts",

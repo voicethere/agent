@@ -25,7 +25,7 @@ export function installAgentIpc(): {
 
 /** Call before dynamically importing a template that `defineAgent`s at load. */
 export function silenceAgentIpc(): ReturnType<typeof installProcessSendMock> {
-  return installProcessSendMock();
+  return installProcessSendMock({ copyBinary: true });
 }
 
 export function clearAgentIpc(send: ReturnType<typeof vi.fn>): void {

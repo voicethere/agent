@@ -6,32 +6,41 @@
  * - each tracked object uses exactly 9 floats:
  *   [objectId, posX, posY, posZ, posW, dirX, dirY, dirZ, dirW]
  *
- * With project Redis (`AGENT_REDIS_URL`), the world blob is shared across runner
- * workers (key `game-sync:world`). World writes (allocate/release Lua, sim SET)
- * serialize on `game-sync:sim-lock`; one holder runs physics per tick.
+ * With project Redis (`AGENT_REDIS_URL`), the world blob (float32) is shared across
+ * runner workers (key `game-sync:world`). World writes (allocate/release Lua, sim
+ * commit) serialize on `game-sync:sim-lock`. The lock holds a random per-attempt token:
+ * it is released by compare-and-delete, and every world write is conditional on the
+ * token. The world is stored with `game-sync:sim-at` (Redis clock, ms); a step takes
+ * dt = now - sim-at and is skipped when dt is under one sim interval, so any number of
+ * pods simulate wall time once.
  *
  * Control messages:
  * - `{ type: "register" }` -> allocates (or reuses) one 9-float slot
  * - server replies `{ type: "register_ack", objectId }`
  * - `{ type: "register_nack", reason: "world_full", maxObjects: 25 }` when cap reached
+ * - `{ type: "register_nack", reason: "busy" }` / `{ type: "unregister_nack", reason: "busy" }`
+ *   when the Redis sim lock was lost twice in a row (the write was skipped; retry later)
  * - `{ type: "remove", objectId }` or `{ type: "unregister", objectId?: number }` ->
  *   zeros that live slot (objectId required for click-to-remove; omit objectId on
  *   unregister to drop the highest object owned by this session)
  * - `{ type: "unregister_ack", objectId }` or `{ type: "unregister_nack", reason }`
  *
  * Simulation:
- * - server-authoritative movement at 60Hz
+ * - server-authoritative movement at 60Hz (SIM_HZ)
  * - wall bounce + object-object elastic collisions on server
  * - clients render server snapshots; client binary writes are ignored
  * - with project Redis, the sim loop keeps running with zero connected clients so
  *   objects persist and keep moving after everyone disconnects
  *
  * Broadcast:
- * - 60Hz world-state broadcast while the sim loop runs (no-op send when 0 sessions)
+ * - 30Hz (BROADCAST_HZ, every 2nd sim tick) quantized world frame while the sim loop
+ *   runs: u8 format 2, u8 version 1, u16le objectCount, then 18 B per live object (see
+ *   world-layout.ts). Followers relay only when sim-at advanced.
  *
  * Build:
  *   npx @voicethere/agent build --entry templates/game-sync/agent.ts
  */
+import { randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
 import {
   agentLog,
@@ -46,18 +55,27 @@ import {
   parseRegisterCommand,
   parseUnregisterCommand,
   resolveRemoveTarget,
+  REGISTER_NACK_REASON_BUSY,
   REGISTER_NACK_REASON_WORLD_FULL,
+  UNREGISTER_NACK_REASON_BUSY,
   UNREGISTER_NACK_REASON_NOT_FOUND,
 } from "./protocol.js";
 import {
   LUA_ALLOCATE_OBJECT,
+  LUA_COMMIT_WORLD,
+  LUA_READ_WORLD,
+  LUA_RELEASE_LOCK,
   LUA_RELEASE_OBJECT,
   REDIS_EVAL_KEYS,
 } from "./redis.js";
 import {
   BOARD_HEIGHT,
   BOARD_WIDTH,
+  BROADCAST_HZ,
+  MAX_SPEED,
+  MIN_SPEED,
   OBJECT_RADIUS,
+  SIM_HZ,
   simulateWorldStep,
 } from "./sim.js";
 import {
@@ -65,24 +83,31 @@ import {
   collectActiveObjectIdsInto,
   countLiveObjects,
   createEmptyWorldBuffer,
+  encodeLiveObjectsInto,
   findFirstEmptySlot,
   liveWorldSnapshot,
   markSlotFree,
   normalizeWorldBuffer,
   objectIdToSlot,
+  MAX_FRAME_BYTES,
   planRedisSimTick,
+  planRedisStepDtSec,
+  REDIS_SIM_AT_KEY,
   REDIS_SIM_LOCK_KEY,
   REDIS_WORLD_KEY,
   slotToObjectId,
   writeObjectSlot,
 } from "./world-layout.js";
 
-const BROADCAST_HZ = 60;
-const BROADCAST_INTERVAL_MS = Math.floor(1000 / BROADCAST_HZ);
-const SIM_LOCK_TTL_MS = BROADCAST_INTERVAL_MS * 2;
+const SIM_INTERVAL_MS = Math.floor(1000 / SIM_HZ);
+/** Every 2nd sim tick broadcasts (60 Hz sim, 30 Hz send). */
+const BROADCAST_EVERY_N_TICKS = Math.round(SIM_HZ / BROADCAST_HZ);
+const SIM_LOCK_TTL_MS = SIM_INTERVAL_MS * 2;
 const SIM_LOCK_RETRY_MS = 5;
-const MIN_SPEED = 90;
-const MAX_SPEED = 180;
+/** Allocate/release Lua result when the lock no longer holds this pod's token. */
+const LUA_LOCK_LOST = -3;
+const LOCK_LOST = "lock_lost" as const;
+type LockLost = typeof LOCK_LOST;
 
 const connectedSessions = new Set<string>();
 /** Same members as connectedSessions; array form lets the broadcast skip Set iteration. */
@@ -102,6 +127,14 @@ let redis: Redis | null = null;
 let broadcastTimer: NodeJS.Timeout | null = null;
 let worldMutationChain: Promise<void> = Promise.resolve();
 let lastTickTimeMs = 0;
+let tickCount = 0;
+/** One broadcast scratch frame per pod; the frame sent is a subarray of it (IPC copies synchronously). */
+const frameScratch = Buffer.alloc(MAX_FRAME_BYTES);
+/** From the last Redis read: stored sim-at (0 = none) and Redis' clock, both ms. */
+let lastReadSimAt = 0;
+let lastReadNowMs = 0;
+/** sim-at of the last frame this pod broadcast; followers relay only when it advanced. */
+let lastRelayedSimAt = 0;
 
 function withWorldMutation<T>(fn: () => Promise<T>): Promise<T> {
   const run = worldMutationChain.then(fn);
@@ -118,29 +151,36 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+async function releaseSimLock(token: string): Promise<void> {
+  if (!redis) return;
+  // Compare-and-delete: a holder whose TTL lapsed never deletes the next holder's lock.
+  await redis.eval(LUA_RELEASE_LOCK, 1, REDIS_SIM_LOCK_KEY, token);
+}
+
 async function withRedisSimLock<T>(
-  fn: () => Promise<T>,
+  fn: (token: string) => Promise<T>,
   options?: { retryUntilAcquired?: boolean },
 ): Promise<T | null> {
   if (!redis) {
-    return fn();
+    return fn("");
   }
 
   const retryUntilAcquired = options?.retryUntilAcquired ?? true;
+  const token = randomUUID();
 
   while (true) {
     const lockAcquired = await redis.set(
       REDIS_SIM_LOCK_KEY,
-      "1",
+      token,
       "PX",
       SIM_LOCK_TTL_MS,
       "NX",
     );
     if (lockAcquired === "OK") {
       try {
-        return await fn();
+        return await fn(token);
       } finally {
-        await redis.del(REDIS_SIM_LOCK_KEY);
+        await releaseSimLock(token);
       }
     }
     if (!retryUntilAcquired) {
@@ -249,23 +289,30 @@ function registerObjectInMemory(sessionId: string): number | null {
 
 async function registerObjectInRedis(
   sessionId: string,
-): Promise<number | null> {
+  token: string,
+): Promise<number | null | LockLost> {
   if (!redis) {
     return registerObjectInMemory(sessionId);
   }
 
   const result = await redis.eval(
     LUA_ALLOCATE_OBJECT,
-    1,
+    2,
     REDIS_EVAL_KEYS.worldKey,
+    REDIS_EVAL_KEYS.lockKey,
     REDIS_EVAL_KEYS.worldByteLength,
     REDIS_EVAL_KEYS.slotByteLength,
     REDIS_EVAL_KEYS.maxSlots,
     randomInitialTail(),
     REDIS_EVAL_KEYS.headers,
+    token,
   );
 
   const objectId = Number(result);
+  if (objectId === LUA_LOCK_LOST) {
+    agentLog("warn", "register skipped: sim lock lost before the world write");
+    return LOCK_LOST;
+  }
   if (!Number.isFinite(objectId) || objectId < 1) {
     return null;
   }
@@ -275,27 +322,49 @@ async function registerObjectInRedis(
   return objectId;
 }
 
-async function releaseObjectInRedis(objectId: number): Promise<boolean> {
-  detachObjectFromSession(objectId);
+async function releaseObjectInRedis(
+  objectId: number,
+  token: string,
+): Promise<boolean | LockLost> {
   if (!redis) {
+    detachObjectFromSession(objectId);
     releaseObjectInMemory(objectId);
     return true;
   }
 
   const released = await redis.eval(
     LUA_RELEASE_OBJECT,
-    1,
+    2,
     REDIS_EVAL_KEYS.worldKey,
+    REDIS_EVAL_KEYS.lockKey,
     REDIS_EVAL_KEYS.worldByteLength,
     REDIS_EVAL_KEYS.slotByteLength,
     REDIS_EVAL_KEYS.maxSlots,
     String(objectId),
     REDIS_EVAL_KEYS.headers,
+    token,
   );
+  if (Number(released) === LUA_LOCK_LOST) {
+    // Nothing was written and nothing was detached: the owner stays as it was.
+    agentLog("warn", "release skipped: sim lock lost before the world write");
+    return LOCK_LOST;
+  }
+  detachObjectFromSession(objectId);
   if (Number(released) === 1) {
     await loadWorldFromRedis();
   }
   return Number(released) === 1;
+}
+
+/** Run a lock-guarded write; when the lock was lost mid-way, retry once with a new token. */
+async function withSimLockRetryOnce<T>(
+  fn: (token: string) => Promise<T | LockLost>,
+): Promise<T | LockLost> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await withRedisSimLock(fn);
+    if (result !== LOCK_LOST) return result as T;
+  }
+  return LOCK_LOST;
 }
 
 async function unregisterObject(
@@ -309,19 +378,21 @@ async function unregisterObject(
   }
 
   const previousOwner = objectOwners.get(target.objectId) ?? sessionId;
-  notifyObjectReleased(target.objectId, previousOwner);
   const released = await withWorldMutation(async () => {
     if (!redis) {
-      return releaseObjectInRedis(target.objectId);
+      return releaseObjectInRedis(target.objectId, "");
     }
-    const result = await withRedisSimLock(() =>
-      releaseObjectInRedis(target.objectId),
+    return withSimLockRetryOnce((token) =>
+      releaseObjectInRedis(target.objectId, token),
     );
-    return result === true;
   });
+  if (released === LOCK_LOST) {
+    return { ok: false, reason: UNREGISTER_NACK_REASON_BUSY };
+  }
   if (!released) {
     return { ok: false, reason: UNREGISTER_NACK_REASON_NOT_FOUND };
   }
+  notifyObjectReleased(target.objectId, previousOwner);
   return { ok: true, objectId: target.objectId };
 }
 
@@ -359,23 +430,32 @@ function notifyObjectReleased(objectId: number, ownerSessionId: string): void {
 
 function broadcastWorldBuffer(): void {
   if (connectedSessionList.length === 0) return;
-  // worldStateBytes is already a Buffer: forwarded as-is, one call, no iterator.
-  broadCastBinaryToClients(worldStateBytes, connectedSessionList, "sync");
+  // Live objects only, quantized into the pod's one scratch buffer; one fan-out call.
+  const length = encodeLiveObjectsInto(frameScratch, worldState);
+  broadCastBinaryToClients(
+    frameScratch.subarray(0, length),
+    connectedSessionList,
+    "sync",
+  );
 }
 
 /**
- * Copy the Redis blob into `worldState` in place (the GET reply is the only
- * per-tick allocation; it is a fresh socket Buffer we cannot avoid).
+ * One Lua read of the world, the stored sim-at and Redis' clock. The world is copied into
+ * `worldState` in place (the reply is the only per-tick allocation we cannot avoid); sim-at
+ * and now land in `lastReadSimAt` / `lastReadNowMs`.
  */
 async function loadWorldFromRedis(): Promise<void> {
   if (!redis) return;
-  const raw = await redis.getBuffer(REDIS_WORLD_KEY);
-  normalizeWorldBuffer(raw, worldState);
-}
-
-async function saveWorldToRedis(): Promise<void> {
-  if (!redis) return;
-  await redis.set(REDIS_WORLD_KEY, worldStateBytes);
+  const reply = (await redis.callBuffer(
+    "EVAL",
+    LUA_READ_WORLD,
+    2,
+    REDIS_WORLD_KEY,
+    REDIS_SIM_AT_KEY,
+  )) as Buffer[];
+  normalizeWorldBuffer(reply[0], worldState);
+  lastReadSimAt = reply[1]!.byteLength > 0 ? Number(reply[1]!.toString()) : 0;
+  lastReadNowMs = Number(reply[2]!.toString());
 }
 
 /** Live object ids for the current tick; filled in place, never reallocated. */
@@ -392,48 +472,73 @@ function takeTickDtSec(): number {
   const now = Date.now();
   const dt = clampSimulationDtSec(
     lastTickTimeMs === 0 ? 0 : now - lastTickTimeMs,
-    BROADCAST_HZ,
+    SIM_HZ,
   );
   lastTickTimeMs = now;
   return dt;
 }
 
-function stepWorldInPlace(): void {
-  const dt = takeTickDtSec();
+function stepWorldInPlace(dtSec: number): void {
   const count = collectActiveObjectIdsInto(worldState, activeObjectIds);
-  simulateWorldStep(worldState, dt, activeObjectIds, count);
+  simulateWorldStep(worldState, dtSec, activeObjectIds, count);
 }
 
 async function stepWorldInMemory(): Promise<void> {
-  stepWorldInPlace();
+  stepWorldInPlace(takeTickDtSec());
 }
 
-async function stepWorldWithRedis(): Promise<boolean> {
+type StepOutcome = "stepped" | "skipped" | "lost";
+
+/**
+ * Leader step under the sim lock: dt comes from the stored sim-at (Redis clock). Below one
+ * sim interval another pod already stepped this interval, so skip. The commit writes the
+ * world and sim-at together only while the lock still holds `token`.
+ */
+async function stepWorldWithRedis(token: string): Promise<StepOutcome> {
+  if (!redis) return "lost";
   await loadWorldFromRedis();
-  stepWorldInPlace();
-  await saveWorldToRedis();
-  broadcastWorldBuffer();
-  return true;
+  const now = lastReadNowMs;
+  const dt = planRedisStepDtSec(lastReadSimAt, now);
+  if (dt === null) return "skipped";
+  stepWorldInPlace(dt);
+  const written = await redis.eval(
+    LUA_COMMIT_WORLD,
+    3,
+    REDIS_SIM_LOCK_KEY,
+    REDIS_WORLD_KEY,
+    REDIS_SIM_AT_KEY,
+    token,
+    worldStateBytes,
+    String(now),
+  );
+  if (Number(written) !== 1) return "lost";
+  lastReadSimAt = now;
+  return "stepped";
 }
 
 async function runRedisTick(): Promise<void> {
-  const lockResult = await withRedisSimLock(
-    stepWorldWithRedis,
-    SIM_LOCK_TRY_ONCE,
-  );
-  if (lockResult !== null) return;
-  takeTickDtSec();
-  if (planRedisSimTick(SIM_TICK_PLAN_INPUT) === "relay") {
+  tickCount += 1;
+  const broadcastDue = tickCount % BROADCAST_EVERY_N_TICKS === 0;
+  const outcome = await withRedisSimLock(stepWorldWithRedis, SIM_LOCK_TRY_ONCE);
+  if (outcome === "lost") return;
+  if (outcome === null) {
+    if (!broadcastDue) return;
+    if (planRedisSimTick(SIM_TICK_PLAN_INPUT) !== "relay") return;
     await loadWorldFromRedis();
-    broadcastWorldBuffer();
   }
+  if (!broadcastDue || connectedSessionList.length === 0) return;
+  // Relay only when sim-at advanced since this pod's last frame.
+  if (lastReadSimAt <= lastRelayedSimAt) return;
+  lastRelayedSimAt = lastReadSimAt;
+  broadcastWorldBuffer();
 }
 
 // Tick bodies are module-level functions (no per-tick closures or option objects).
 async function runSimulationTick(): Promise<void> {
   if (!redis) {
+    tickCount += 1;
     await withWorldMutation(stepWorldInMemory);
-    broadcastWorldBuffer();
+    if (tickCount % BROADCAST_EVERY_N_TICKS === 0) broadcastWorldBuffer();
     return;
   }
   await withWorldMutation(runRedisTick);
@@ -459,8 +564,11 @@ function startBroadcastLoopIfNeeded(): void {
   if (broadcastTimer) return;
   if (!redis && connectedSessions.size < 1) return;
 
-  broadcastTimer = setInterval(onBroadcastTick, BROADCAST_INTERVAL_MS);
-  agentLog("info", `world loop started (${BROADCAST_HZ}Hz)`);
+  broadcastTimer = setInterval(onBroadcastTick, SIM_INTERVAL_MS);
+  agentLog(
+    "info",
+    `world loop started (sim ${SIM_HZ}Hz, broadcast ${BROADCAST_HZ}Hz)`,
+  );
 }
 
 function stopBroadcastLoopIfNeeded(): void {
@@ -542,11 +650,18 @@ defineAgent({
         if (!redis) {
           return registerObjectInMemory(ctx.sessionId);
         }
-        const result = await withRedisSimLock(() =>
-          registerObjectInRedis(ctx.sessionId),
+        return withSimLockRetryOnce((token) =>
+          registerObjectInRedis(ctx.sessionId, token),
         );
-        return result;
       });
+      if (objectId === LOCK_LOST) {
+        sendToClient(ctx.sessionId, {
+          type: "register_nack",
+          reason: REGISTER_NACK_REASON_BUSY,
+        });
+        agentLog("info", `register_nack busy session=${ctx.sessionId}`);
+        return;
+      }
       if (objectId === null) {
         sendToClient(ctx.sessionId, {
           type: "register_nack",

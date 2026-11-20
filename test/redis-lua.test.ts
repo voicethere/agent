@@ -3,6 +3,9 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import {
   LUA_ALLOCATE_OBJECT,
+  LUA_COMMIT_WORLD,
+  LUA_READ_WORLD,
+  LUA_RELEASE_LOCK,
   LUA_RELEASE_OBJECT,
   OBJECT_ID_HEADERS_BLOB,
 } from "../templates/game-sync/redis.js";
@@ -15,15 +18,11 @@ import {
   WORLD_BYTE_LENGTH,
 } from "../templates/game-sync/world-layout.js";
 import {
-  LUA_PATCH_PEER_SLOT,
+  encodeSlotInto,
   normalizeWorldBuffer as normalizeRedisSyncWorld,
-  peerSlotOffset,
-  PEER_FIELD_ACTIVE,
-  PEER_FIELD_INDEX,
-  PEER_FIELD_X,
-  PEER_FIELD_Y,
-  PEER_SLOT_BYTE_LENGTH,
   readPeerSlot,
+  slotOffset,
+  SLOT_BYTES,
   WORLD_BYTE_LENGTH as REDIS_SYNC_WORLD_BYTE_LENGTH,
 } from "../templates/redis-sync/world-layout.js";
 import { silenceAgentIpc } from "./helpers/agent-ipc.js";
@@ -48,31 +47,34 @@ function objectTail(posX: number, posY: number): Buffer {
   return Buffer.from(tail.buffer, tail.byteOffset, tail.byteLength);
 }
 
-function peerSlot(
-  clientIndex: number,
-  x: number,
-  y: number,
-  active: number,
-): Buffer {
-  const slot = new Float32Array([clientIndex, x, y, active]);
-  return Buffer.from(slot.buffer, slot.byteOffset, slot.byteLength);
+const LOCK_TOKEN = "test-token";
+
+/** The scripts only write while the lock key holds the caller's token. */
+async function takeLock(key: string, token = LOCK_TOKEN): Promise<string> {
+  skipWithoutRedis();
+  const lockKey = `${key}:lock`;
+  await harness!.redis.set(lockKey, token, "PX", 60_000);
+  return lockKey;
 }
 
 async function allocate(
   key: string,
   posX: number,
   posY: number,
+  token = LOCK_TOKEN,
 ): Promise<number> {
   skipWithoutRedis();
   const result = await harness!.redis.eval(
     LUA_ALLOCATE_OBJECT,
-    1,
+    2,
     key,
+    `${key}:lock`,
     String(WORLD_BYTE_LENGTH),
     String(OBJECT_SLOT_BYTE_LENGTH),
     String(MAX_LIVE_OBJECTS),
     objectTail(posX, posY),
     OBJECT_ID_HEADERS_BLOB,
+    token,
   );
   return Number(result);
 }
@@ -85,6 +87,7 @@ describe.skipIf(!harness)("world Lua against real Redis", () => {
   it("allocates distinct slots under concurrent EVAL", async () => {
     skipWithoutRedis();
     const key = `test:game-sync:${randomUUID()}`;
+    await takeLock(key);
     const [first, second] = await Promise.all([
       allocate(key, 40, 50),
       allocate(key, 60, 70),
@@ -103,6 +106,7 @@ describe.skipIf(!harness)("world Lua against real Redis", () => {
   it("returns -1 once MAX_LIVE_OBJECTS are live and recycles after release", async () => {
     skipWithoutRedis();
     const key = `test:game-sync:${randomUUID()}`;
+    await takeLock(key);
     const ids: number[] = [];
     for (let i = 0; i < MAX_LIVE_OBJECTS; i += 1) {
       ids.push(await allocate(key, 10, 10));
@@ -114,61 +118,149 @@ describe.skipIf(!harness)("world Lua against real Redis", () => {
     const released = Number(
       await harness!.redis.eval(
         LUA_RELEASE_OBJECT,
-        1,
+        2,
         key,
+        `${key}:lock`,
         String(WORLD_BYTE_LENGTH),
         String(OBJECT_SLOT_BYTE_LENGTH),
         String(MAX_LIVE_OBJECTS),
         String(ids[0]),
         OBJECT_ID_HEADERS_BLOB,
+        LOCK_TOKEN,
       ),
     );
     expect(released).toBe(1);
     expect(await allocate(key, 80, 90)).toBe(ids[0]);
   });
 
-  it("patches two redis-sync peer slots concurrently without clobber", async () => {
+  it("allocate and release write nothing when the lock holds another token", async () => {
+    skipWithoutRedis();
+    const key = `test:game-sync:${randomUUID()}`;
+    await takeLock(key, "someone-else");
+    expect(await allocate(key, 40, 50)).toBe(-3);
+    expect(await harness!.redis.exists(key)).toBe(0);
+
+    await takeLock(key);
+    const id = await allocate(key, 40, 50);
+    expect(id).toBeGreaterThan(0);
+    await takeLock(key, "someone-else");
+    const before = await harness!.redis.getBuffer(key);
+    const released = Number(
+      await harness!.redis.eval(
+        LUA_RELEASE_OBJECT,
+        2,
+        key,
+        `${key}:lock`,
+        String(WORLD_BYTE_LENGTH),
+        String(OBJECT_SLOT_BYTE_LENGTH),
+        String(MAX_LIVE_OBJECTS),
+        String(id),
+        OBJECT_ID_HEADERS_BLOB,
+        LOCK_TOKEN,
+      ),
+    );
+    expect(released).toBe(-3);
+    expect(await harness!.redis.getBuffer(key)).toEqual(before);
+  });
+
+  it("release-lock deletes only the holder's own token", async () => {
+    skipWithoutRedis();
+    const lockKey = `test:game-sync:${randomUUID()}:lock`;
+    await harness!.redis.set(lockKey, "holder-b", "PX", 60_000);
+    expect(
+      Number(
+        await harness!.redis.eval(LUA_RELEASE_LOCK, 1, lockKey, "holder-a"),
+      ),
+    ).toBe(0);
+    expect(await harness!.redis.get(lockKey)).toBe("holder-b");
+    expect(
+      Number(
+        await harness!.redis.eval(LUA_RELEASE_LOCK, 1, lockKey, "holder-b"),
+      ),
+    ).toBe(1);
+    expect(await harness!.redis.get(lockKey)).toBeNull();
+  });
+
+  it("commit writes world and sim-at together only while the token holds the lock", async () => {
+    skipWithoutRedis();
+    const base = `test:game-sync:${randomUUID()}`;
+    const [lockKey, worldKey, simAtKey] = [`${base}:lock`, base, `${base}:at`];
+    const commit = async (token: string, bytes: string, at: string) =>
+      Number(
+        await harness!.redis.eval(
+          LUA_COMMIT_WORLD,
+          3,
+          lockKey,
+          worldKey,
+          simAtKey,
+          token,
+          bytes,
+          at,
+        ),
+      );
+    await harness!.redis.set(lockKey, "holder-b", "PX", 60_000);
+    expect(await commit("holder-a", "stale", "1")).toBe(0);
+    expect(await harness!.redis.exists(worldKey, simAtKey)).toBe(0);
+
+    expect(await commit("holder-b", "fresh", "2")).toBe(1);
+    expect(await harness!.redis.get(worldKey)).toBe("fresh");
+    expect(await harness!.redis.get(simAtKey)).toBe("2");
+  });
+
+  it("read returns the world, the stored sim-at and Redis' own clock", async () => {
+    skipWithoutRedis();
+    const base = `test:game-sync:${randomUUID()}`;
+    const read = async () =>
+      (await harness!.redis.callBuffer(
+        "EVAL",
+        LUA_READ_WORLD,
+        2,
+        base,
+        `${base}:at`,
+      )) as Buffer[];
+    const empty = await read();
+    expect(empty[0]!.byteLength).toBe(0);
+    expect(empty[1]!.byteLength).toBe(0);
+    await harness!.redis.set(base, Buffer.from([0, 255, 7]));
+    await harness!.redis.set(`${base}:at`, "12345");
+    const [world, simAt, now] = await read();
+    expect([...world!]).toEqual([0, 255, 7]);
+    expect(simAt!.toString()).toBe("12345");
+    // Epoch milliseconds from Redis TIME, as a plain integer string.
+    expect(now!.toString()).toMatch(/^1\d{12}$/);
+  });
+
+  it("SETRANGE writes two redis-sync peer slots concurrently without clobber", async () => {
     skipWithoutRedis();
     const key = `test:redis-sync:${randomUUID()}`;
-    await Promise.all([
-      harness!.redis.eval(
-        LUA_PATCH_PEER_SLOT,
-        1,
-        key,
-        String(peerSlotOffset(0) * 4),
-        peerSlot(0, 1.5, 2.5, 1),
-        String(REDIS_SYNC_WORLD_BYTE_LENGTH),
+    await Promise.all(
+      [
+        [0, 1.5, 2.5],
+        [3, 7, 8],
+      ].map(([index, x, y]) =>
+        harness!.redis.setrange(
+          key,
+          slotOffset(index!),
+          Buffer.from(
+            encodeSlotInto(new Uint8Array(SLOT_BYTES), index!, x!, y!, 1),
+          ),
+        ),
       ),
-      harness!.redis.eval(
-        LUA_PATCH_PEER_SLOT,
-        1,
-        key,
-        String(peerSlotOffset(3) * 4),
-        peerSlot(3, 7, 8, 1),
-        String(REDIS_SYNC_WORLD_BYTE_LENGTH),
-      ),
-    ]);
+    );
 
     const raw = await harness!.redis.getBuffer(key);
-    expect(raw?.byteLength).toBe(REDIS_SYNC_WORLD_BYTE_LENGTH);
-    expect(raw?.byteLength).toBeGreaterThanOrEqual(PEER_SLOT_BYTE_LENGTH);
-    const world = normalizeRedisSyncWorld(raw);
-    expect(readPeerSlot(world, 0)).toEqual({
-      clientIndex: 0,
-      x: 1.5,
-      y: 2.5,
-      active: 1,
-    });
-    expect(readPeerSlot(world, 3)).toEqual({
-      clientIndex: 3,
-      x: 7,
-      y: 8,
-      active: 1,
-    });
-    expect(world[PEER_FIELD_INDEX]).toBe(0);
-    expect(world[PEER_FIELD_X]).toBe(1.5);
-    expect(world[PEER_FIELD_Y]).toBe(2.5);
-    expect(world[PEER_FIELD_ACTIVE]).toBe(1);
+    // SETRANGE pads with zeros up to the last slot written; the pod zero-pads the rest.
+    expect(raw?.byteLength).toBe(4 * SLOT_BYTES);
+    const world = normalizeRedisSyncWorld(
+      raw,
+      new Uint8Array(REDIS_SYNC_WORLD_BYTE_LENGTH),
+    );
+    expect(readPeerSlot(world, 0)?.x).toBeCloseTo(1.5, 1);
+    expect(readPeerSlot(world, 0)?.y).toBeCloseTo(2.5, 1);
+    expect(readPeerSlot(world, 3)?.x).toBeCloseTo(7, 1);
+    expect(readPeerSlot(world, 3)?.y).toBeCloseTo(8, 1);
+    expect(readPeerSlot(world, 1)).toBeNull();
+    await harness!.redis.del(key);
   });
 
   it("increments the webhooks-redis counter atomically", async () => {
@@ -179,8 +271,8 @@ describe.skipIf(!harness)("world Lua against real Redis", () => {
         harness!.redis.eval(LUA_INCREMENT_COUNTER, 1, key),
       ),
     );
-    expect(
-      counts.map((n) => Number(n)).sort((a, b) => a - b),
-    ).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(counts.map((n) => Number(n)).sort((a, b) => a - b)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8,
+    ]);
   });
 });

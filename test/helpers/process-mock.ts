@@ -36,13 +36,25 @@ export function installProcessMessageCapture(): {
   };
 }
 
-export function installProcessSendMock(): {
+export function installProcessSendMock(
+  options: { copyBinary?: boolean } = {},
+): {
   send: ReturnType<typeof vi.fn>;
   restore: () => void;
 } {
   const send = vi.fn();
   const original = process.send;
-  process.send = send as typeof process.send;
+  // copyBinary: advanced IPC serialization copies binary payloads inside process.send
+  // (test/binary-send-copy.test.ts), so agents may reuse one scratch buffer. Record the
+  // same copy, not the caller's live buffer. Off by default: runtime tests assert identity.
+  process.send = ((message: unknown, ...rest: unknown[]) => {
+    const data = (message as { data?: unknown } | null)?.data;
+    const recorded =
+      options.copyBinary && Buffer.isBuffer(data)
+        ? { ...(message as object), data: Buffer.from(data) }
+        : message;
+    return send(recorded, ...rest);
+  }) as typeof process.send;
 
   return {
     send,

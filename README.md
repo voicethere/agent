@@ -682,7 +682,7 @@ The runtime processes parent IPC **in order per `sessionId`** while different se
 
 For isolated voice agents (default), leave **`shared_child_per_session`** disabled — each session gets its own child process.
 
-See [`templates/game-sync/agent.ts`](./templates/game-sync/agent.ts) for a data-only authoritative server example (60Hz server-side movement + collisions, client render-only). Start simpler with [`templates/world-sync`](./templates/world-sync) (JSON) or [`templates/world-sync-binary`](./templates/world-sync-binary) (`ArrayBuffer` poses).
+See [`templates/game-sync/agent.ts`](./templates/game-sync/agent.ts) for a data-only authoritative server example (60Hz server-side movement + collisions, 30Hz quantized snapshots, client render-only). Start simpler with [`templates/world-sync`](./templates/world-sync) (JSON) or [`templates/world-sync-binary`](./templates/world-sync-binary) (`ArrayBuffer` poses).
 
 ### Game servers + parent/child IPC payload size guidance
 

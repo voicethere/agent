@@ -124,13 +124,14 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     summary: "Authoritative multi-object sync sample for real-time games.",
     category: "data",
     description:
-      "Authoritative multi-object sync with binary world snapshots; uses Redis when AGENT_REDIS_URL is set.",
+      "Authoritative multi-object sync: 60 Hz sim, 30 Hz quantized int16 binary frames (live objects only); uses Redis when AGENT_REDIS_URL is set.",
     sourceFiles: [
       "game-sync/agent.ts",
       "game-sync/protocol.ts",
       "game-sync/world-layout.ts",
       "game-sync/sim.ts",
       "game-sync/redis.ts",
+      "game-sync/quantize.ts",
     ],
     npmDependencies: { ioredis: "^5.11.1" },
   },
@@ -529,8 +530,12 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     summary: "Redis-backed world buffer sync for redis-sync-smoke.",
     category: "debug",
     description:
-      "Redis-backed world buffer sync for redis-sync-smoke — binary 12-byte position frames + project Redis.",
-    sourceFiles: ["redis-sync/agent.ts", "redis-sync/world-layout.ts"],
+      "Redis-backed world sync for redis-sync-smoke — 12-byte position frames in, quantized delta and keyframe frames out, project Redis SETRANGE.",
+    sourceFiles: [
+      "redis-sync/agent.ts",
+      "redis-sync/world-layout.ts",
+      "redis-sync/quantize.ts",
+    ],
     npmDependencies: { ioredis: "^5.11.1" },
   },
   {

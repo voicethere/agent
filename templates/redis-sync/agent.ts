@@ -1,15 +1,18 @@
 /**
- * Redis-backed world buffer sync for redis-sync-smoke (Advanced tier + project Redis).
+ * Redis-backed world sync for redis-sync-smoke (Advanced tier + project Redis).
  *
- * Game-style layout: one Float32Array world blob in Redis (`e2e:redis-sync:world`).
- * Each client owns a fixed slot and publishes a 12-byte `ArrayBuffer`
- * `Float32Array([clientIndex, x, y])` on the sync DataChannel. Each runner pod
- * runs its own broadcast loop: one Redis GET per tick, then binary fan-out on
- * voicethere-sync to all local sessions (no pub/sub). Clients patch out of sync;
- * the 20Hz server tick is the authoritative sync path.
+ * The world is a 128-slot x 6 B blob in Redis (`e2e:redis-sync:world:v2`, layout in
+ * `world-layout.ts`). Each client owns a fixed slot and publishes a 12-byte `ArrayBuffer`
+ * `Float32Array([clientIndex, x, y])` on the sync DataChannel. The agent quantizes the pose
+ * once and writes only that slot with `SETRANGE` (atomic, no read-modify-write).
  *
- * Slot writes use a Lua read-modify-write so concurrent patches from many sessions
- * cannot clobber each other (WATCH/MULTI lost slots under 30-way connect storms).
+ * Each runner pod runs a 20Hz loop: one Redis GET, a diff against the world it last
+ * broadcast, and one delta frame (changed slots only) to all local sessions; an empty delta is
+ * not sent. A joining session gets a keyframe built from the same last-broadcast world, and
+ * every session gets a keyframe every KEYFRAME_INTERVAL_MS as a safety net.
+ *
+ * Buffers are allocated once per pod: two 768 B worlds swapped by reference and one frame
+ * scratch buffer (the send path copies synchronously, see test/binary-send-copy.test.ts).
  *
  * Build:
  *   npx @voicethere/agent build --entry templates/redis-sync/agent.ts --outfile dist/agent.js
@@ -25,55 +28,47 @@ import {
 import {
   createEmptyWorldBuffer,
   decodePositionBuffer,
+  encodeDeltaInto,
+  encodeKeyframeInto,
+  encodeSlotInto,
+  MAX_FRAME_BYTES,
   normalizeWorldBuffer,
-  peerSlotOffset,
-  PEER_SLOT_BYTE_LENGTH,
-  PEER_STRIDE,
   REDIS_WORLD_KEY,
-  WORLD_BYTE_LENGTH,
+  slotOffset,
+  SLOT_BYTES,
   writePeerSlot,
-  LUA_PATCH_PEER_SLOT,
 } from "./world-layout.js";
 
 const WORLD_BROADCAST_HZ = 20;
 const WORLD_BROADCAST_INTERVAL_MS = Math.floor(1000 / WORLD_BROADCAST_HZ);
+export const KEYFRAME_INTERVAL_MS = 1000;
+const KEYFRAME_EVERY_TICKS = Math.round(
+  KEYFRAME_INTERVAL_MS / WORLD_BROADCAST_INTERVAL_MS,
+);
 
 const connectedSessions = new Set<string>();
 /** Same members as connectedSessions; array form for the per-tick broadcast. */
 const connectedSessionList: string[] = [];
 const sessionClientIndex = new Map<string, number>();
-/** The one world buffer: Redis GETs copy into it, every broadcast sends this view. */
-const localWorld = createEmptyWorldBuffer();
-const localWorldBytes = Buffer.from(
-  localWorld.buffer,
-  localWorld.byteOffset,
-  localWorld.byteLength,
-);
+/** `world` is filled by the Redis GET (or memory-mode writes); `lastSent` is what was broadcast. */
+let world = createEmptyWorldBuffer();
+let lastSent = createEmptyWorldBuffer();
+/** One frame scratch buffer; the frame sent is a subarray of it. */
+const frameScratch = Buffer.allocUnsafe(MAX_FRAME_BYTES);
+const slotScratch = Buffer.allocUnsafe(SLOT_BYTES);
 let redis: Redis | null = null;
 let broadcastTimer: NodeJS.Timeout | null = null;
+let tickCount = 0;
+let tickInFlight = false;
+let droppedPoses = 0;
 
-const PEER_SLOT = new Float32Array(PEER_STRIDE);
-const PEER_SLOT_BUF = Buffer.from(
-  PEER_SLOT.buffer,
-  PEER_SLOT.byteOffset,
-  PEER_SLOT.byteLength,
-);
-
-function encodePeerSlot(
-  clientIndex: number,
-  x: number,
-  y: number,
-  active: number,
-): Buffer {
-  PEER_SLOT[0] = clientIndex;
-  PEER_SLOT[1] = x;
-  PEER_SLOT[2] = y;
-  PEER_SLOT[3] = active;
-  return PEER_SLOT_BUF;
+/** Number of inbound poses dropped as invalid (non-finite or out-of-range index). */
+export function getDroppedPoseCount(): number {
+  return droppedPoses;
 }
 
-function broadcastWorldBuffer(targetSessionId?: string): void {
-  const payload = localWorldBytes;
+function sendFrame(length: number, targetSessionId?: string): void {
+  const payload = frameScratch.subarray(0, length);
   if (targetSessionId) {
     try {
       sendBinaryToClient(targetSessionId, payload, "sync");
@@ -88,7 +83,6 @@ function broadcastWorldBuffer(targetSessionId?: string): void {
   }
   if (connectedSessionList.length === 0) return;
   try {
-    // payload is already a Buffer: forwarded as-is, one call, no Set iterator.
     broadCastBinaryToClients(payload, connectedSessionList, "sync");
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -96,18 +90,35 @@ function broadcastWorldBuffer(targetSessionId?: string): void {
   }
 }
 
-/** Copy the Redis blob into `localWorld` in place; the GET reply is the only allocation. */
+/** Remember what this tick broadcast: swap with Redis, copy in memory mode (world is the state). */
+function commitLastSent(): void {
+  if (redis) {
+    const previous = lastSent;
+    lastSent = world;
+    world = previous;
+    return;
+  }
+  lastSent.set(world);
+}
+
+/** Copy the Redis blob into `world` in place; the GET reply is the only allocation. */
 async function loadWorldFromRedis(): Promise<void> {
   if (!redis) return;
   const raw = await redis.getBuffer(REDIS_WORLD_KEY);
-  normalizeWorldBuffer(raw, localWorld);
+  normalizeWorldBuffer(raw, world);
 }
 
-async function broadcastWorldFromRedis(
-  targetSessionId?: string,
-): Promise<void> {
+async function broadcastTick(): Promise<void> {
   await loadWorldFromRedis();
-  broadcastWorldBuffer(targetSessionId);
+  if (connectedSessionList.length === 0) return;
+  tickCount += 1;
+  if (tickCount % KEYFRAME_EVERY_TICKS === 0) {
+    sendFrame(encodeKeyframeInto(frameScratch, world));
+  } else {
+    const length = encodeDeltaInto(frameScratch, world, lastSent);
+    if (length > 0) sendFrame(length);
+  }
+  commitLastSent();
 }
 
 function logBroadcastError(error: unknown): void {
@@ -116,7 +127,13 @@ function logBroadcastError(error: unknown): void {
 }
 
 function onBroadcastTick(): void {
-  void broadcastWorldFromRedis().catch(logBroadcastError);
+  if (tickInFlight) return;
+  tickInFlight = true;
+  void broadcastTick()
+    .catch(logBroadcastError)
+    .finally(() => {
+      tickInFlight = false;
+    });
 }
 
 function startBroadcastLoopIfNeeded(): void {
@@ -143,24 +160,14 @@ async function patchWorldSlot(
   active: number,
 ): Promise<void> {
   if (!redis) {
-    writePeerSlot(localWorld, clientIndex, x, y, active);
+    writePeerSlot(world, clientIndex, x, y, active);
     return;
   }
-
-  const byteOffset = peerSlotOffset(clientIndex) * 4;
-  const slot = encodePeerSlot(clientIndex, x, y, active);
-  if (slot.byteLength !== PEER_SLOT_BYTE_LENGTH) {
-    throw new Error(
-      `peer slot encode length ${slot.byteLength} != ${PEER_SLOT_BYTE_LENGTH}`,
-    );
-  }
-  await redis.eval(
-    LUA_PATCH_PEER_SLOT,
-    1,
+  const slot = encodeSlotInto(slotScratch, clientIndex, x, y, active);
+  await redis.setrange(
     REDIS_WORLD_KEY,
-    String(byteOffset),
-    slot,
-    String(WORLD_BYTE_LENGTH),
+    slotOffset(clientIndex),
+    slot as Buffer,
   );
 }
 
@@ -192,7 +199,8 @@ defineAgent({
       connectedSessionList.push(sessionId);
     }
     startBroadcastLoopIfNeeded();
-    await broadcastWorldFromRedis(sessionId);
+    // Keyframe from the last-broadcast world: the same baseline the next shared delta applies to.
+    sendFrame(encodeKeyframeInto(frameScratch, lastSent), sessionId);
   },
 
   async onClientLeave({ sessionId }) {
@@ -219,6 +227,10 @@ defineAgent({
   async onDataChannelBinary(ctx) {
     const position = decodePositionBuffer(ctx.rawBinary);
     if (!position) {
+      if (ctx.rawBinary && ctx.rawBinary.byteLength >= 12) {
+        droppedPoses += 1;
+        agentLog("warn", `dropped invalid pose (total ${droppedPoses})`);
+      }
       return;
     }
     sessionClientIndex.set(ctx.sessionId, position.clientIndex);

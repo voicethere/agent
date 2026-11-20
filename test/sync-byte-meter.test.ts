@@ -60,7 +60,9 @@ describe("sync template byte meter (baseline)", () => {
     const summary = summarizeMeter(WINDOW_MS);
     report("redis-sync 30 peers", summary);
     expect(summary.sessions).toBe(30);
-    expect(summary.frameBytes).toEqual([2048]);
+    // 30 new slots: one 4 + 30 x 6 B delta on the first tick, one keyframe of the same size on tick 20.
+    expect(summary.frameBytes).toEqual([184]);
+    expect(summary.frames).toBe(2 * 30);
     for (let i = 0; i < 30; i += 1) {
       await pod.onClientLeave?.({ sessionId: `rs-${i}` } as never);
     }

@@ -1,0 +1,175 @@
+{
+  "description": "Encoded sync frames and their expected decode. Identical copy lives in platform (src/lib/showcase/quantized-frames.vectors.json); each side's tests decode every frame to the listed slots. Regenerate only with the agent codec, then copy.",
+  "source": "agent/templates/redis-sync/quantized-frames.vectors.json",
+  "board": {
+    "min": -1024,
+    "max": 1024
+  },
+  "redisSync": {
+    "frameHeader": "u8 kind (1 keyframe, 2 delta) u8 version (1) u16le slotCount; slot = u8 clientIndex u8 active i16le x i16le y",
+    "frames": [
+      {
+        "name": "keyframe-empty",
+        "hex": "01010000",
+        "kind": "keyframe",
+        "version": 1,
+        "slots": []
+      },
+      {
+        "name": "keyframe-three-slots",
+        "hex": "0101030000010000000003019001a0ff7f01ff7f0180",
+        "kind": "keyframe",
+        "version": 1,
+        "slots": [
+          {
+            "clientIndex": 0,
+            "active": 1,
+            "qx": 0,
+            "qy": 0
+          },
+          {
+            "clientIndex": 3,
+            "active": 1,
+            "qx": 400,
+            "qy": -96
+          },
+          {
+            "clientIndex": 127,
+            "active": 1,
+            "qx": 32767,
+            "qy": -32767
+          }
+        ]
+      },
+      {
+        "name": "delta-all-new",
+        "hex": "0201030000010000000003019001a0ff7f01ff7f0180",
+        "kind": "delta",
+        "version": 1,
+        "slots": [
+          {
+            "clientIndex": 0,
+            "active": 1,
+            "qx": 0,
+            "qy": 0
+          },
+          {
+            "clientIndex": 3,
+            "active": 1,
+            "qx": 400,
+            "qy": -96
+          },
+          {
+            "clientIndex": 127,
+            "active": 1,
+            "qx": 32767,
+            "qy": -32767
+          }
+        ]
+      },
+      {
+        "name": "delta-one-mover",
+        "hex": "020101000301880c7f57",
+        "kind": "delta",
+        "version": 1,
+        "slots": [
+          {
+            "clientIndex": 3,
+            "active": 1,
+            "qx": 3208,
+            "qy": 22399
+          }
+        ]
+      },
+      {
+        "name": "delta-leave",
+        "hex": "02010100000000000000",
+        "kind": "delta",
+        "version": 1,
+        "slots": [
+          {
+            "clientIndex": 0,
+            "active": 0,
+            "qx": 0,
+            "qy": 0
+          }
+        ]
+      }
+    ]
+  },
+  "gameSync": {
+    "note": "chunk 3 (game-sync quantized frames) adds frames here",
+    "frames": []
+  },
+  "quantizer": {
+    "range": "quantize(v, min, max): clamp, round((v-min)/(max-min)*65534)-32767; unit: round(clamp(v,-1,1)*32767)",
+    "board": [
+      {
+        "value": -1024,
+        "q": -32767
+      },
+      {
+        "value": -512,
+        "q": -16383
+      },
+      {
+        "value": -0.015,
+        "q": 0
+      },
+      {
+        "value": 0,
+        "q": 0
+      },
+      {
+        "value": 0.015,
+        "q": 0
+      },
+      {
+        "value": 12.5,
+        "q": 400
+      },
+      {
+        "value": 700,
+        "q": 22399
+      },
+      {
+        "value": 1024,
+        "q": 32767
+      },
+      {
+        "value": 5000,
+        "q": 32767
+      },
+      {
+        "value": -5000,
+        "q": -32767
+      }
+    ],
+    "unit": [
+      {
+        "value": -1,
+        "q": -32767
+      },
+      {
+        "value": -0.5,
+        "q": -16383
+      },
+      {
+        "value": 0,
+        "q": 0
+      },
+      {
+        "value": 0.25,
+        "q": 8192
+      },
+      {
+        "value": 1,
+        "q": 32767
+      },
+      {
+        "value": 2,
+        "q": 32767
+      }
+    ]
+  }
+}

@@ -529,8 +529,12 @@ export const AGENT_TEMPLATES: readonly AgentTemplateDefinition[] = [
     summary: "Redis-backed world buffer sync for redis-sync-smoke.",
     category: "debug",
     description:
-      "Redis-backed world buffer sync for redis-sync-smoke — binary 12-byte position frames + project Redis.",
-    sourceFiles: ["redis-sync/agent.ts", "redis-sync/world-layout.ts"],
+      "Redis-backed world sync for redis-sync-smoke — 12-byte position frames in, quantized delta and keyframe frames out, project Redis SETRANGE.",
+    sourceFiles: [
+      "redis-sync/agent.ts",
+      "redis-sync/world-layout.ts",
+      "redis-sync/quantize.ts",
+    ],
     npmDependencies: { ioredis: "^5.11.1" },
   },
   {

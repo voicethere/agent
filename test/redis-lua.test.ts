@@ -15,15 +15,11 @@ import {
   WORLD_BYTE_LENGTH,
 } from "../templates/game-sync/world-layout.js";
 import {
-  LUA_PATCH_PEER_SLOT,
+  encodeSlotInto,
   normalizeWorldBuffer as normalizeRedisSyncWorld,
-  peerSlotOffset,
-  PEER_FIELD_ACTIVE,
-  PEER_FIELD_INDEX,
-  PEER_FIELD_X,
-  PEER_FIELD_Y,
-  PEER_SLOT_BYTE_LENGTH,
   readPeerSlot,
+  slotOffset,
+  SLOT_BYTES,
   WORLD_BYTE_LENGTH as REDIS_SYNC_WORLD_BYTE_LENGTH,
 } from "../templates/redis-sync/world-layout.js";
 import { silenceAgentIpc } from "./helpers/agent-ipc.js";
@@ -46,16 +42,6 @@ function skipWithoutRedis(): void {
 function objectTail(posX: number, posY: number): Buffer {
   const tail = new Float32Array([posX, posY, 0, 1, 10, 20, 0, 0]);
   return Buffer.from(tail.buffer, tail.byteOffset, tail.byteLength);
-}
-
-function peerSlot(
-  clientIndex: number,
-  x: number,
-  y: number,
-  active: number,
-): Buffer {
-  const slot = new Float32Array([clientIndex, x, y, active]);
-  return Buffer.from(slot.buffer, slot.byteOffset, slot.byteLength);
 }
 
 async function allocate(
@@ -127,48 +113,37 @@ describe.skipIf(!harness)("world Lua against real Redis", () => {
     expect(await allocate(key, 80, 90)).toBe(ids[0]);
   });
 
-  it("patches two redis-sync peer slots concurrently without clobber", async () => {
+  it("SETRANGE writes two redis-sync peer slots concurrently without clobber", async () => {
     skipWithoutRedis();
     const key = `test:redis-sync:${randomUUID()}`;
-    await Promise.all([
-      harness!.redis.eval(
-        LUA_PATCH_PEER_SLOT,
-        1,
-        key,
-        String(peerSlotOffset(0) * 4),
-        peerSlot(0, 1.5, 2.5, 1),
-        String(REDIS_SYNC_WORLD_BYTE_LENGTH),
+    await Promise.all(
+      [
+        [0, 1.5, 2.5],
+        [3, 7, 8],
+      ].map(([index, x, y]) =>
+        harness!.redis.setrange(
+          key,
+          slotOffset(index!),
+          Buffer.from(
+            encodeSlotInto(new Uint8Array(SLOT_BYTES), index!, x!, y!, 1),
+          ),
+        ),
       ),
-      harness!.redis.eval(
-        LUA_PATCH_PEER_SLOT,
-        1,
-        key,
-        String(peerSlotOffset(3) * 4),
-        peerSlot(3, 7, 8, 1),
-        String(REDIS_SYNC_WORLD_BYTE_LENGTH),
-      ),
-    ]);
+    );
 
     const raw = await harness!.redis.getBuffer(key);
-    expect(raw?.byteLength).toBe(REDIS_SYNC_WORLD_BYTE_LENGTH);
-    expect(raw?.byteLength).toBeGreaterThanOrEqual(PEER_SLOT_BYTE_LENGTH);
-    const world = normalizeRedisSyncWorld(raw);
-    expect(readPeerSlot(world, 0)).toEqual({
-      clientIndex: 0,
-      x: 1.5,
-      y: 2.5,
-      active: 1,
-    });
-    expect(readPeerSlot(world, 3)).toEqual({
-      clientIndex: 3,
-      x: 7,
-      y: 8,
-      active: 1,
-    });
-    expect(world[PEER_FIELD_INDEX]).toBe(0);
-    expect(world[PEER_FIELD_X]).toBe(1.5);
-    expect(world[PEER_FIELD_Y]).toBe(2.5);
-    expect(world[PEER_FIELD_ACTIVE]).toBe(1);
+    // SETRANGE pads with zeros up to the last slot written; the pod zero-pads the rest.
+    expect(raw?.byteLength).toBe(4 * SLOT_BYTES);
+    const world = normalizeRedisSyncWorld(
+      raw,
+      new Uint8Array(REDIS_SYNC_WORLD_BYTE_LENGTH),
+    );
+    expect(readPeerSlot(world, 0)?.x).toBeCloseTo(1.5, 1);
+    expect(readPeerSlot(world, 0)?.y).toBeCloseTo(2.5, 1);
+    expect(readPeerSlot(world, 3)?.x).toBeCloseTo(7, 1);
+    expect(readPeerSlot(world, 3)?.y).toBeCloseTo(8, 1);
+    expect(readPeerSlot(world, 1)).toBeNull();
+    await harness!.redis.del(key);
   });
 
   it("increments the webhooks-redis counter atomically", async () => {
@@ -179,8 +154,8 @@ describe.skipIf(!harness)("world Lua against real Redis", () => {
         harness!.redis.eval(LUA_INCREMENT_COUNTER, 1, key),
       ),
     );
-    expect(
-      counts.map((n) => Number(n)).sort((a, b) => a - b),
-    ).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(counts.map((n) => Number(n)).sort((a, b) => a - b)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8,
+    ]);
   });
 });

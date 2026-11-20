@@ -92,6 +92,17 @@
       "require": "./templates/redis-sync/world-layout.ts",
       "default": "./templates/redis-sync/world-layout.ts"
     },
+    "./templates/redis-sync/quantize": {
+      "types": "./templates/redis-sync/quantize.ts",
+      "import": "./templates/redis-sync/quantize.ts",
+      "require": "./templates/redis-sync/quantize.ts",
+      "default": "./templates/redis-sync/quantize.ts"
+    },
+    "./templates/redis-sync/quantized-frames.vectors.json": {
+      "import": "./templates/redis-sync/quantized-frames.vectors.json",
+      "require": "./templates/redis-sync/quantized-frames.vectors.json",
+      "default": "./templates/redis-sync/quantized-frames.vectors.json"
+    },
     "./llm/eject/loop.ts": {
       "types": "./eject/llm/loop.ts",
       "import": "./eject/llm/loop.ts",

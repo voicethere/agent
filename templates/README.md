@@ -66,8 +66,8 @@ Each folder has its own README. Summary:
 | `voice-starter`           | `voice-starter/`           | Every speech event                                                                                                           |
 | `language-switch`         | `language-switch/`         | Manual `setVoiceLanguage`, or runner auto-switch with a localized echo of the recognized text                                |
 | `speaker-gate`            | `speaker-gate/`            | Caller speaker gate: `auto` listens to the enrolled caller only, `manual` labels every speaker; switch with `setSpeakerGate` |
-| `world-sync`              | `world-sync/`              | JSON pose broadcast                                                                                                          |
-| `world-sync-binary`       | `world-sync-binary/`       | Binary pose `ArrayBuffer`                                                                                                    |
+| `world-sync`              | `world-sync/`              | JSON pose broadcast, one snapshot per 30 Hz tick when dirty                                                                  |
+| `world-sync-binary`       | `world-sync-binary/`       | Binary pose `ArrayBuffer`, one snapshot per 30 Hz tick when dirty                                                            |
 | `game-sync`               | `game-sync/`               | Authoritative sim, Redis + binary snapshots                                                                                  |
 | `voice-showcase`          | `voice-showcase/`          | Conversational landing demo                                                                                                  |
 | `recording-consent`       | `recording-consent/`       | Recording consent flow                                                                                                       |

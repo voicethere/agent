@@ -4,7 +4,11 @@
  * Clients send an ArrayBuffer of 3 float32 values `[x, y, z]` on the sync
  * DataChannel. Poses live in one Float32Array; the outbound snapshot is one
  * growable buffer rewritten in place and fanned out as a single Buffer view
- * (no per-tick or per-peer copies).
+ * (no per-tick or per-peer copies; the IPC send copies the bytes synchronously,
+ * test/binary-send-copy.test.ts). A pose only marks the world dirty; a 30 Hz
+ * tick (BROADCAST_HZ) sends one shared frame when dirty, so each session gets at
+ * most 30 frames/s however many peers send poses. Join and leave broadcast at
+ * once. The tick runs while at least one peer is connected.
  *
  * Build:
  *   npx @voicethere/agent build --entry templates/world-sync-binary/agent.ts --outfile dist/agent.js
@@ -17,6 +21,11 @@ import {
   WorldSnapshotBuffer,
 } from "./protocol.js";
 
+export const BROADCAST_HZ = 30;
+const BROADCAST_INTERVAL_MS = Math.floor(1000 / BROADCAST_HZ);
+
+let dirty = false;
+let broadcastTimer: ReturnType<typeof setInterval> | null = null;
 const snapshot = new WorldSnapshotBuffer();
 const indexBySession = new Map<string, number>();
 const sessionIds: string[] = [];
@@ -74,20 +83,37 @@ function removePeer(sessionId: string): void {
 }
 
 function broadcastWorld(): void {
+  dirty = false;
   // sessionIds.length === peerCount, so one Buffer view is shared by every send.
   const payload = snapshot.encodePacked(sessionIds, xyz, peerCount);
   broadCastBinaryToClients(payload, sessionIds, "sync");
 }
 
+function startTickIfNeeded(): void {
+  if (broadcastTimer || peerCount === 0) return;
+  broadcastTimer = setInterval(() => {
+    if (dirty) broadcastWorld();
+  }, BROADCAST_INTERVAL_MS);
+}
+
+function stopTickIfIdle(): void {
+  if (peerCount > 0 || !broadcastTimer) return;
+  clearInterval(broadcastTimer);
+  broadcastTimer = null;
+  dirty = false;
+}
+
 export default defineAgent({
   onClientJoin({ sessionId }) {
     setPose(sessionId, 0, 0, 0);
+    startTickIfNeeded();
     broadcastWorld();
   },
 
   onClientLeave({ sessionId }) {
     removePeer(sessionId);
     broadcastWorld();
+    stopTickIfIdle();
   },
 
   onDataChannelBinary({ sessionId, rawBinary }) {
@@ -102,6 +128,7 @@ export default defineAgent({
     if (!decodePoseInto(rawBinary, xyz, index * POSE_FLOAT_COUNT)) {
       return;
     }
-    broadcastWorld();
+    startTickIfNeeded();
+    dirty = true;
   },
 });

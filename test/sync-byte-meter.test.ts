@@ -118,8 +118,10 @@ describe("sync template byte meter (baseline)", () => {
     const summary = summarizeMeter(WINDOW_MS);
     report("world-sync-binary 30 peers 20 Hz", summary);
     expect(summary.sessions).toBe(30);
-    // One broadcast per incoming pose: 20 Hz x 30 senders = 600 frames per recipient.
-    expect(summary.frames).toBe(600 * 30);
+    // One shared frame per dirty 33 ms tick, so per session min(input rate, 30 Hz):
+    // 20 Hz input -> about 20 frames/s per session (was 600), never above 30.
+    expect(summary.frames).toBeGreaterThanOrEqual(19 * 30);
+    expect(summary.frames).toBeLessThanOrEqual(30 * 30);
     for (const sessionId of sessionIds) {
       await pod.onClientLeave?.({ sessionId } as never);
     }

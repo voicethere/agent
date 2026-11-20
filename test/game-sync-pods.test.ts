@@ -9,6 +9,8 @@
  * `defineAgent` is mocked so the handlers are called directly. The template's
  * setInterval is captured, never fired by a clock: the test runs each pod's tick
  * on demand and waits until that pod has no Redis command in flight.
+ *
+ * db 14: game-sync-redis-agent.test.ts uses the same keys on db 15.
  */
 import {
   afterAll,
@@ -27,6 +29,8 @@ import {
   writeObjectSlot,
   createEmptyWorldBuffer,
 } from "../templates/game-sync/world-layout.js";
+import { Redis } from "ioredis";
+
 import { agentMockFactory, loadPod } from "./helpers/sync-pods.js";
 import { openTestRedis, type TestRedis } from "./helpers/test-redis.js";
 
@@ -34,8 +38,8 @@ vi.mock("@voicethere/agent", (importOriginal) =>
   agentMockFactory(importOriginal as () => Promise<Record<string, unknown>>),
 );
 
-type RedisHooks = { evalDelayMs: number; pending: number };
-const hooks = vi.hoisted(() => ({ evalDelayMs: 0, pending: 0 }) as RedisHooks);
+type RedisHooks = { evalGate: Promise<void> | null; pending: number };
+const hooks = vi.hoisted(() => ({ evalGate: null, pending: 0 }) as RedisHooks);
 
 vi.mock("ioredis", async (importOriginal) => {
   const actual = (await importOriginal()) as typeof import("ioredis");
@@ -52,9 +56,7 @@ vi.mock("ioredis", async (importOriginal) => {
     }
 
     override async eval(...args: unknown[]): Promise<unknown> {
-      if (hooks.evalDelayMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, hooks.evalDelayMs));
-      }
+      if (hooks.evalGate) await hooks.evalGate;
       return (super.eval as (...a: unknown[]) => Promise<unknown>)(...args);
     }
   }
@@ -63,6 +65,18 @@ vi.mock("ioredis", async (importOriginal) => {
 
 const RUN_BUG_TESTS = process.env.SYNC_EFFICIENCY_BUG_TESTS === "1";
 const harness: TestRedis | null = RUN_BUG_TESTS ? await openTestRedis() : null;
+/** db 14: game-sync-redis-agent.test.ts uses the same keys on db 15. */
+const podsUrl = harness
+  ? (() => {
+      const u = new URL(harness.url);
+      u.pathname = "/14";
+      return u.toString();
+    })()
+  : "";
+/** This file's own client for every seed, read and DEL (db 14). */
+const podsRedis: Redis | null = harness
+  ? new Redis(podsUrl, { maxRetriesPerRequest: 1 })
+  : null;
 
 /** No Redis command in flight across two macrotask turns: the tick chain ended. */
 async function waitRedisIdle(timeoutMs = 2_000): Promise<void> {
@@ -89,7 +103,7 @@ async function startPod(): Promise<Pod> {
     () => import("../templates/game-sync/agent.js"),
     () => vi.resetModules(),
   );
-  await pod.onAgentStart?.({ env: { AGENT_REDIS_URL: harness!.url } } as never);
+  await pod.onAgentStart?.({ env: { AGENT_REDIS_URL: podsUrl } } as never);
   if (intervalCallbacks.length !== before + 1) {
     throw new Error("game-sync pod did not start exactly one sim interval");
   }
@@ -99,7 +113,7 @@ async function startPod(): Promise<Pod> {
 
 async function readObjectX(): Promise<number> {
   const world = normalizeWorldBuffer(
-    await harness!.redis.getBuffer(REDIS_WORLD_KEY),
+    await podsRedis!.getBuffer(REDIS_WORLD_KEY),
   );
   return world[1]!;
 }
@@ -108,24 +122,25 @@ describe.skipIf(!harness)(
   "game-sync pods on one Redis (skipped until chunk 3: fails on main)",
   () => {
     beforeEach(async () => {
-      hooks.evalDelayMs = 0;
+      hooks.evalGate = null;
       vi.spyOn(globalThis, "setInterval").mockImplementation(((
         callback: () => void,
       ) => {
         intervalCallbacks.push(callback);
         return { unref() {}, ref() {} } as unknown as NodeJS.Timeout;
       }) as typeof setInterval);
-      await harness!.redis.del(REDIS_WORLD_KEY, REDIS_SIM_LOCK_KEY);
+      await podsRedis!.del(REDIS_WORLD_KEY, REDIS_SIM_LOCK_KEY);
     });
 
     afterEach(async () => {
       vi.restoreAllMocks();
-      hooks.evalDelayMs = 0;
+      hooks.evalGate = null;
       await waitRedisIdle();
-      await harness!.redis.del(REDIS_WORLD_KEY, REDIS_SIM_LOCK_KEY);
+      await podsRedis!.del(REDIS_WORLD_KEY, REDIS_SIM_LOCK_KEY);
     });
 
     afterAll(async () => {
+      podsRedis?.disconnect();
       await harness?.close();
     });
 
@@ -135,12 +150,16 @@ describe.skipIf(!harness)(
         () => vi.resetModules(),
       );
       await podA.onAgentStart?.({
-        env: { AGENT_REDIS_URL: harness!.url },
+        env: { AGENT_REDIS_URL: podsUrl },
       } as never);
       await podA.onClientJoin?.({ sessionId: "lock-a" } as never);
 
-      // A's register holds the sim lock across a slow allocate (300 ms > 32 ms TTL).
-      hooks.evalDelayMs = 300;
+      // A's register parks inside its critical section (allocate eval) holding
+      // the sim lock until the test releases it, past the 32 ms TTL.
+      let release!: () => void;
+      hooks.evalGate = new Promise<void>((r) => {
+        release = r;
+      });
       const registered = podA.onDataChannelMessage?.({
         sessionId: "lock-a",
         message: { type: "register" },
@@ -148,20 +167,20 @@ describe.skipIf(!harness)(
 
       await vi.waitFor(
         async () => {
-          expect(await harness!.redis.get(REDIS_SIM_LOCK_KEY)).not.toBeNull();
+          expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).not.toBeNull();
         },
         { timeout: 1_000, interval: 1 },
       );
       // A's lock expires while A is still inside its critical section.
       await vi.waitFor(
         async () => {
-          expect(await harness!.redis.get(REDIS_SIM_LOCK_KEY)).toBeNull();
+          expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).toBeNull();
         },
         { timeout: 1_000, interval: 2 },
       );
       // Pod B takes the lock.
       expect(
-        await harness!.redis.set(
+        await podsRedis!.set(
           REDIS_SIM_LOCK_KEY,
           "holder-b",
           "PX",
@@ -170,9 +189,11 @@ describe.skipIf(!harness)(
         ),
       ).toBe("OK");
 
+      hooks.evalGate = null;
+      release();
       await registered;
       // A's release must not delete B's lock.
-      expect(await harness!.redis.get(REDIS_SIM_LOCK_KEY)).toBe("holder-b");
+      expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).toBe("holder-b");
       await podA.onClientLeave?.({ sessionId: "lock-a" } as never);
     });
 
@@ -181,7 +202,7 @@ describe.skipIf(!harness)(
       const VX = 100;
       const world = createEmptyWorldBuffer();
       writeObjectSlot(world, 0, 1, 400, 300, 0, 1, VX, 0, 0, 0);
-      await harness!.redis.set(
+      await podsRedis!.set(
         REDIS_WORLD_KEY,
         Buffer.from(world.buffer, world.byteOffset, world.byteLength),
       );

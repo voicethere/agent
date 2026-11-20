@@ -1,10 +1,18 @@
 # game-sync
 
-Authoritative multi-object world sync for games and simulations. Live objects are capped at **25**. Clients register over JSON; the agent simulates at 60 Hz and broadcasts a **binary** `Float32Array` world snapshot with `sendBinaryToClient`.
+Authoritative multi-object world sync for games and simulations. Live objects are capped at **25**. Clients register over JSON; the agent simulates at 60 Hz and broadcasts a **quantized binary** world frame at 30 Hz (every second sim tick) with `broadCastBinaryToClients`.
 
-When `AGENT_REDIS_URL` is set (Project Redis), the world blob lives at `game-sync:world` and is shared across runner workers. Redis GET bytes are copied into the one in-memory `Float32Array` (the GET reply is the only per-tick allocation); sim, broadcast, and Redis `SET` all use one persistent `Buffer` view of that array. The tick itself is allocation-free: live object ids are collected into a reusable `Int32Array`, tick bodies are module-level functions (no per-tick closures or option objects), and the broadcast is a single `broadCastBinaryToClients` call over a live session array. Without Redis, state is per-worker in memory.
+## Frame format
 
-This is the most advanced world-sync starter: Redis + binary snapshots + server-side physics.
+`u8 format (2) · u8 version (1) · u16le objectCount`, then one 18 B record per live object: `u16le objectId` and eight `i16le` values `[posX posY posZ posW dirX dirY dirZ dirW]`. Positions are bounded to the 1280 x 720 board and velocities to +-1024 px/s; `z`, `w`, `dirZ` and `dirW` are unit components stored as `round(v x 32767)`. A value outside its range is clamped and counted. A full frame of 25 objects is 454 B (the earlier Float32 snapshot was 900 B). The vectors in `templates/redis-sync/quantized-frames.vectors.json` (`gameSync`) pin the encoding, and `world-layout.ts` exports the encoder and decoder.
+
+## Redis
+
+When `AGENT_REDIS_URL` is set (Project Redis), the world blob (float32) lives at `game-sync:world` and is shared across runner workers. World writes (allocate, release, sim commit) take the `game-sync:sim-lock`, which holds a random per-attempt token: it is released by compare-and-delete and every write is conditional on the token, so a pod whose lock expired cannot overwrite a newer world. The world is stored with `game-sync:sim-at` (Redis clock, ms). A step advances by `now - sim-at` and is skipped when that is under one sim interval, so any number of pods simulate wall time once. When the lock is lost twice in a row, a register or unregister answers `{ type: "register_nack" | "unregister_nack", reason: "busy" }` and the client retries.
+
+Without Redis, state is per-worker in memory. The tick is allocation-free: live object ids go into a reusable `Int32Array`, tick bodies are module-level functions, and the broadcast is one call over a live session array.
+
+This is the most advanced world-sync starter: Redis + quantized binary frames + server-side physics.
 
 ## Build
 
@@ -16,6 +24,7 @@ npx @voicethere/agent build --entry templates/game-sync/agent.ts --outfile dist/
 
 - `agent.ts` — `defineAgent` wiring, register/unregister, sim loop
 - `protocol.ts` — JSON control messages
-- `world-layout.ts` — Float32Array slot layout
+- `world-layout.ts` — Float32Array slot layout and the quantized frame encoder/decoder
+- `quantize.ts` — int16 quantizer (same content as `redis-sync/quantize.ts`)
 - `sim.ts` — wall bounce + collisions
 - `redis.ts` — Lua allocate/release

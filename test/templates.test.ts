@@ -160,6 +160,7 @@ describe("agent template registry", () => {
       [
         "agent.ts",
         "protocol.ts",
+        "quantize.ts",
         "redis.ts",
         "sim.ts",
         "world-layout.ts",

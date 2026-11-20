@@ -3,6 +3,12 @@
  */
 import { objectIdToSlot } from "./world-layout.js";
 
+/** Physics steps per second; the world broadcasts every SIM_HZ / BROADCAST_HZ-th step. */
+export const SIM_HZ = 60;
+export const BROADCAST_HZ = 30;
+/** Initial speed range (px/s) of a new object; collisions can raise one component to MAX_SPEED x sqrt(2). */
+export const MIN_SPEED = 90;
+export const MAX_SPEED = 180;
 export const BOARD_WIDTH = 1280;
 export const BOARD_HEIGHT = 720;
 export const OBJECT_RADIUS = 25;

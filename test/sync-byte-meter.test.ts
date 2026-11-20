@@ -1,5 +1,5 @@
 /**
- * Byte meter for the data-sync templates (plan 2026-11-20-sync-template-efficiency, chunk 1).
+ * Byte meter for the data-sync templates (plan 2026-11-20-sync-template-efficiency, chunk 1; game-sync rows updated in chunk 3).
  *
  * Records what each template sends per session per second today, with the
  * template's own timers driven by fake time and no Redis (per-pod memory mode;
@@ -88,8 +88,9 @@ describe("sync template byte meter (baseline)", () => {
       const summary = summarizeMeter(WINDOW_MS);
       report(`game-sync ${objects} objects`, summary);
       expect(summary.sessions).toBe(1);
-      // Full 25-slot buffer whatever the live count.
-      expect(summary.frameBytes).toEqual([900]);
+      // 4 B header + 18 B per live object, 30 Hz (62 timer ticks, every 2nd sends).
+      expect(summary.frameBytes).toEqual([4 + objects * 18]);
+      expect(summary.frames).toBe(31);
       await pod.onClientLeave?.({ sessionId } as never);
       await vi.advanceTimersByTimeAsync(100);
     });

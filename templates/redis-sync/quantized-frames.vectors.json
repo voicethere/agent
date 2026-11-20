@@ -98,8 +98,82 @@
     ]
   },
   "gameSync": {
-    "note": "chunk 3 (game-sync quantized frames) adds frames here",
-    "frames": []
+    "frameHeader": "u8 format (2 quantized) u8 version (1) u16le objectCount; record = u16le objectId, 8 x i16le [posX posY posZ posW dirX dirY dirZ dirW]; live objects only (18 B each)",
+    "bounds": {
+      "x": [0, 1280],
+      "y": [0, 720],
+      "velocity": [-512, 512],
+      "unit": [-1, 1]
+    },
+    "quantizer": "x, y, dirX, dirY: quantize(v, min, max) as in `quantizer`; posZ, posW, dirZ, dirW: round(clamp(v,-1,1)*32767)",
+    "frames": [
+      {
+        "name": "empty",
+        "hex": "02010000",
+        "input": [],
+        "objects": []
+      },
+      {
+        "name": "one-object",
+        "hex": "020101000100000000000000ff7f001980f300000000",
+        "input": [
+          {
+            "objectId": 1,
+            "slot": 0,
+            "pose": [640, 360, 0, 1, 100, -50, 0, 0]
+          }
+        ],
+        "objects": [
+          {
+            "objectId": 1,
+            "q": [0, 0, 0, 32767, 6400, -3200, 0, 0]
+          }
+        ]
+      },
+      {
+        "name": "two-objects-bounds",
+        "hex": "0201020002000180ff7f0000ff7fff7f0180000000001900ff7f01800000ff7f00d3002d00000000",
+        "input": [
+          {
+            "objectId": 2,
+            "slot": 1,
+            "pose": [0, 720, 0, 1, 512, -512, 0, 0]
+          },
+          {
+            "objectId": 25,
+            "slot": 24,
+            "pose": [1280, 0, 0, 1, -180, 180, 0, 0]
+          }
+        ],
+        "objects": [
+          {
+            "objectId": 2,
+            "q": [-32767, 32767, 0, 32767, 32767, -32767, 0, 0]
+          },
+          {
+            "objectId": 25,
+            "q": [32767, -32767, 0, 32767, -11520, 11520, 0, 0]
+          }
+        ]
+      },
+      {
+        "name": "clamped-out-of-range",
+        "hex": "0201010001000180ff7f0000ff7fff7f018000000000",
+        "input": [
+          {
+            "objectId": 1,
+            "slot": 0,
+            "pose": [-5, 9999, 0, 1, 9999, -9999, 0, 0]
+          }
+        ],
+        "objects": [
+          {
+            "objectId": 1,
+            "q": [-32767, 32767, 0, 32767, 32767, -32767, 0, 0]
+          }
+        ]
+      }
+    ]
   },
   "quantizer": {
     "range": "quantize(v, min, max): clamp, round((v-min)/(max-min)*65534)-32767; unit: round(clamp(v,-1,1)*32767)",

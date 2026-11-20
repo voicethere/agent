@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MAX_LIVE_OBJECTS } from "../templates/game-sync/protocol.js";
 import {
-  OBJECT_STRIDE,
-  readSlotObjectId,
+  decodeLiveObjectsFrame,
+  FRAME_HEADER_BYTES,
+  FRAME_RECORD_BYTES,
 } from "../templates/game-sync/world-layout.js";
 import {
   binarySends,
@@ -75,13 +76,12 @@ describe("game-sync in-memory agent handlers", () => {
     await vi.waitFor(() => {
       const frames = binarySends(ipc.send, "game-reg");
       expect(frames.length).toBeGreaterThan(0);
-      const world = new Float32Array(
-        frames[frames.length - 1]!.buffer,
-        frames[frames.length - 1]!.byteOffset,
-        frames[frames.length - 1]!.byteLength / 4,
-      );
-      expect(readSlotObjectId(world, 0)).toBeGreaterThan(0);
-      expect(world[1]).toBeGreaterThan(0);
+      const objects = decodeLiveObjectsFrame(frames[frames.length - 1]!);
+      expect(objects).toHaveLength(1);
+      expect(objects[0]!.objectId).toBeGreaterThan(0);
+      // posX is quantized over [0, 1280]: a positive board x is a positive int16 above 0 or not;
+      // the object spawns inside the board, so it never sits at the clamped minimum.
+      expect(objects[0]!.q[0]).toBeGreaterThan(-32767);
     });
   });
 
@@ -145,7 +145,7 @@ describe("game-sync in-memory agent handlers", () => {
     });
   });
 
-  it("shares one world Buffer view on the 60Hz binary fan-out", async () => {
+  it("shares one frame Buffer view on the 30Hz binary fan-out", async () => {
     await join("game-share-a");
     await join("game-share-b");
     emitJson("game-share-a", { type: "register" });
@@ -158,7 +158,10 @@ describe("game-sync in-memory agent handlers", () => {
       expect(forA.length).toBeGreaterThan(0);
       expect(forB.length).toBeGreaterThan(0);
       expect(frames[0]?.buffer).toBe(frames[1]?.buffer);
-      expect(frames[0]!.byteLength).toBeGreaterThanOrEqual(OBJECT_STRIDE * 4);
+      // 4 B header + one 18 B record for the one live object.
+      expect(frames[0]!.byteLength).toBe(
+        FRAME_HEADER_BYTES + FRAME_RECORD_BYTES,
+      );
     });
   });
 });

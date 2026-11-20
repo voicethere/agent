@@ -6,6 +6,13 @@
  * Empty slot: objectId === 0
  */
 import { MAX_LIVE_OBJECTS } from "./protocol.js";
+import {
+  dequantize,
+  dequantizeUnit,
+  isQuantizable,
+  quantize,
+  quantizeUnit,
+} from "./quantize.js";
 
 export const OBJECT_STRIDE = 9;
 export const WORLD_FLOAT_COUNT = MAX_LIVE_OBJECTS * OBJECT_STRIDE;
@@ -14,6 +21,28 @@ export const OBJECT_SLOT_BYTE_LENGTH = OBJECT_STRIDE * 4;
 
 export const REDIS_WORLD_KEY = "game-sync:world";
 export const REDIS_SIM_LOCK_KEY = "game-sync:sim-lock";
+/** Redis time (ms) at which the stored world was last stepped; written with the world. */
+export const REDIS_SIM_AT_KEY = "game-sync:sim-at";
+
+/**
+ * Broadcast frame (agent -> client, quantized int16; the Redis world stays float32):
+ *   u8 format (2) · u8 version (1) · u16le objectCount · objectCount x 18 B
+ *   record = u16le objectId · 8 x i16le [posX posY posZ posW dirX dirY dirZ dirW]
+ * Live objects only. Bounds below: x in [0, BOARD_X_MAX], y in [0, BOARD_Y_MAX] (they equal
+ * BOARD_WIDTH / BOARD_HEIGHT in sim.ts), dirX/dirY (velocity, px/s) in [-VELOCITY_LIMIT,
+ * VELOCITY_LIMIT]; z, w and dirZ/dirW are unit components (round(v x 32767)).
+ * Matching test vectors: templates/redis-sync/quantized-frames.vectors.json, `gameSync`.
+ */
+export const FRAME_FORMAT_QUANTIZED = 2;
+export const FRAME_VERSION = 1;
+export const FRAME_HEADER_BYTES = 4;
+export const FRAME_RECORD_BYTES = 18;
+export const MAX_FRAME_BYTES =
+  FRAME_HEADER_BYTES + MAX_LIVE_OBJECTS * FRAME_RECORD_BYTES;
+export const BOARD_X_MAX = 1280;
+export const BOARD_Y_MAX = 720;
+/** Elastic collisions keep |v| <= 180 x sqrt(2) per component; 512 leaves wide margin. */
+export const VELOCITY_LIMIT = 512;
 
 export function slotToObjectId(slot: number): number {
   return slot + 1;
@@ -278,4 +307,129 @@ export const OBJECT_ID_HEADERS_BLOB = (() => {
 export function objectIdHeaderBytes(objectId: number): Buffer {
   const index = objectId - 1;
   return OBJECT_ID_HEADERS_BLOB.subarray(index * 4, index * 4 + 4);
+}
+
+/** Thrown for a frame with an unknown format or version byte, or a bad length. Never guessed. */
+export class WorldFrameError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorldFrameError";
+  }
+}
+
+export type DecodedObject = {
+  objectId: number;
+  /** Raw quantized [posX posY posZ posW dirX dirY dirZ dirW]. */
+  q: number[];
+};
+
+/** Objects dropped by {@link encodeLiveObjectsInto} for a non-finite component. */
+let invalidObjectDrops = 0;
+
+export function invalidObjectDropCount(): number {
+  return invalidObjectDrops;
+}
+
+function writeI16(dest: Uint8Array, offset: number, v: number): void {
+  dest[offset] = v & 0xff;
+  dest[offset + 1] = (v >> 8) & 0xff;
+}
+
+function readI16(src: Uint8Array, offset: number): number {
+  const v = src[offset]! | (src[offset + 1]! << 8);
+  return v >= 0x8000 ? v - 0x10000 : v;
+}
+
+function slotIsQuantizable(world: Float32Array, start: number): boolean {
+  for (let i = 1; i < OBJECT_STRIDE; i += 1) {
+    if (!isQuantizable(world[start + i]!)) return false;
+  }
+  return true;
+}
+
+/**
+ * Quantize every live slot of `world` into `dest` (capacity >= MAX_FRAME_BYTES) and return
+ * the frame length. No allocation. A live slot with a non-finite component is dropped and
+ * counted ({@link invalidObjectDropCount}); it is never encoded.
+ */
+export function encodeLiveObjectsInto(
+  dest: Uint8Array,
+  world: Float32Array,
+): number {
+  let count = 0;
+  let at = FRAME_HEADER_BYTES;
+  for (let slot = 0; slot < MAX_LIVE_OBJECTS; slot += 1) {
+    const start = slot * OBJECT_STRIDE;
+    const objectId = readSlotObjectId(world, slot);
+    if (objectId === 0) continue;
+    if (!slotIsQuantizable(world, start)) {
+      invalidObjectDrops += 1;
+      continue;
+    }
+    dest[at] = objectId & 0xff;
+    dest[at + 1] = (objectId >> 8) & 0xff;
+    writeI16(dest, at + 2, quantize(world[start + 1]!, 0, BOARD_X_MAX));
+    writeI16(dest, at + 4, quantize(world[start + 2]!, 0, BOARD_Y_MAX));
+    writeI16(dest, at + 6, quantizeUnit(world[start + 3]!));
+    writeI16(dest, at + 8, quantizeUnit(world[start + 4]!));
+    writeI16(
+      dest,
+      at + 10,
+      quantize(world[start + 5]!, -VELOCITY_LIMIT, VELOCITY_LIMIT),
+    );
+    writeI16(
+      dest,
+      at + 12,
+      quantize(world[start + 6]!, -VELOCITY_LIMIT, VELOCITY_LIMIT),
+    );
+    writeI16(dest, at + 14, quantizeUnit(world[start + 7]!));
+    writeI16(dest, at + 16, quantizeUnit(world[start + 8]!));
+    at += FRAME_RECORD_BYTES;
+    count += 1;
+  }
+  dest[0] = FRAME_FORMAT_QUANTIZED;
+  dest[1] = FRAME_VERSION;
+  dest[2] = count & 0xff;
+  dest[3] = (count >> 8) & 0xff;
+  return at;
+}
+
+export function decodeLiveObjectsFrame(data: Uint8Array): DecodedObject[] {
+  if (data.byteLength < FRAME_HEADER_BYTES) {
+    throw new WorldFrameError(`frame too short: ${data.byteLength} bytes`);
+  }
+  if (data[0] !== FRAME_FORMAT_QUANTIZED) {
+    throw new WorldFrameError(`unknown frame format ${data[0]}`);
+  }
+  if (data[1] !== FRAME_VERSION) {
+    throw new WorldFrameError(`unknown frame version ${data[1]}`);
+  }
+  const count = data[2]! | (data[3]! << 8);
+  if (data.byteLength !== FRAME_HEADER_BYTES + count * FRAME_RECORD_BYTES) {
+    throw new WorldFrameError(
+      `frame length ${data.byteLength} does not match objectCount ${count}`,
+    );
+  }
+  const objects: DecodedObject[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const o = FRAME_HEADER_BYTES + i * FRAME_RECORD_BYTES;
+    const q: number[] = [];
+    for (let c = 0; c < 8; c += 1) q.push(readI16(data, o + 2 + c * 2));
+    objects.push({ objectId: data[o]! | (data[o + 1]! << 8), q });
+  }
+  return objects;
+}
+
+/** Dequantize raw components to [posX posY posZ posW dirX dirY dirZ dirW]. */
+export function dequantizeObject(q: readonly number[]): number[] {
+  return [
+    dequantize(q[0]!, 0, BOARD_X_MAX),
+    dequantize(q[1]!, 0, BOARD_Y_MAX),
+    dequantizeUnit(q[2]!),
+    dequantizeUnit(q[3]!),
+    dequantize(q[4]!, -VELOCITY_LIMIT, VELOCITY_LIMIT),
+    dequantize(q[5]!, -VELOCITY_LIMIT, VELOCITY_LIMIT),
+    dequantizeUnit(q[6]!),
+    dequantizeUnit(q[7]!),
+  ];
 }

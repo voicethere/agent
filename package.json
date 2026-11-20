@@ -98,6 +98,24 @@
       "require": "./templates/redis-sync/quantize.ts",
       "default": "./templates/redis-sync/quantize.ts"
     },
+    "./templates/game-sync/world-layout": {
+      "types": "./templates/game-sync/world-layout.ts",
+      "import": "./templates/game-sync/world-layout.ts",
+      "require": "./templates/game-sync/world-layout.ts",
+      "default": "./templates/game-sync/world-layout.ts"
+    },
+    "./templates/game-sync/quantize": {
+      "types": "./templates/game-sync/quantize.ts",
+      "import": "./templates/game-sync/quantize.ts",
+      "require": "./templates/game-sync/quantize.ts",
+      "default": "./templates/game-sync/quantize.ts"
+    },
+    "./templates/game-sync/sim": {
+      "types": "./templates/game-sync/sim.ts",
+      "import": "./templates/game-sync/sim.ts",
+      "require": "./templates/game-sync/sim.ts",
+      "default": "./templates/game-sync/sim.ts"
+    },
     "./templates/redis-sync/quantized-frames.vectors.json": {
       "import": "./templates/redis-sync/quantized-frames.vectors.json",
       "require": "./templates/redis-sync/quantized-frames.vectors.json",

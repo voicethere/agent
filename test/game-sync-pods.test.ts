@@ -1,9 +1,9 @@
 /**
  * game-sync correctness with several pods on one project Redis
- * (plan 2026-11-20-sync-template-efficiency, chunk 1 failing tests; chunk 3 fixes).
+ * (plan 2026-11-20-sync-template-efficiency, chunk 1 failing tests; chunk 3 fixed them).
  *
- * Skipped by default: both fail on main. Run with SYNC_EFFICIENCY_BUG_TESTS=1
- * (and a reachable Redis, see helpers/test-redis.ts) to see the failures.
+ * Both failed on bc68e5f's template. Needs a reachable Redis (helpers/test-redis.ts);
+ * skipped without one, like the other Redis tests.
  *
  * Each pod is a fresh import of templates/game-sync/agent.ts (own module state);
  * `defineAgent` is mocked so the handlers are called directly. The template's
@@ -24,6 +24,7 @@ import {
 
 import {
   normalizeWorldBuffer,
+  REDIS_SIM_AT_KEY,
   REDIS_SIM_LOCK_KEY,
   REDIS_WORLD_KEY,
   writeObjectSlot,
@@ -31,7 +32,12 @@ import {
 } from "../templates/game-sync/world-layout.js";
 import { Redis } from "ioredis";
 
-import { agentMockFactory, loadPod } from "./helpers/sync-pods.js";
+import {
+  agentMockFactory,
+  loadPod,
+  meterState,
+  resetMeter,
+} from "./helpers/sync-pods.js";
 import { openTestRedis, type TestRedis } from "./helpers/test-redis.js";
 
 vi.mock("@voicethere/agent", (importOriginal) =>
@@ -63,8 +69,7 @@ vi.mock("ioredis", async (importOriginal) => {
   return { ...actual, Redis: TrackedRedis, default: TrackedRedis };
 });
 
-const RUN_BUG_TESTS = process.env.SYNC_EFFICIENCY_BUG_TESTS === "1";
-const harness: TestRedis | null = RUN_BUG_TESTS ? await openTestRedis() : null;
+const harness: TestRedis | null = await openTestRedis();
 /** db 14: game-sync-redis-agent.test.ts uses the same keys on db 15. */
 const podsUrl = harness
   ? (() => {
@@ -93,7 +98,7 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-type Pod = { tick: () => void };
+type Pod = { tick: () => void; join: (sessionId: string) => Promise<void> };
 
 const intervalCallbacks: Array<() => void> = [];
 
@@ -108,7 +113,10 @@ async function startPod(): Promise<Pod> {
     throw new Error("game-sync pod did not start exactly one sim interval");
   }
   const tick = intervalCallbacks[intervalCallbacks.length - 1]!;
-  return { tick };
+  const join = async (sessionId: string): Promise<void> => {
+    await pod.onClientJoin?.({ sessionId } as never);
+  };
+  return { tick, join };
 }
 
 async function readObjectX(): Promise<number> {
@@ -118,119 +126,191 @@ async function readObjectX(): Promise<number> {
   return world[1]!;
 }
 
-describe.skipIf(!harness)(
-  "game-sync pods on one Redis (skipped until chunk 3: fails on main)",
-  () => {
-    beforeEach(async () => {
-      hooks.evalGate = null;
-      vi.spyOn(globalThis, "setInterval").mockImplementation(((
-        callback: () => void,
-      ) => {
-        intervalCallbacks.push(callback);
-        return { unref() {}, ref() {} } as unknown as NodeJS.Timeout;
-      }) as typeof setInterval);
-      await podsRedis!.del(REDIS_WORLD_KEY, REDIS_SIM_LOCK_KEY);
+describe.skipIf(!harness)("game-sync pods on one Redis", () => {
+  beforeEach(async () => {
+    hooks.evalGate = null;
+    vi.spyOn(globalThis, "setInterval").mockImplementation(((
+      callback: () => void,
+    ) => {
+      intervalCallbacks.push(callback);
+      return { unref() {}, ref() {} } as unknown as NodeJS.Timeout;
+    }) as typeof setInterval);
+    await podsRedis!.del(REDIS_WORLD_KEY, REDIS_SIM_LOCK_KEY, REDIS_SIM_AT_KEY);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    hooks.evalGate = null;
+    await waitRedisIdle();
+    await podsRedis!.del(REDIS_WORLD_KEY, REDIS_SIM_LOCK_KEY, REDIS_SIM_AT_KEY);
+  });
+
+  afterAll(async () => {
+    podsRedis?.disconnect();
+    await harness?.close();
+  });
+
+  it("TestSimLockReleaseKeepsOtherHolder", async () => {
+    const podA = await loadPod(
+      () => import("../templates/game-sync/agent.js"),
+      () => vi.resetModules(),
+    );
+    await podA.onAgentStart?.({
+      env: { AGENT_REDIS_URL: podsUrl },
+    } as never);
+    await podA.onClientJoin?.({ sessionId: "lock-a" } as never);
+
+    // A's register parks inside its critical section (allocate eval) holding
+    // the sim lock until the test releases it, past the 32 ms TTL.
+    let release!: () => void;
+    hooks.evalGate = new Promise<void>((r) => {
+      release = r;
     });
+    const registered = podA.onDataChannelMessage?.({
+      sessionId: "lock-a",
+      message: { type: "register" },
+    } as never);
 
-    afterEach(async () => {
-      vi.restoreAllMocks();
-      hooks.evalGate = null;
-      await waitRedisIdle();
-      await podsRedis!.del(REDIS_WORLD_KEY, REDIS_SIM_LOCK_KEY);
+    await vi.waitFor(
+      async () => {
+        expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).not.toBeNull();
+      },
+      { timeout: 1_000, interval: 1 },
+    );
+    // A's lock expires while A is still inside its critical section.
+    await vi.waitFor(
+      async () => {
+        expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).toBeNull();
+      },
+      { timeout: 1_000, interval: 2 },
+    );
+    // Pod B takes the lock.
+    expect(
+      await podsRedis!.set(REDIS_SIM_LOCK_KEY, "holder-b", "PX", 10_000, "NX"),
+    ).toBe("OK");
+
+    hooks.evalGate = null;
+    release();
+    await registered;
+    // A's release must not delete B's lock.
+    expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).toBe("holder-b");
+    await podA.onClientLeave?.({ sessionId: "lock-a" } as never);
+  });
+
+  it("two pods ticking in one 16 ms window simulate wall time once", async () => {
+    // One object moving +x at 100 px/s, far from walls.
+    const VX = 100;
+    const world = createEmptyWorldBuffer();
+    writeObjectSlot(world, 0, 1, 400, 300, 0, 1, VX, 0, 0, 0);
+    await podsRedis!.set(
+      REDIS_WORLD_KEY,
+      Buffer.from(world.buffer, world.byteOffset, world.byteLength),
+    );
+
+    const podA = await startPod();
+    const podB = await startPod();
+
+    const primeStart = Date.now();
+    podA.tick();
+    await waitRedisIdle();
+    podB.tick();
+    await waitRedisIdle();
+    const xAfterPrime = await readObjectX();
+
+    await sleep(25);
+
+    // Both pods' 16 ms timers fire in the same window.
+    podA.tick();
+    await waitRedisIdle();
+    podB.tick();
+    await waitRedisIdle();
+    const wallSec = (Date.now() - primeStart) / 1000;
+    const simulatedSec = ((await readObjectX()) - xAfterPrime) / VX;
+
+    // The world advanced at most the wall time since the first prime tick
+    // (+1 ms float slack). Today each pod steps its own dt, so two pods ~= 2x.
+    expect(simulatedSec).toBeLessThanOrEqual(wallSec + 0.001);
+    expect(simulatedSec).toBeGreaterThan(0);
+  });
+
+  it("a step whose lock lapsed before the commit writes nothing", async () => {
+    const world = createEmptyWorldBuffer();
+    writeObjectSlot(world, 0, 1, 400, 300, 0, 1, 100, 0, 0, 0);
+    const seeded = Buffer.from(
+      world.buffer,
+      world.byteOffset,
+      world.byteLength,
+    );
+    await podsRedis!.set(REDIS_WORLD_KEY, seeded);
+
+    const podA = await startPod();
+    // Park A's commit (an eval) past the 32 ms lock TTL.
+    let release!: () => void;
+    hooks.evalGate = new Promise<void>((r) => {
+      release = r;
     });
+    podA.tick();
+    await vi.waitFor(
+      async () => {
+        expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).not.toBeNull();
+      },
+      { timeout: 1_000, interval: 1 },
+    );
+    await vi.waitFor(
+      async () => {
+        expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).toBeNull();
+      },
+      { timeout: 1_000, interval: 2 },
+    );
+    expect(
+      await podsRedis!.set(REDIS_SIM_LOCK_KEY, "holder-b", "PX", 10_000, "NX"),
+    ).toBe("OK");
 
-    afterAll(async () => {
-      podsRedis?.disconnect();
-      await harness?.close();
-    });
+    hooks.evalGate = null;
+    release();
+    await waitRedisIdle();
+    // The commit is conditional on A's token: no world write, no sim-at, B's lock intact.
+    expect((await podsRedis!.getBuffer(REDIS_WORLD_KEY))!.equals(seeded)).toBe(
+      true,
+    );
+    expect(await podsRedis!.get(REDIS_SIM_AT_KEY)).toBeNull();
+    expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).toBe("holder-b");
+  });
 
-    it("TestSimLockReleaseKeepsOtherHolder", async () => {
-      const podA = await loadPod(
-        () => import("../templates/game-sync/agent.js"),
-        () => vi.resetModules(),
-      );
-      await podA.onAgentStart?.({
-        env: { AGENT_REDIS_URL: podsUrl },
-      } as never);
-      await podA.onClientJoin?.({ sessionId: "lock-a" } as never);
+  it("a pod relays a frame only when sim-at advanced", async () => {
+    const world = createEmptyWorldBuffer();
+    writeObjectSlot(world, 0, 1, 400, 300, 0, 1, 100, 0, 0, 0);
+    await podsRedis!.set(
+      REDIS_WORLD_KEY,
+      Buffer.from(world.buffer, world.byteOffset, world.byteLength),
+    );
+    // A sim-at in the future: no pod ever steps (dt < one interval), so the test
+    // controls exactly when sim-at advances.
+    const future = Date.now() + 3_600_000;
+    await podsRedis!.set(REDIS_SIM_AT_KEY, String(future));
 
-      // A's register parks inside its critical section (allocate eval) holding
-      // the sim lock until the test releases it, past the 32 ms TTL.
-      let release!: () => void;
-      hooks.evalGate = new Promise<void>((r) => {
-        release = r;
-      });
-      const registered = podA.onDataChannelMessage?.({
-        sessionId: "lock-a",
-        message: { type: "register" },
-      } as never);
+    const pod = await startPod();
+    await pod.join("relay-a");
+    resetMeter();
+    const frames = () =>
+      meterState().sends.filter(
+        (send) => send.sessionId === "relay-a" && send.kind === "binary",
+      ).length;
+    const tickTwice = async () => {
+      for (let i = 0; i < 2; i += 1) {
+        pod.tick();
+        await waitRedisIdle();
+      }
+    };
 
-      await vi.waitFor(
-        async () => {
-          expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).not.toBeNull();
-        },
-        { timeout: 1_000, interval: 1 },
-      );
-      // A's lock expires while A is still inside its critical section.
-      await vi.waitFor(
-        async () => {
-          expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).toBeNull();
-        },
-        { timeout: 1_000, interval: 2 },
-      );
-      // Pod B takes the lock.
-      expect(
-        await podsRedis!.set(
-          REDIS_SIM_LOCK_KEY,
-          "holder-b",
-          "PX",
-          10_000,
-          "NX",
-        ),
-      ).toBe("OK");
+    await tickTwice();
+    expect(frames()).toBe(1);
+    await tickTwice();
+    await tickTwice();
+    expect(frames()).toBe(1);
 
-      hooks.evalGate = null;
-      release();
-      await registered;
-      // A's release must not delete B's lock.
-      expect(await podsRedis!.get(REDIS_SIM_LOCK_KEY)).toBe("holder-b");
-      await podA.onClientLeave?.({ sessionId: "lock-a" } as never);
-    });
-
-    it("two pods ticking in one 16 ms window simulate wall time once", async () => {
-      // One object moving +x at 100 px/s, far from walls.
-      const VX = 100;
-      const world = createEmptyWorldBuffer();
-      writeObjectSlot(world, 0, 1, 400, 300, 0, 1, VX, 0, 0, 0);
-      await podsRedis!.set(
-        REDIS_WORLD_KEY,
-        Buffer.from(world.buffer, world.byteOffset, world.byteLength),
-      );
-
-      const podA = await startPod();
-      const podB = await startPod();
-
-      const primeStart = Date.now();
-      podA.tick();
-      await waitRedisIdle();
-      podB.tick();
-      await waitRedisIdle();
-      const xAfterPrime = await readObjectX();
-
-      await sleep(25);
-
-      // Both pods' 16 ms timers fire in the same window.
-      podA.tick();
-      await waitRedisIdle();
-      podB.tick();
-      await waitRedisIdle();
-      const wallSec = (Date.now() - primeStart) / 1000;
-      const simulatedSec = ((await readObjectX()) - xAfterPrime) / VX;
-
-      // The world advanced at most the wall time since the first prime tick
-      // (+1 ms float slack). Today each pod steps its own dt, so two pods ~= 2x.
-      expect(simulatedSec).toBeLessThanOrEqual(wallSec + 0.001);
-      expect(simulatedSec).toBeGreaterThan(0);
-    });
-  },
-);
+    await podsRedis!.set(REDIS_SIM_AT_KEY, String(future + 1));
+    await tickTwice();
+    expect(frames()).toBe(2);
+  });
+});

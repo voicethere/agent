@@ -232,10 +232,11 @@ describe("quantized-frames.vectors.json (redis-sync)", () => {
     ),
   ) as Vectors;
 
-  it("carries the board bounds, redis-sync frames and a marked game-sync spot", () => {
+  it("carries the board bounds, redis-sync frames and the game-sync frames", () => {
     expect(vectors.board).toEqual({ min: BOARD_MIN, max: BOARD_MAX });
     expect(vectors.redisSync.frames.length).toBeGreaterThanOrEqual(5);
-    expect(vectors.gameSync.frames).toEqual([]);
+    // Decoded and re-encoded in test/game-sync-frames.test.ts.
+    expect(vectors.gameSync.frames.length).toBeGreaterThanOrEqual(4);
   });
 
   it("decodes every frame to the listed slots", () => {

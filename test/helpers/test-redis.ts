@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomInt } from "node:crypto";
+import { hostname } from "node:os";
 import { Redis } from "ioredis";
 
 const CONNECT_TIMEOUT_MS = 400;
@@ -106,6 +107,7 @@ async function spawnRedisServer(): Promise<{
 
 const DOCKER_LABEL = "voicethere-agent-test";
 const DOCKER_PID_LABEL = "voicethere-agent-test-pid";
+const DOCKER_HOST_LABEL = "voicethere-agent-test-host";
 
 /** Containers this process started and has not yet removed. */
 const ownContainers = new Set<string>();
@@ -141,14 +143,17 @@ function removeStaleContainers(): void {
       "--filter",
       `label=${DOCKER_LABEL}=1`,
       "--format",
-      `{{.ID}} {{.Label "${DOCKER_PID_LABEL}"}}`,
+      `{{.ID}} {{.Label "${DOCKER_PID_LABEL}"}} {{.Label "${DOCKER_HOST_LABEL}"}}`,
     ],
     { encoding: "utf8" },
   );
   if (listed.status !== 0) return;
   for (const line of listed.stdout.split("\n")) {
-    const [id, pidText] = line.trim().split(/\s+/);
+    const [id, pidText, host] = line.trim().split(/\s+/);
     const pid = Number(pidText);
+    // A pid from another host or pid namespace (a devcontainer sharing the
+    // Docker socket) says nothing about liveness here: never reap it.
+    if (host !== hostname()) continue;
     if (!id || !Number.isInteger(pid) || pid <= 0 || pidAlive(pid)) continue;
     spawnSync("docker", ["rm", "-f", "-v", id], { encoding: "utf8" });
   }
@@ -187,6 +192,8 @@ async function spawnDockerRedis(): Promise<{
       `${DOCKER_LABEL}=1`,
       "--label",
       `${DOCKER_PID_LABEL}=${process.pid}`,
+      "--label",
+      `${DOCKER_HOST_LABEL}=${hostname()}`,
       "-p",
       `127.0.0.1:${port}:6379`,
       "redis:7-alpine",

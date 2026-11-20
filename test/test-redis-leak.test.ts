@@ -59,7 +59,7 @@ function startChild(extraEnv: Record<string, string>): {
 }
 
 describe.skipIf(Boolean(skipReason))(
-  "openTestRedis docker path leaves no container behind",
+  `openTestRedis docker path leaves no container behind${skipReason ? ` (skipped: ${skipReason})` : ""}`,
   () => {
     it("removes the container when the process exits without close()", async () => {
       const { output, exited } = startChild({});
@@ -82,15 +82,46 @@ describe.skipIf(Boolean(skipReason))(
 
     it("removes the container of a SIGKILLed run on the next docker spawn", async () => {
       const { proc, output, exited } = startChild({ LEAK_CHILD_HANG: "1" });
-      const { pid } = await output;
+      const { pid, labelled } = await output;
+      // Checked while the pid is alive: no parallel run may reap it yet.
+      expect(labelled).toBe(1);
+      expect(containersForPid(pid)).toHaveLength(1);
       proc.kill("SIGKILL");
       await exited;
-      // SIGKILL cannot run hooks: the container is stale until the next spawn.
-      expect(containersForPid(pid)).toHaveLength(1);
       const next = startChild({});
       await next.output;
       await next.exited;
       expect(containersForPid(pid)).toEqual([]);
+    }, 90_000);
+
+    it("keeps a stale-looking container that belongs to another host", async () => {
+      const deadPid = 2_000_000_000;
+      const run = spawnSync(
+        "docker",
+        [
+          "run",
+          "-d",
+          "--rm",
+          "--label",
+          "voicethere-agent-test=1",
+          "--label",
+          `voicethere-agent-test-pid=${deadPid}`,
+          "--label",
+          "voicethere-agent-test-host=other-pid-namespace",
+          "redis:7-alpine",
+        ],
+        { encoding: "utf8" },
+      );
+      expect(run.status).toBe(0);
+      const id = run.stdout.trim();
+      try {
+        const next = startChild({});
+        await next.output;
+        await next.exited;
+        expect(containersForPid(deadPid)).toEqual([id.slice(0, 12)]);
+      } finally {
+        spawnSync("docker", ["rm", "-f", "-v", id], { encoding: "utf8" });
+      }
     }, 90_000);
   },
 );

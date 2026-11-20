@@ -12,6 +12,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 - game-sync and redis-sync wire format is now quantized int16 with a 4-byte header; game-sync broadcasts at 30 Hz. A client that reads the old Float32 snapshots must switch to the new frames. game-sync sends `u8 format (2) · u8 version (1) · u16le objectCount` and 18 B per live object (a full 25-object frame is 454 B instead of 900 B). redis-sync sends `u8 kind (1 keyframe, 2 delta) · u8 version (1) · u16le slotCount` and 6 B per slot, as a delta of changed slots with a keyframe on join and every second. The Redis world key of redis-sync is now `e2e:redis-sync:world:v2`.
 
+- `@voicethere/agent/templates/redis-sync/world-layout`: the world is 128 int16 slots of 6 B (`SLOT_BYTES`, `slotOffset`, `encodeKeyframeInto`, `encodeDeltaInto`, `decodeFrame`, `applyFrameToWorld`). Removed: `PEER_STRIDE`, `WORLD_FLOAT_COUNT`, `PEER_SLOT_BYTE_LENGTH`, `PEER_FIELD_INDEX`, `PEER_FIELD_X`, `PEER_FIELD_Y`, `PEER_FIELD_ACTIVE`, `LUA_PATCH_PEER_SLOT`, `peerSlotOffset`, `decodeWorldBuffer`, `worldBufferToArrayBuffer`. `createEmptyWorldBuffer`, `clearPeerSlot`, `readPeerSlot` and `normalizeWorldBuffer` now use `Uint8Array` instead of `Float32Array`, and `normalizeWorldBuffer` requires `dest`.
+
 ### Added
 
 - Exports for the shared quantizer and frame layouts: `@voicethere/agent/templates/redis-sync/quantize`, `@voicethere/agent/templates/game-sync/quantize`, `@voicethere/agent/templates/game-sync/world-layout` and `@voicethere/agent/templates/game-sync/sim`.

@@ -4,7 +4,7 @@
  * Records what each template sends per session per second today, with the
  * template's own timers driven by fake time and no Redis (per-pod memory mode;
  * the outbound frame is the same size with project Redis). The numbers are the
- * baseline in development/webrtc-cloud/features/2026-11-20-sync-template-efficiency.md.
+ * baseline: the numbers asserted below (measured before the 2026-11-20 change).
  * Later chunks replace these expectations with the new frame sizes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

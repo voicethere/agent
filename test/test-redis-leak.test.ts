@@ -50,8 +50,9 @@ function startChild(extraEnv: Record<string, string>): {
         if (m)
           resolve({ state: m[1]!, pid: Number(m[2]), labelled: Number(m[3]) });
       });
+      // "close" fires after stdout is drained, so a reported line is never lost.
       // No-op once resolved; fails fast when the child dies before reporting.
-      proc.on("exit", (code, signal) =>
+      proc.on("close", (code, signal) =>
         reject(
           new Error(
             `child exited before reporting: code ${code} signal ${signal}`,

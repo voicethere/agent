@@ -65,6 +65,13 @@ function startChild(extraEnv: Record<string, string>): {
   const exited = new Promise<void>((resolve) =>
     proc.on("exit", () => resolve()),
   );
+  // A failed assertion or a timeout abandons the test body: never orphan a child.
+  onTestFinished(async () => {
+    if (proc.exitCode === null && proc.signalCode === null) {
+      proc.kill("SIGTERM");
+      await exited;
+    }
+  });
   return { proc, output, exited };
 }
 

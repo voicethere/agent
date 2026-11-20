@@ -91,7 +91,8 @@ describe.skipIf(Boolean(skipReason))(
 
     it("removes the container of a SIGKILLed run on the next docker spawn", async () => {
       const { proc, output, exited } = startChild({ LEAK_CHILD_HANG: "1" });
-      const { pid, labelled } = await output;
+      const { state, pid, labelled } = await output;
+      expect(state).toBe("OPENED");
       // Checked while the pid is alive: no parallel run may reap it yet.
       expect(labelled).toBe(1);
       expect(containersForPid(pid)).toHaveLength(1);

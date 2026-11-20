@@ -179,27 +179,34 @@ async function spawnDockerRedis(): Promise<{
   containerId: string;
 } | null> {
   removeStaleContainers();
-  const port = 30_000 + randomInt(20_000);
-  const started = spawnSync(
-    "docker",
-    [
-      "run",
-      "-d",
-      "--rm",
-      "--name",
-      `${DOCKER_LABEL}-redis-${process.pid}-${port}`,
-      "--label",
-      `${DOCKER_LABEL}=1`,
-      "--label",
-      `${DOCKER_PID_LABEL}=${process.pid}`,
-      "--label",
-      `${DOCKER_HOST_LABEL}=${hostname()}`,
-      "-p",
-      `127.0.0.1:${port}:6379`,
-      "redis:7-alpine",
-    ],
-    { encoding: "utf8" },
-  );
+  // A random host port can already be taken (other runs, leaked containers):
+  // retry with a new port instead of giving up on the first refusal.
+  let port = 0;
+  let started = spawnSync("true", { encoding: "utf8" });
+  for (let attempt = 0; attempt < 5; attempt++) {
+    port = 30_000 + randomInt(20_000);
+    started = spawnSync(
+      "docker",
+      [
+        "run",
+        "-d",
+        "--rm",
+        "--name",
+        `${DOCKER_LABEL}-redis-${process.pid}-${port}`,
+        "--label",
+        `${DOCKER_LABEL}=1`,
+        "--label",
+        `${DOCKER_PID_LABEL}=${process.pid}`,
+        "--label",
+        `${DOCKER_HOST_LABEL}=${hostname()}`,
+        "-p",
+        `127.0.0.1:${port}:6379`,
+        "redis:7-alpine",
+      ],
+      { encoding: "utf8" },
+    );
+    if (started.status === 0) break;
+  }
   if (started.status !== 0) {
     return null;
   }

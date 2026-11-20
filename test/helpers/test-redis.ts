@@ -1,4 +1,9 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import {
+  spawn,
+  spawnSync,
+  type ChildProcess,
+  type SpawnSyncReturns,
+} from "node:child_process";
 import { randomInt } from "node:crypto";
 import { hostname } from "node:os";
 import { Redis } from "ioredis";
@@ -174,17 +179,30 @@ function installExitHooks(): void {
   }
 }
 
+/**
+ * Host port for docker attempt `attempt`. Test-only
+ * `AGENT_TEST_REDIS_DOCKER_PORTS` (comma list) fixes the first ports so the
+ * port-conflict retry can be reproduced deterministically; otherwise random.
+ */
+function pickDockerPort(attempt: number): number {
+  const fixed = process.env.AGENT_TEST_REDIS_DOCKER_PORTS?.split(",")
+    .map((p) => Number(p.trim()))
+    .filter((p) => Number.isInteger(p) && p > 0);
+  return fixed?.[attempt] ?? 30_000 + randomInt(20_000);
+}
+
 async function spawnDockerRedis(): Promise<{
   url: string;
   containerId: string;
 } | null> {
   removeStaleContainers();
   // A random host port can already be taken (other runs, leaked containers):
-  // retry with a new port instead of giving up on the first refusal.
+  // retry with a new port on a port conflict only; any other failure is final.
+  const portTaken = /port is already allocated|address already in use/i;
   let port = 0;
-  let started = spawnSync("true", { encoding: "utf8" });
+  let started: SpawnSyncReturns<string> | undefined;
   for (let attempt = 0; attempt < 5; attempt++) {
-    port = 30_000 + randomInt(20_000);
+    port = pickDockerPort(attempt);
     started = spawnSync(
       "docker",
       [
@@ -205,9 +223,12 @@ async function spawnDockerRedis(): Promise<{
       ],
       { encoding: "utf8" },
     );
-    if (started.status === 0) break;
+    if (started.status === 0 || !portTaken.test(started.stderr)) break;
   }
-  if (started.status !== 0) {
+  if (!started || started.status !== 0) {
+    console.warn(
+      `[test-redis] docker run failed: ${started?.stderr.trim().split("\n")[0]}`,
+    );
     return null;
   }
   const containerId = started.stdout.trim();
@@ -241,6 +262,8 @@ async function spawnDockerRedis(): Promise<{
  * 4. `docker run redis:7-alpine` when Docker is on PATH (set `AGENT_TEST_REDIS_DOCKER=0` to disable)
  *
  * `AGENT_TEST_REDIS_FORCE_DOCKER=1` skips 1-3 (used by the leak test).
+ * `AGENT_TEST_REDIS_DOCKER_PORTS=p1,p2` fixes the docker host ports tried
+ * first (test-only, for the port-conflict retry test).
  * The docker container is labelled with this process's pid and removed on
  * exit or SIGINT/SIGTERM/SIGHUP even when the caller never calls `close()`;
  * containers of dead pids carrying the label are removed on the next spawn.

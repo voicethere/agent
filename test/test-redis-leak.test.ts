@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 const child = fileURLToPath(
   new URL("./helpers/test-redis-leak.child.ts", import.meta.url),
@@ -42,7 +42,7 @@ function startChild(extraEnv: Record<string, string>): {
     stdio: ["ignore", "pipe", "inherit"],
   });
   const output = new Promise<{ state: string; pid: number; labelled: number }>(
-    (resolve) => {
+    (resolve, reject) => {
       let buf = "";
       proc.stdout!.on("data", (c: Buffer) => {
         buf += c.toString("utf8");
@@ -50,6 +50,14 @@ function startChild(extraEnv: Record<string, string>): {
         if (m)
           resolve({ state: m[1]!, pid: Number(m[2]), labelled: Number(m[3]) });
       });
+      // No-op once resolved; fails fast when the child dies before reporting.
+      proc.on("exit", (code, signal) =>
+        reject(
+          new Error(
+            `child exited before reporting: code ${code} signal ${signal}`,
+          ),
+        ),
+      );
     },
   );
   const exited = new Promise<void>((resolve) =>
@@ -112,16 +120,17 @@ describe.skipIf(Boolean(skipReason))(
         ],
         { encoding: "utf8" },
       );
-      expect(run.status).toBe(0);
       const id = run.stdout.trim();
-      try {
-        const next = startChild({});
-        await next.output;
-        await next.exited;
-        expect(containersForPid(deadPid)).toEqual([id.slice(0, 12)]);
-      } finally {
-        spawnSync("docker", ["rm", "-f", "-v", id], { encoding: "utf8" });
+      if (id) {
+        onTestFinished(() => {
+          spawnSync("docker", ["rm", "-f", "-v", id], { encoding: "utf8" });
+        });
       }
+      expect(run.status).toBe(0);
+      const next = startChild({});
+      await next.output;
+      await next.exited;
+      expect(containersForPid(deadPid)).toEqual([id.slice(0, 12)]);
     }, 90_000);
   },
 );

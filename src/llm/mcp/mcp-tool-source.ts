@@ -6,6 +6,11 @@ export interface McpToolInfo {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /**
+   * The server's MCP ToolAnnotations hints we act on. A call that failed on a dropped connection is
+   * retried once only when the server marks the tool read-only or idempotent.
+   */
+  annotations?: { readOnlyHint?: boolean; idempotentHint?: boolean };
 }
 
 export type McpSourceStatus = "idle" | "connecting" | "ready" | "closed";
@@ -40,6 +45,8 @@ const DEFAULT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
 const MAX_LIST_PAGES = 10;
 /** JSON-RPC code the MCP SDK uses for a request timeout (`ErrorCode.RequestTimeout`). */
 const REQUEST_TIMEOUT_CODE = -32001;
+/** callOnce result when the transport failed (the source is reconnecting). */
+const CONNECTION_LOST = Symbol("connection-lost");
 
 function readPackageVersion(): string {
   try {
@@ -53,15 +60,35 @@ function readPackageVersion(): string {
 
 const AGENT_VERSION = readPackageVersion();
 
-function errorFields(err: unknown): { error: string } {
+function errorFields(err: unknown): {
+  error: string;
+  cause?: string;
+  causeCode?: string;
+} {
   if (err instanceof Error) {
     const code = (err as { code?: unknown }).code;
     const name = err.constructor.name || err.name;
-    return {
+    const out: { error: string; cause?: string; causeCode?: string } = {
       error: code !== undefined ? `${name} ${String(code)}` : name,
     };
+    // fetch wraps socket errors (`TypeError: fetch failed`); the cause names the hop that failed.
+    // Class and code only: a message can carry a URL or request content.
+    const cause = (err as { cause?: unknown }).cause;
+    if (cause instanceof Error) {
+      out.cause = cause.constructor.name || cause.name;
+      const causeCode = (cause as { code?: unknown }).code;
+      if (causeCode !== undefined) out.causeCode = String(causeCode);
+    }
+    return out;
   }
   return { error: typeof err };
+}
+
+function retryableAfterReconnect(tool: McpToolInfo | undefined): boolean {
+  return (
+    tool?.annotations?.readOnlyHint === true ||
+    tool?.annotations?.idempotentHint === true
+  );
 }
 
 function urlOrigin(url: string): string {
@@ -193,6 +220,34 @@ export class McpToolSource {
     args: unknown,
     opts: { signal?: AbortSignal; timeoutMs: number },
   ): Promise<McpCallResult> {
+    const deadline = Date.now() + opts.timeoutMs;
+    const tool = this.cached.find((t) => t.name === name);
+    const first = await this.callOnce(name, args, opts.signal, opts.timeoutMs);
+    if (first !== CONNECTION_LOST) return first;
+    const unavailable = {
+      isError: true,
+      content: `tool ${name} failed: unavailable`,
+    };
+    // The request may have reached the server before the connection dropped, so only a tool the
+    // server marks read-only or idempotent is sent again, once, on the new connection and within
+    // the time left of this call's bound.
+    if (!retryableAfterReconnect(tool) || opts.signal?.aborted)
+      return unavailable;
+    const reconnected = await this.ready(deadline - Date.now());
+    const remaining = deadline - Date.now();
+    if (!reconnected || remaining <= 0 || opts.signal?.aborted)
+      return unavailable;
+    const second = await this.callOnce(name, args, opts.signal, remaining);
+    return second === CONNECTION_LOST ? unavailable : second;
+  }
+
+  /** One call on the current connection; CONNECTION_LOST when the transport failed. */
+  private async callOnce(
+    name: string,
+    args: unknown,
+    signal: AbortSignal | undefined,
+    timeoutMs: number,
+  ): Promise<McpCallResult | typeof CONNECTION_LOST> {
     const client = this.client;
     if (
       this.state !== "ready" ||
@@ -201,6 +256,7 @@ export class McpToolSource {
     ) {
       return { isError: true, content: `tool ${name} is not available` };
     }
+    const opts = { signal, timeoutMs };
     try {
       const result = await client.callTool(
         { name, arguments: (args ?? {}) as Record<string, unknown> },
@@ -221,7 +277,7 @@ export class McpToolSource {
         return { isError: true, content: `tool ${name} failed: unavailable` };
       }
       this.connectionLost(client, err);
-      return { isError: true, content: `tool ${name} failed: unavailable` };
+      return CONNECTION_LOST;
     }
   }
 
@@ -332,6 +388,14 @@ export class McpToolSource {
           name: t.name,
           description: t.description ?? "",
           inputSchema: t.inputSchema as Record<string, unknown>,
+          ...(t.annotations
+            ? {
+                annotations: {
+                  readOnlyHint: t.annotations.readOnlyHint,
+                  idempotentHint: t.annotations.idempotentHint,
+                },
+              }
+            : {}),
         });
       }
       cursor = res.nextCursor;

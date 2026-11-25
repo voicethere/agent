@@ -35,8 +35,54 @@ function readBody(req: IncomingMessage): Promise<unknown> {
   });
 }
 
-function buildServer(headers: IncomingMessage["headers"]): McpServer {
+export interface TestMcpServerOptions {
+  /**
+   * Also register `ro` (readOnlyHint), `idem` (idempotentHint only) and `ro_error` (readOnlyHint,
+   * returns isError). Each echoes `text`.
+   */
+  annotatedTools?: boolean;
+}
+
+function buildServer(
+  headers: IncomingMessage["headers"],
+  opts: TestMcpServerOptions,
+): McpServer {
   const server = new McpServer({ name: "test", version: "1.0.0" });
+  if (opts.annotatedTools) {
+    const echo = async ({ text }: { text: string }) => ({
+      content: [{ type: "text" as const, text }],
+    });
+    server.registerTool(
+      "ro",
+      {
+        description: "read-only echo",
+        inputSchema: { text: z.string() },
+        annotations: { readOnlyHint: true },
+      },
+      echo,
+    );
+    server.registerTool(
+      "idem",
+      {
+        description: "idempotent echo",
+        inputSchema: { text: z.string() },
+        annotations: { readOnlyHint: false, idempotentHint: true },
+      },
+      echo,
+    );
+    server.registerTool(
+      "ro_error",
+      {
+        description: "read-only tool that reports an error",
+        inputSchema: { text: z.string() },
+        annotations: { readOnlyHint: true },
+      },
+      async () => ({
+        isError: true,
+        content: [{ type: "text" as const, text: "plan not found" }],
+      }),
+    );
+  }
   server.registerTool(
     "echo",
     { description: "echo text", inputSchema: { text: z.string() } },
@@ -60,7 +106,10 @@ function buildServer(headers: IncomingMessage["headers"]): McpServer {
 }
 
 /** Session-mode Streamable HTTP MCP server on 127.0.0.1. */
-export async function startTestMcpServer(port = 0): Promise<TestMcpServer> {
+export async function startTestMcpServer(
+  port = 0,
+  opts: TestMcpServerOptions = {},
+): Promise<TestMcpServer> {
   const transports = new Map<string, StreamableHTTPServerTransport>();
   const servers: McpServer[] = [];
   let resolveSse!: () => void;
@@ -82,7 +131,7 @@ export async function startTestMcpServer(port = 0): Promise<TestMcpServer> {
                   transports.set(id, t);
                 },
               });
-            const server = buildServer(req.headers);
+            const server = buildServer(req.headers, opts);
             servers.push(server);
             await server.connect(t);
             transport = t;

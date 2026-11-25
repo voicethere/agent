@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP tool sources: a tool call that fails because the connection dropped (for example `fetch failed` on a reused socket) is sent once more on the reconnected client when the server marks the tool `readOnlyHint` or `idempotentHint`, within the call's remaining timeout. Other tools still return `unavailable` after one attempt, and a tool's own error result is never retried. The `mcp source connection lost` log line now carries the error cause class and code (`cause`, `causeCode`).
+
 ## [0.37.0] - 2026-11-20
 
 ### Breaking

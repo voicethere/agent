@@ -8,7 +8,7 @@ import { startTestMcpServer, type TestMcpServer } from "./mcp-test-server.js";
 
 // A call that fails on a dropped connection (fetch rejects with `TypeError: fetch failed`, cause
 // ECONNRESET) is retried once on the reconnected client, but only for tools the server marks
-// read-only or idempotent (staging-full 45494156054: get_plan_price never reached the platform).
+// read-only or idempotent (a dropped socket means the request may never have reached the server).
 
 const sources: McpToolSource[] = [];
 const servers: TestMcpServer[] = [];
@@ -70,6 +70,19 @@ describe("McpToolSource retry after a dropped connection", () => {
     const spy = dropNextCall();
     const res = await src.callTool("idem", { text: "x" }, { timeoutMs: 5_000 });
     expect(res).toEqual({ content: "x", isError: false });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("read-only tool dropped twice: unavailable after exactly 2 calls", async () => {
+    const { src } = await readySource(undefined, [20]);
+    const spy = vi
+      .spyOn(Client.prototype, "callTool")
+      .mockImplementation(() => Promise.reject(fetchFailed()));
+    const res = await src.callTool("ro", { text: "x" }, { timeoutMs: 5_000 });
+    expect(res).toEqual({
+      isError: true,
+      content: "tool ro failed: unavailable",
+    });
     expect(spy).toHaveBeenCalledTimes(2);
   });
 

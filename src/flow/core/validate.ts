@@ -421,7 +421,7 @@ export function validateFlow(
     if (n.onError !== undefined) return;
     if (docOnError === undefined) {
       err(
-        "missing_error_target",
+        "FLOW_MISSING_ERROR_TARGET",
         "Set an error target on this node or a flow-wide error handler.",
         `/nodes/${i}/onError`,
         n.id,
@@ -438,10 +438,10 @@ export function validateFlow(
       if (g.op !== "matches") return;
       const vp = `${path}/value`;
       if (typeof g.value !== "string") {
-        err("invalid_regex", "Regex value must be a string.", vp, nodeId);
+        err("FLOW_INVALID_REGEX", "Regex value must be a string.", vp, nodeId);
       } else if (g.value.length > FLOW_LIMITS.maxRegexChars) {
         err(
-          "invalid_regex",
+          "FLOW_INVALID_REGEX",
           `Regex is longer than ${FLOW_LIMITS.maxRegexChars} characters.`,
           vp,
           nodeId,
@@ -451,7 +451,7 @@ export function validateFlow(
           new RegExp(g.value, "u");
         } catch (e) {
           err(
-            "invalid_regex",
+            "FLOW_INVALID_REGEX",
             `Invalid regex: ${e instanceof Error ? e.message : String(e)}`,
             vp,
             nodeId,

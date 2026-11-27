@@ -491,7 +491,7 @@ describe("validateFlow", () => {
         withRule({ var: "answer", op: "matches", value: "([" }),
       );
       expect(codes(r)).toContainEqual([
-        "invalid_regex",
+        "FLOW_INVALID_REGEX",
         "/nodes/9/rules/all/0/value",
       ]);
     });
@@ -499,7 +499,7 @@ describe("validateFlow", () => {
       const r = validateFlow(
         withRule({ var: "answer", op: "matches", value: "a".repeat(501) }),
       );
-      expect(r.errors.map((e) => e.code)).toContain("invalid_regex");
+      expect(r.errors.map((e) => e.code)).toContain("FLOW_INVALID_REGEX");
     });
     it("a valid regex passes", () => {
       const r = validateFlow(
@@ -529,7 +529,7 @@ describe("validateFlow", () => {
       delete node(f, "lookup").onError;
       const r = validateFlow(f);
       expect(codes(r)).toContainEqual([
-        "missing_error_target",
+        "FLOW_MISSING_ERROR_TARGET",
         "/nodes/4/onError",
       ]);
     });

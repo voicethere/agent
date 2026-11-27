@@ -328,7 +328,7 @@
                 "minimum": 0
               }
             },
-            "required": ["id", "type", "paths", "onNone", "onError"],
+            "required": ["id", "type", "paths", "onNone"],
             "additionalProperties": false
           },
           {
@@ -456,7 +456,7 @@
                 "type": "string"
               }
             },
-            "required": ["id", "type", "method", "url", "next", "onError"],
+            "required": ["id", "type", "method", "url", "next"],
             "additionalProperties": false
           },
           {
@@ -496,7 +496,7 @@
                 "type": "string"
               }
             },
-            "required": ["id", "type", "source", "tool", "next", "onError"],
+            "required": ["id", "type", "source", "tool", "next"],
             "additionalProperties": false
           },
           {
@@ -575,14 +575,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "id",
-              "type",
-              "instructions",
-              "send",
-              "next",
-              "onError"
-            ],
+            "required": ["id", "type", "instructions", "send", "next"],
             "additionalProperties": false
           },
           {
@@ -612,6 +605,9 @@
         ]
       }
     },
+    "onError": {
+      "type": "string"
+    },
     "ui": {
       "type": "object"
     }
@@ -626,9 +622,22 @@
           "type": "string"
         },
         "op": {
-          "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "contains", "exists"]
+          "enum": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "contains",
+            "exists",
+            "matches"
+          ]
         },
-        "value": {}
+        "value": {},
+        "flags": {
+          "enum": ["i"]
+        }
       },
       "required": ["var", "op"],
       "additionalProperties": false

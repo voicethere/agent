@@ -230,7 +230,7 @@ export function compileFlow(flow: FlowDocument): CompiledFlow {
             next: ix(p.next),
           })),
           onNone: ix(n.onNone),
-          onError: ix(n.onError),
+          onError: ix((n.onError ?? flow.onError)!),
           timeoutMs: n.timeoutMs ?? 3000,
           model: n.model,
           historyTurns: n.historyTurns ?? 0,
@@ -267,7 +267,7 @@ export function compileFlow(flow: FlowDocument): CompiledFlow {
           map: pairs(n.map),
           timeoutMs: n.timeoutMs ?? 5000,
           next: ix(n.next),
-          onError: ix(n.onError),
+          onError: ix((n.onError ?? flow.onError)!),
         };
       case "mcp":
         return {
@@ -279,7 +279,7 @@ export function compileFlow(flow: FlowDocument): CompiledFlow {
           map: pairs(n.map),
           timeoutMs: n.timeoutMs ?? 15000,
           next: ix(n.next),
-          onError: ix(n.onError),
+          onError: ix((n.onError ?? flow.onError)!),
         };
       case "llm":
         return {
@@ -297,7 +297,7 @@ export function compileFlow(flow: FlowDocument): CompiledFlow {
           maxRounds: n.maxRounds ?? 5,
           filler: n.filler,
           next: ix(n.next),
-          onError: ix(n.onError),
+          onError: ix((n.onError ?? flow.onError)!),
         };
       case "end":
         return {

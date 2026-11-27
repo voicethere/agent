@@ -8,6 +8,7 @@ export const FLOW_LIMITS = {
   maxTextChars: 4000,
   maxWaitMs: 60_000,
   maxHttpTimeoutMs: 15_000,
+  maxRegexChars: 500,
 } as const;
 
 export const FLOW_NODE_ID_PATTERN = "^[A-Za-z][A-Za-z0-9_-]{0,63}$";
@@ -46,7 +47,17 @@ function node(
   };
 }
 
-const RULE_OPS = ["eq", "ne", "gt", "gte", "lt", "lte", "contains", "exists"];
+const RULE_OPS = [
+  "eq",
+  "ne",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "contains",
+  "exists",
+  "matches",
+];
 
 const DEFS: Record<string, JsonSchema> = {
   rule: {
@@ -55,6 +66,7 @@ const DEFS: Record<string, JsonSchema> = {
       var: STR,
       op: { enum: RULE_OPS },
       value: {},
+      flags: { enum: ["i"] },
     },
     required: ["var", "op"],
     additionalProperties: false,
@@ -106,7 +118,7 @@ export const FLOW_NODE_SCHEMAS: Record<string, JsonSchema> = {
     ms: { type: "integer", minimum: 0, maximum: FLOW_LIMITS.maxWaitMs },
     next: TARGET,
   }),
-  route: node("route", ["paths", "onNone", "onError"], {
+  route: node("route", ["paths", "onNone"], {
     input: TEXT,
     paths: {
       type: "array",
@@ -147,7 +159,7 @@ export const FLOW_NODE_SCHEMAS: Record<string, JsonSchema> = {
     },
     next: TARGET,
   }),
-  http: node("http", ["method", "url", "next", "onError"], {
+  http: node("http", ["method", "url", "next"], {
     method: { enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
     url: TEXT,
     headers: {
@@ -174,7 +186,7 @@ export const FLOW_NODE_SCHEMAS: Record<string, JsonSchema> = {
     next: TARGET,
     onError: TARGET,
   }),
-  mcp: node("mcp", ["source", "tool", "next", "onError"], {
+  mcp: node("mcp", ["source", "tool", "next"], {
     source: STR,
     tool: STR,
     args: {},
@@ -183,7 +195,7 @@ export const FLOW_NODE_SCHEMAS: Record<string, JsonSchema> = {
     next: TARGET,
     onError: TARGET,
   }),
-  llm: node("llm", ["instructions", "send", "next", "onError"], {
+  llm: node("llm", ["instructions", "send", "next"], {
     instructions: TEXT,
     send: { enum: ["conversation", "message"] },
     message: TEXT,
@@ -314,6 +326,7 @@ function docSchema(nodeItems: JsonSchema): JsonSchema {
         maxItems: FLOW_LIMITS.maxNodes,
         items: nodeItems,
       },
+      onError: TARGET,
       ui: { type: "object" },
     },
     required: ["version", "start", "models", "nodes"],

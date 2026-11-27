@@ -1,6 +1,7 @@
 import { isPrivateHostLiteral } from "./host.js";
 import {
   FLOW_DOC_SHELL_SCHEMA,
+  FLOW_LIMITS,
   FLOW_JSON_SCHEMA,
   FLOW_NODE_SCHEMAS,
   type JsonSchema,
@@ -10,6 +11,8 @@ import type {
   FlowDocument,
   FlowIssue,
   FlowNode,
+  FlowRule,
+  FlowRuleGroup,
   FlowValidationContext,
   FlowValidationResult,
 } from "./types.js";
@@ -395,6 +398,74 @@ export function validateFlow(
         );
       } else adj[i]!.push(to);
     }
+  });
+  // flow-wide error handler: unknown id, missing target, reachability
+  const docOnError = flow.onError;
+  const docOnErrorIdx =
+    typeof docOnError === "string" ? byId.get(docOnError) : undefined;
+  if (typeof docOnError === "string" && docOnErrorIdx === undefined) {
+    err(
+      "FLOW_UNKNOWN_TARGET",
+      `Node "${docOnError}" does not exist`,
+      "/onError",
+    );
+  }
+  nodes.forEach((n, i) => {
+    if (
+      n.type !== "route" &&
+      n.type !== "http" &&
+      n.type !== "mcp" &&
+      n.type !== "llm"
+    )
+      return;
+    if (n.onError !== undefined) return;
+    if (docOnError === undefined) {
+      err(
+        "missing_error_target",
+        "Set an error target on this node or a flow-wide error handler.",
+        `/nodes/${i}/onError`,
+        n.id,
+      );
+    } else if (docOnErrorIdx !== undefined) adj[i]!.push(docOnErrorIdx);
+  });
+  // regex rules
+  const checkRules = (
+    g: FlowRule | FlowRuleGroup,
+    path: string,
+    nodeId: string,
+  ): void => {
+    if ("var" in g) {
+      if (g.op !== "matches") return;
+      const vp = `${path}/value`;
+      if (typeof g.value !== "string") {
+        err("invalid_regex", "Regex value must be a string.", vp, nodeId);
+      } else if (g.value.length > FLOW_LIMITS.maxRegexChars) {
+        err(
+          "invalid_regex",
+          `Regex is longer than ${FLOW_LIMITS.maxRegexChars} characters.`,
+          vp,
+          nodeId,
+        );
+      } else {
+        try {
+          new RegExp(g.value, "u");
+        } catch (e) {
+          err(
+            "invalid_regex",
+            `Invalid regex: ${e instanceof Error ? e.message : String(e)}`,
+            vp,
+            nodeId,
+          );
+        }
+      }
+      return;
+    }
+    const key = "all" in g ? "all" : "any";
+    const list = "all" in g ? g.all : g.any;
+    list.forEach((r, k) => checkRules(r, `${path}/${key}/${k}`, nodeId));
+  };
+  nodes.forEach((n, i) => {
+    if (n.type === "condition") checkRules(n.rules, `/nodes/${i}/rules`, n.id);
   });
   const startIdx = byId.get(flow.start);
   if (startIdx !== undefined) {

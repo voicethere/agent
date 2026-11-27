@@ -18,12 +18,14 @@ export interface FlowVariable {
 }
 
 export type FlowRuleOp =
-  "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "contains" | "exists";
+  "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "contains" | "exists" | "matches";
 
 export interface FlowRule {
   var: string;
   op: FlowRuleOp;
   value?: unknown;
+  /** Regex flags for `matches`; only `i` is allowed. */
+  flags?: "i";
 }
 
 export type FlowRuleGroup =
@@ -66,7 +68,7 @@ export interface FlowRouteNode extends FlowNodeBase {
   input?: string;
   paths: FlowRoutePath[];
   onNone: string;
-  onError: string;
+  onError?: string;
   timeoutMs?: number;
   model?: string;
   historyTurns?: number;
@@ -97,7 +99,7 @@ export interface FlowHttpNode extends FlowNodeBase {
   map?: Record<string, string>;
   timeoutMs?: number;
   next: string;
-  onError: string;
+  onError?: string;
 }
 
 export interface FlowMcpNode extends FlowNodeBase {
@@ -108,7 +110,7 @@ export interface FlowMcpNode extends FlowNodeBase {
   map?: Record<string, string>;
   timeoutMs?: number;
   next: string;
-  onError: string;
+  onError?: string;
 }
 
 export interface FlowLlmNode extends FlowNodeBase {
@@ -124,7 +126,7 @@ export interface FlowLlmNode extends FlowNodeBase {
   maxRounds?: number;
   filler?: { text: string; afterMs: number };
   next: string;
-  onError: string;
+  onError?: string;
 }
 
 export interface FlowEndNode extends FlowNodeBase {
@@ -156,6 +158,8 @@ export interface FlowDocument {
   variables?: Record<string, FlowVariable>;
   tools?: { toolSources?: LlmAgentToolSource[] };
   nodes: FlowNode[];
+  /** Error target for nodes without their own onError. */
+  onError?: string;
   /** Editor-only data; ignored by compile. */
   ui?: Record<string, unknown>;
 }

@@ -48,6 +48,14 @@ function compileRule(rule: FlowRule): (lookup: FlowLookup) => boolean {
         if (Array.isArray(a)) return a.some((el) => looseEquals(el, value));
         return false;
       };
+    case "matches": {
+      if (typeof value !== "string") return () => false;
+      const re = new RegExp(value, "u" + (rule.flags === "i" ? "i" : ""));
+      return (l) => {
+        const a = l(name);
+        return typeof a === "string" && re.test(a);
+      };
+    }
     case "exists":
       return (l) => isPresent(l(name));
     default:

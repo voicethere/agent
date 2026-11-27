@@ -477,6 +477,12 @@ export class FlowSession {
           done(node.test(this.lookup) ? node.then : node.else);
           break;
         }
+        case "decision": {
+          const hit = node.branches.find((b) => b.test(this.lookup));
+          if (hit) done(hit.next, { edge: hit.id });
+          else done(node.default, { edge: "default" });
+          break;
+        }
         case "end": {
           if (node.text) {
             const text = this.render(node.text);

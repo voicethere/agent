@@ -6,6 +6,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-27
+
+### Added
+
+- Flow `decision` node: ordered branches, the first branch whose rules match is taken, otherwise `default`. Up to 16 branches per node. The trace edge is the branch id or `default`.
+- Flow rule operator `matches` (regular expression, optional `flags: "i"`), with validation code `FLOW_INVALID_REGEX`.
+- Flow-wide `onError` target for nodes without their own, and validation code `FLOW_MISSING_ERROR_TARGET`.
+
+### Changed
+
+- `onError` on `route`, `http`, `mcp` and `llm` nodes is optional when the flow sets a flow-wide `onError`.
+
 ## [0.37.1] - 2026-11-25
 
 ### Fixed

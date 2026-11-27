@@ -469,4 +469,77 @@ describe("validateFlow", () => {
       ).toBe(true);
     });
   });
+
+  describe("regex rules and flow-wide onError", () => {
+    const withRule = (rule: any) => {
+      const f = baseFlow();
+      f.nodes.push({
+        id: "c",
+        type: "condition",
+        rules: { all: [rule] },
+        then: "end",
+        else: "end",
+      });
+      node(f, "tell").next = "c";
+      return f;
+    };
+    const codes = (r: ReturnType<typeof validateFlow>) =>
+      r.errors.map((e) => [e.code, e.path]);
+
+    it("invalid regex is a validation error", () => {
+      const r = validateFlow(
+        withRule({ var: "answer", op: "matches", value: "([" }),
+      );
+      expect(codes(r)).toContainEqual([
+        "FLOW_INVALID_REGEX",
+        "/nodes/9/rules/all/0/value",
+      ]);
+    });
+    it("regex over 500 chars rejected", () => {
+      const r = validateFlow(
+        withRule({ var: "answer", op: "matches", value: "a".repeat(501) }),
+      );
+      expect(r.errors.map((e) => e.code)).toContain("FLOW_INVALID_REGEX");
+    });
+    it("a valid regex passes", () => {
+      const r = validateFlow(
+        withRule({
+          var: "answer",
+          op: "matches",
+          value: "^yes\\b",
+          flags: "i",
+        }),
+      );
+      expect(r.errors).toEqual([]);
+    });
+    it("flags other than i rejected", () => {
+      const r = validateFlow(
+        withRule({ var: "answer", op: "matches", value: "x", flags: "g" }),
+      );
+      expect(r.errors.some((e) => e.code === "FLOW_SCHEMA")).toBe(true);
+    });
+    it("flow onError fills in for nodes without their own", () => {
+      const f = baseFlow();
+      delete node(f, "lookup").onError;
+      f.onError = "fallback";
+      expect(validateFlow(f).errors).toEqual([]);
+    });
+    it("missing error target", () => {
+      const f = baseFlow();
+      delete node(f, "lookup").onError;
+      const r = validateFlow(f);
+      expect(codes(r)).toContainEqual([
+        "FLOW_MISSING_ERROR_TARGET",
+        "/nodes/4/onError",
+      ]);
+    });
+    it("unknown flow onError", () => {
+      const f = baseFlow();
+      f.onError = "nope";
+      expect(codes(validateFlow(f))).toContainEqual([
+        "FLOW_UNKNOWN_TARGET",
+        "/onError",
+      ]);
+    });
+  });
 });

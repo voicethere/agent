@@ -194,6 +194,28 @@ describe("http node", () => {
     expect(h.ends).toEqual(["bad"]);
   });
 
+  it("flow onError catches a node without its own onError", async () => {
+    const h = makeHarness();
+    h.effects.http = async () => ({ status: 500, body: {} });
+    const d = flow();
+    delete d.nodes[0].onError;
+    d.onError = "bad";
+    const s = session(d, h, { initialVars: init });
+    await s.start();
+    expect(h.ends).toEqual(["bad"]);
+  });
+
+  it("a node's own onError wins over the flow onError", async () => {
+    const h = makeHarness();
+    h.effects.http = async () => ({ status: 500, body: {} });
+    const d = flow();
+    d.nodes.push({ id: "other", type: "end", reason: "other" });
+    d.onError = "other";
+    const s = session(d, h, { initialVars: init });
+    await s.start();
+    expect(h.ends).toEqual(["bad"]);
+  });
+
   it("effect error codes pass through; no code means HTTP_NETWORK", async () => {
     for (const [err, code] of [
       [

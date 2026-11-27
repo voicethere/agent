@@ -328,7 +328,7 @@
                 "minimum": 0
               }
             },
-            "required": ["id", "type", "paths", "onNone", "onError"],
+            "required": ["id", "type", "paths", "onNone"],
             "additionalProperties": false
           },
           {
@@ -355,6 +355,51 @@
               }
             },
             "required": ["id", "type", "rules", "then", "else"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
+                "const": "decision"
+              },
+              "label": {
+                "type": "string"
+              },
+              "branches": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "rules": {
+                      "$ref": "#/$defs/ruleGroup"
+                    },
+                    "next": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "rules", "next"],
+                  "additionalProperties": false
+                }
+              },
+              "default": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "type", "branches", "default"],
             "additionalProperties": false
           },
           {
@@ -456,7 +501,7 @@
                 "type": "string"
               }
             },
-            "required": ["id", "type", "method", "url", "next", "onError"],
+            "required": ["id", "type", "method", "url", "next"],
             "additionalProperties": false
           },
           {
@@ -496,7 +541,7 @@
                 "type": "string"
               }
             },
-            "required": ["id", "type", "source", "tool", "next", "onError"],
+            "required": ["id", "type", "source", "tool", "next"],
             "additionalProperties": false
           },
           {
@@ -575,14 +620,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "id",
-              "type",
-              "instructions",
-              "send",
-              "next",
-              "onError"
-            ],
+            "required": ["id", "type", "instructions", "send", "next"],
             "additionalProperties": false
           },
           {
@@ -612,6 +650,9 @@
         ]
       }
     },
+    "onError": {
+      "type": "string"
+    },
     "ui": {
       "type": "object"
     }
@@ -626,9 +667,22 @@
           "type": "string"
         },
         "op": {
-          "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "contains", "exists"]
+          "enum": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "contains",
+            "exists",
+            "matches"
+          ]
         },
-        "value": {}
+        "value": {},
+        "flags": {
+          "enum": ["i"]
+        }
       },
       "required": ["var", "op"],
       "additionalProperties": false

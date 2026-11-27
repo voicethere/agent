@@ -663,7 +663,7 @@ A flow reply to a typed message reaches the client as `chat_reply` with the `tur
 
 #### Decision node
 
-A `decision` node picks one of several exits. Branches are checked in order and the first one whose rules match is taken. If none match, the flow continues at `default`. Each rule names its own variable, so a branch can test the last user message (`last.transcript`), the variable an `llm` node saved, an `mcp` node result or a field mapped from an `http` response. A flow can hold up to 16 branches per decision node, and branch ids must be unique within the node.
+A `decision` node picks one of several exits. Branches are checked in order and the first one whose rules match is taken. If none match, the flow continues at `default`. Each rule names its own variable, so a branch can test the last user message (`last.transcript`), the variable an `llm` node saved, an `mcp` node result or a field mapped from an `http` response. A flow can hold up to 16 branches per decision node, and branch ids must be unique within the node. The branch id `default` is reserved for the default path.
 
 ```json
 {

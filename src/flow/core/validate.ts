@@ -154,6 +154,10 @@ function targetsOf(n: FlowNode, i: number): { path: string; target: string }[] {
       add("then", n.then);
       add("else", n.else);
       break;
+    case "decision":
+      n.branches.forEach((b, j) => add(`branches/${j}/next`, b.next));
+      add("default", n.default);
+      break;
     case "route":
       n.paths.forEach((p, j) => add(`paths/${j}/next`, p.next));
       add("onNone", n.onNone);
@@ -466,6 +470,21 @@ export function validateFlow(
   };
   nodes.forEach((n, i) => {
     if (n.type === "condition") checkRules(n.rules, `/nodes/${i}/rules`, n.id);
+    if (n.type === "decision") {
+      const seenIds = new Set<string>();
+      n.branches.forEach((b, j) => {
+        checkRules(b.rules, `/nodes/${i}/branches/${j}/rules`, n.id);
+        if (seenIds.has(b.id)) {
+          err(
+            "FLOW_DUPLICATE_BRANCH_ID",
+            `Branch id "${b.id}" is used twice in this decision`,
+            `/nodes/${i}/branches/${j}/id`,
+            n.id,
+          );
+        }
+        seenIds.add(b.id);
+      });
+    }
   });
   const startIdx = byId.get(flow.start);
   if (startIdx !== undefined) {

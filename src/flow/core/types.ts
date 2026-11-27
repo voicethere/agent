@@ -81,6 +81,19 @@ export interface FlowConditionNode extends FlowNodeBase {
   else: string;
 }
 
+export interface FlowDecisionBranch {
+  id: string;
+  label?: string;
+  rules: FlowRuleGroup;
+  next: string;
+}
+
+export interface FlowDecisionNode extends FlowNodeBase {
+  type: "decision";
+  branches: FlowDecisionBranch[];
+  default: string;
+}
+
 export interface FlowSetNode extends FlowNodeBase {
   type: "set";
   assign: Record<string, string | number | boolean>;
@@ -141,6 +154,7 @@ export type FlowNode =
   | FlowWaitNode
   | FlowRouteNode
   | FlowConditionNode
+  | FlowDecisionNode
   | FlowSetNode
   | FlowHttpNode
   | FlowMcpNode

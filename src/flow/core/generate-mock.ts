@@ -140,7 +140,10 @@ function numericVars(flow: FlowDocument): Set<string> {
     )
       out.add(x.var);
   };
-  for (const n of flow.nodes) if (n.type === "condition") rule(n.rules);
+  for (const n of flow.nodes) {
+    if (n.type === "condition") rule(n.rules);
+    else if (n.type === "decision") n.branches.forEach((b) => rule(b.rules));
+  }
   return out;
 }
 

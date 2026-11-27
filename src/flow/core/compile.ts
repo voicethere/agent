@@ -103,6 +103,16 @@ export type CompiledNode =
       else: number;
     }
   | {
+      type: "decision";
+      id: string;
+      branches: {
+        id: string;
+        test: (lookup: FlowLookup) => boolean;
+        next: number;
+      }[];
+      default: number;
+    }
+  | {
       type: "set";
       id: string;
       assign: { name: string; value: TemplatePart[] | number | boolean }[];
@@ -242,6 +252,17 @@ export function compileFlow(flow: FlowDocument): CompiledFlow {
           test: compileRuleGroup(n.rules),
           then: ix(n.then),
           else: ix(n.else),
+        };
+      case "decision":
+        return {
+          type: "decision",
+          id: n.id,
+          branches: n.branches.map((b) => ({
+            id: b.id,
+            test: compileRuleGroup(b.rules),
+            next: ix(b.next),
+          })),
+          default: ix(n.default),
         };
       case "set":
         return {

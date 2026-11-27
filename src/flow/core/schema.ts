@@ -9,6 +9,7 @@ export const FLOW_LIMITS = {
   maxWaitMs: 60_000,
   maxHttpTimeoutMs: 15_000,
   maxRegexChars: 500,
+  maxBranchesPerDecision: 16,
 } as const;
 
 export const FLOW_NODE_ID_PATTERN = "^[A-Za-z][A-Za-z0-9_-]{0,63}$";
@@ -149,6 +150,25 @@ export const FLOW_NODE_SCHEMAS: Record<string, JsonSchema> = {
     rules: { $ref: "#/$defs/ruleGroup" },
     then: TARGET,
     else: TARGET,
+  }),
+  decision: node("decision", ["branches", "default"], {
+    branches: {
+      type: "array",
+      minItems: 1,
+      maxItems: FLOW_LIMITS.maxBranchesPerDecision,
+      items: {
+        type: "object",
+        properties: {
+          id: ID,
+          label: STR,
+          rules: { $ref: "#/$defs/ruleGroup" },
+          next: TARGET,
+        },
+        required: ["id", "rules", "next"],
+        additionalProperties: false,
+      },
+    },
+    default: TARGET,
   }),
   set: node("set", ["assign", "next"], {
     assign: {

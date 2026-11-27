@@ -365,6 +365,51 @@
                 "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
               },
               "type": {
+                "const": "decision"
+              },
+              "label": {
+                "type": "string"
+              },
+              "branches": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "rules": {
+                      "$ref": "#/$defs/ruleGroup"
+                    },
+                    "next": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "rules", "next"],
+                  "additionalProperties": false
+                }
+              },
+              "default": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "type", "branches", "default"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "type": {
                 "const": "set"
               },
               "label": {

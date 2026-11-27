@@ -646,7 +646,7 @@ The agent calls `POST {AGENT_SUPABASE_URL}/rest/v1/rpc/match_documents` with the
 
 ## Conversation flows (`@voicethere/agent/flow`)
 
-A flow is a graph of nodes saved as `voicethere.flow.json`: speak, listen, wait, route by example sentences, condition, set, http, mcp, llm and end. `createFlowAgent` runs it for voice and chat sessions, and the dashboard Flow tab edits the same file. Create a project from the `flow-agent` template to start:
+A flow is a graph of nodes saved as `voicethere.flow.json`: speak, listen, wait, route by example sentences, condition, decision, set, http, mcp, llm and end. `createFlowAgent` runs it for voice and chat sessions, and the dashboard Flow tab edits the same file. Create a project from the `flow-agent` template to start:
 
 ```ts
 import { defineAgent } from "@voicethere/agent";
@@ -660,6 +660,49 @@ defineAgent(createFlowAgent({ flow, providers: [openai] }));
 `createFlowAgent` migrates and validates the file at start and throws `FLOW_INVALID` with the first problems. Secrets are referenced by name only (`apiKeySecret`, `{ "secret": "AGENT_..." }`), and only `AGENT_*` project secrets reach the agent. The JSON schema is at `@voicethere/agent/flow/schema.json`.
 
 A flow reply to a typed message reaches the client as `chat_reply` with the `turnId` of the flow turn that produced it. Pair a reply with its turn by that id, not by arrival order.
+
+#### Decision node
+
+A `decision` node picks one of several exits. Branches are checked in order and the first one whose rules match is taken. If none match, the flow continues at `default`. Each rule names its own variable, so a branch can test the last user message (`last.transcript`), the variable an `llm` node saved, an `mcp` node result or a field mapped from an `http` response. A flow can hold up to 16 branches per decision node, and branch ids must be unique within the node.
+
+```json
+{
+  "id": "intent",
+  "type": "decision",
+  "branches": [
+    {
+      "id": "refund",
+      "label": "Refund request",
+      "rules": { "all": [{ "var": "last.transcript", "op": "matches", "value": "refund|money back", "flags": "i" }] },
+      "next": "refundFlow"
+    },
+    {
+      "id": "known",
+      "rules": { "all": [{ "var": "lookup.result", "op": "exists" }] },
+      "next": "greetKnown"
+    }
+  ],
+  "default": "askAgain"
+}
+```
+
+In the trace and the `flow_step` log, the exit of a decision node reports the branch id as `edge`, or `default` when no branch matched.
+
+#### The `matches` operator
+
+A rule with `"op": "matches"` tests a string variable against a regular expression in `value`. The pattern is compiled with the `u` flag, is limited to 500 characters, and `flags` may be `"i"` for case-insensitive matching. A non-string variable never matches. A pattern that does not compile is reported by validation as `FLOW_INVALID_REGEX`.
+
+```json
+{ "var": "last.transcript", "op": "matches", "value": "^(yes|yeah)\\b", "flags": "i" }
+```
+
+#### Flow-wide error handler
+
+Set `onError` at the top level of the flow to the id of a node that handles failures. Any `route`, `http`, `mcp` or `llm` node without its own `onError` continues there when it fails. A node's own `onError` takes precedence. If a node has an error path and neither it nor the flow sets a target, validation reports `FLOW_MISSING_ERROR_TARGET`.
+
+```json
+{ "version": 1, "start": "greet", "onError": "sorry", "models": {}, "nodes": [] }
+```
 
 Work on a flow from the terminal:
 

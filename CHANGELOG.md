@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/). Versioning foll
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-11-27
+
+### Fixed
+
+- Flow validation rejects a `decision` branch with the id `default` (`FLOW_RESERVED_BRANCH_ID`), because the trace edge `default` means the default path.
+
 ## [0.38.0] - 2026-11-27
 
 ### Added

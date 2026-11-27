@@ -106,6 +106,16 @@ describe("decision node", () => {
     ]);
   });
 
+  it("rejects branch id default", () => {
+    const res = validateFlow(
+      decisionDoc({ x: "y" }, [{ id: "default", rules: eq("y"), next: "a" }]),
+    );
+    expect(res.errors.map((e) => [e.code, e.path])).toContainEqual([
+      "FLOW_RESERVED_BRANCH_ID",
+      "/nodes/1/branches/0/id",
+    ]);
+  });
+
   it("rejects 17 branches", () => {
     const branches = Array.from({ length: 17 }, (_, i) => ({
       id: `b${i}`,

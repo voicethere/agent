@@ -482,6 +482,14 @@ export function validateFlow(
             n.id,
           );
         }
+        if (b.id === "default") {
+          err(
+            "FLOW_RESERVED_BRANCH_ID",
+            'Branch id "default" is reserved for the default path.',
+            `/nodes/${i}/branches/${j}/id`,
+            n.id,
+          );
+        }
         seenIds.add(b.id);
       });
     }
